@@ -1,0 +1,5 @@
+coverage.out
+*.test
+.DS_Store
+vendor/
+.cursor/
