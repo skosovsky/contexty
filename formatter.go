@@ -19,8 +19,9 @@ func textFromContent(parts []ContentPart) string {
 
 // InjectIntoSystem merges auxiliary text blocks into a single system message
 // using XML tags for structured separation. Only text parts (Type "text") are
-// included; non-text parts are ignored. Content is XML-escaped to prevent
-// injection. If blocks is empty, returns systemMsg unchanged.
+// included; other part types (e.g. image_url, audio) are safely ignored to avoid
+// embedding large or binary content. Content is XML-escaped to prevent injection.
+// If blocks is empty, returns systemMsg unchanged.
 func InjectIntoSystem(systemMsg Message, blocks ...Message) Message {
 	if len(blocks) == 0 {
 		return systemMsg

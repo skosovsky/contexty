@@ -33,7 +33,7 @@ func TestCompile_Validation(t *testing.T) {
 // errorCounter is a test double that always returns an error from Count.
 type errorCounter struct{}
 
-func (errorCounter) Count([]Message) (int, error) {
+func (errorCounter) Count(context.Context, []Message) (int, error) {
 	return 0, errors.New("boom")
 }
 
@@ -55,12 +55,12 @@ type failOnNthCallCounter struct {
 	inner TokenCounter
 }
 
-func (f *failOnNthCallCounter) Count(msgs []Message) (int, error) {
+func (f *failOnNthCallCounter) Count(ctx context.Context, msgs []Message) (int, error) {
 	f.calls++
 	if f.calls >= f.n {
 		return 0, errors.New("count failed")
 	}
-	return f.inner.Count(msgs)
+	return f.inner.Count(ctx, msgs)
 }
 
 func TestCompile_TokenCounterErrorOnRecount(t *testing.T) {

@@ -82,7 +82,7 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 			return nil, nil
 		}
 		var err error
-		total, err = counter.Count(cur)
+		total, err = counter.Count(ctx, cur)
 		if err != nil {
 			return nil, fmt.Errorf("contexty: truncate: %w", err)
 		}
@@ -126,7 +126,7 @@ func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, originalT
 	if err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}
-	summaryTokens, err := counter.Count([]Message{summary})
+	summaryTokens, err := counter.Count(ctx, []Message{summary})
 	if err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}

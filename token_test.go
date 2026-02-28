@@ -1,6 +1,7 @@
 package contexty
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +32,7 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &CharFallbackCounter{CharsPerToken: tt.charsPerToken}
 			msgs := []Message{TextMessage("user", tt.text)}
-			got, err := c.Count(msgs)
+			got, err := c.Count(context.Background(), msgs)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, ErrInvalidCharsPerToken)
@@ -44,12 +45,37 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 }
 
 func TestFixedCounter_Count(t *testing.T) {
+	ctx := context.Background()
 	c := &FixedCounter{TokensPerMessage: 10}
-	got, err := c.Count([]Message{TextMessage("user", "anything")})
+	got, err := c.Count(ctx, []Message{TextMessage("user", "anything")})
 	require.NoError(t, err)
 	assert.Equal(t, 10, got)
-	got, _ = c.Count([]Message{TextMessage("user", "")})
+	got, _ = c.Count(ctx, []Message{TextMessage("user", "")})
 	assert.Equal(t, 10, got)
+}
+
+func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
+	ctx := context.Background()
+	// Message with text "ab" (2 runes) and one ToolCall. Without EstimateTool: (2+2)/4 = 1 token (Name empty, Arguments "{}" = 2 runes).
+	msgs := []Message{{
+		Role:    "assistant",
+		Content: []ContentPart{{Type: "text", Text: "ab"}},
+		ToolCalls: []ToolCall{{
+			ID:   "call_1",
+			Type: "function",
+			Function: FunctionCall{Name: "foo", Arguments: "{}"},
+		}},
+	}}
+	// With EstimateTool returning 10 per call: text tokens 1 + tool 10 = 11.
+	c := &CharFallbackCounter{CharsPerToken: 4, EstimateTool: func(call ToolCall) int { return 10 }}
+	got, err := c.Count(ctx, msgs)
+	require.NoError(t, err)
+	assert.Equal(t, 11, got, "text tokens (1) + EstimateTool(10) = 11")
+	// Without EstimateTool: runes from text (2) + Name (0) + Function.Name (3) + Arguments (2) = 7 runes -> 2 tokens.
+	cNoEst := &CharFallbackCounter{CharsPerToken: 4}
+	gotNoEst, err := cNoEst.Count(ctx, msgs)
+	require.NoError(t, err)
+	assert.Equal(t, 2, gotNoEst, "rune-based fallback for tool call")
 }
 
 func FuzzCharFallbackCounter(f *testing.F) {
@@ -62,7 +88,7 @@ func FuzzCharFallbackCounter(f *testing.F) {
 		}
 		c := &CharFallbackCounter{CharsPerToken: charsPerToken}
 		msgs := []Message{TextMessage("user", text)}
-		n, err := c.Count(msgs)
+		n, err := c.Count(context.Background(), msgs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,6 +102,6 @@ func BenchmarkCharFallbackCounter(b *testing.B) {
 	c := &CharFallbackCounter{CharsPerToken: 4}
 	msgs := []Message{TextMessage("user", "The quick brown fox jumps over the lazy dog. ")}
 	for i := 0; i < b.N; i++ {
-		_, _ = c.Count(msgs)
+		_, _ = c.Count(context.Background(), msgs)
 	}
 }

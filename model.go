@@ -85,8 +85,10 @@ func (t Tier) String() string {
 // The library does not implement real tokenization; the caller injects an implementation.
 // Count must account for message structure (role, content parts, tool calls) and any
 // per-message overhead; no validation of content types or URLs in core.
+// The context is passed from Compile and may be used for cancellation or timeouts
+// (e.g. when counting involves a network call to a tokenization service).
 type TokenCounter interface {
-	Count(msgs []Message) (int, error)
+	Count(ctx context.Context, msgs []Message) (int, error)
 }
 
 // EvictionStrategy defines how to shrink or trim a block to fit the remaining budget.
@@ -97,7 +99,7 @@ type TokenCounter interface {
 // returns ErrStrategyExceededBudget if the contract is violated.
 type EvictionStrategy interface {
 	// Apply returns a subset of msgs that fits within limit tokens, or an error.
-	// originalTokens is the token count of msgs (from counter.Count(msgs)); use it to avoid re-counting.
+	// originalTokens is the token count of msgs (from counter.Count(ctx, msgs)); use it to avoid re-counting.
 	// Returned messages must have total token count <= limit; Compile enforces this.
 	Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error)
 }

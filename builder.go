@@ -77,7 +77,7 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 		if block.Strategy == nil {
 			return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, ErrNilStrategy)
 		}
-		blockTokens, err := counter.Count(block.Messages)
+		blockTokens, err := counter.Count(ctx, block.Messages)
 		if err != nil {
 			return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
 		}
@@ -102,7 +102,7 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 			report.Evictions[block.ID] = eviction
 		}
 		if len(out) > 0 {
-			used, err := counter.Count(out)
+			used, err := counter.Count(ctx, out)
 			if err != nil {
 				return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
 			}

@@ -158,7 +158,7 @@ func TestTruncateOldestStrategy(t *testing.T) {
 	})
 
 	t.Run("token counter error in loop propagates", func(t *testing.T) {
-		// truncateOldestStrategy calls counter.Count(cur) only inside the loop (after each trim).
+		// truncateOldestStrategy calls counter.Count(ctx, cur) only inside the loop (after each trim).
 		// With 3 msgs, limit 15: first trim -> cur has 2 msgs, Count(cur) is 1st call. Fail on 1st call.
 		failAfter := &failAfterNCallsCounter{n: 1, inner: &FixedCounter{TokensPerMessage: 10}}
 		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, originalTokens, 15, failAfter)
@@ -183,12 +183,12 @@ type failAfterNCallsCounter struct {
 	inner TokenCounter
 }
 
-func (f *failAfterNCallsCounter) Count(msgs []Message) (int, error) {
+func (f *failAfterNCallsCounter) Count(ctx context.Context, msgs []Message) (int, error) {
 	f.calls++
 	if f.calls >= f.n {
 		return 0, errors.New("count failed")
 	}
-	return f.inner.Count(msgs)
+	return f.inner.Count(ctx, msgs)
 }
 
 // failWhenCountingCounter fails when Count is called with a single message matching role+summary text (for summarize strategy).
@@ -196,11 +196,11 @@ type failWhenCountingCounter struct {
 	inner TokenCounter
 }
 
-func (f *failWhenCountingCounter) Count(msgs []Message) (int, error) {
+func (f *failWhenCountingCounter) Count(ctx context.Context, msgs []Message) (int, error) {
 	if len(msgs) == 1 && msgs[0].Role == "system" && len(msgs[0].Content) == 1 && msgs[0].Content[0].Text == "summary" {
 		return 0, errors.New("count failed")
 	}
-	return f.inner.Count(msgs)
+	return f.inner.Count(ctx, msgs)
 }
 
 // inconsistentCounter returns fullCount for full block, sliceCount for a smaller slice; used to simulate removed > total.
@@ -210,7 +210,7 @@ type inconsistentCounter struct {
 	sliceCount int // returned for slice to trigger removed > total (e.g. 100)
 }
 
-func (c *inconsistentCounter) Count(msgs []Message) (int, error) {
+func (c *inconsistentCounter) Count(_ context.Context, msgs []Message) (int, error) {
 	c.calls++
 	if len(msgs) == 3 {
 		return c.fullCount, nil

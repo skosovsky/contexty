@@ -1,6 +1,7 @@
 package contexty
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -27,33 +28,34 @@ func TestTier_String(t *testing.T) {
 }
 
 func TestTokenCounter_CountMessages(t *testing.T) {
+	ctx := context.Background()
 	t.Run("FixedCounter empty slice", func(t *testing.T) {
 		counter := &FixedCounter{TokensPerMessage: 5}
-		n, err := counter.Count(nil)
+		n, err := counter.Count(ctx, nil)
 		require.NoError(t, err)
 		assert.Equal(t, 0, n)
-		n, err = counter.Count([]Message{})
+		n, err = counter.Count(ctx, []Message{})
 		require.NoError(t, err)
 		assert.Equal(t, 0, n)
 	})
 	t.Run("FixedCounter single message", func(t *testing.T) {
 		counter := &FixedCounter{TokensPerMessage: 5}
 		msgs := []Message{TextMessage("user", "hi")}
-		n, err := counter.Count(msgs)
+		n, err := counter.Count(ctx, msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 5, n)
 	})
 	t.Run("FixedCounter message with Name", func(t *testing.T) {
 		counter := &FixedCounter{TokensPerMessage: 5}
 		msgs := []Message{{Role: "tool", Name: "get_weather", Content: []ContentPart{{Type: "text", Text: "sunny"}}}}
-		n, err := counter.Count(msgs)
+		n, err := counter.Count(ctx, msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 5, n)
 	})
 	t.Run("FixedCounter two messages", func(t *testing.T) {
 		counter := &FixedCounter{TokensPerMessage: 5}
 		msgs := []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}
-		n, err := counter.Count(msgs)
+		n, err := counter.Count(ctx, msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 10, n)
 	})
@@ -61,9 +63,9 @@ func TestTokenCounter_CountMessages(t *testing.T) {
 		c := &CharFallbackCounter{CharsPerToken: 4}
 		withoutName := []Message{{Role: "tool", Content: []ContentPart{{Type: "text", Text: "result"}}}}
 		withName := []Message{{Role: "tool", Name: "get_weather", Content: []ContentPart{{Type: "text", Text: "result"}}}}
-		nWithout, err := c.Count(withoutName)
+		nWithout, err := c.Count(ctx, withoutName)
 		require.NoError(t, err)
-		nWith, err := c.Count(withName)
+		nWith, err := c.Count(ctx, withName)
 		require.NoError(t, err)
 		assert.Greater(t, nWith, nWithout, "message with Name should yield more tokens than without")
 	})

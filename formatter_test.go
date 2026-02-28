@@ -65,4 +65,20 @@ func TestInjectIntoSystem(t *testing.T) {
 		require.Contains(t, text, "&lt;/fact&gt;")
 		require.Contains(t, text, "&lt;/context&gt;")
 	})
+
+	t.Run("multimodal block with text and image_url returns only text", func(t *testing.T) {
+		sys := TextMessage("system", "You are helpful.")
+		block := Message{
+			Content: []ContentPart{
+				{Type: "text", Text: "Fact with text"},
+				{Type: "image_url", ImageURL: &ImageURL{URL: "https://example.com/huge.png", Detail: "high"}},
+			},
+		}
+		got := InjectIntoSystem(sys, block)
+		require.Len(t, got.Content, 1)
+		text := messageText(got)
+		require.Contains(t, text, "Fact with text")
+		require.NotContains(t, text, "https://example.com")
+		require.NotContains(t, text, "huge.png")
+	})
 }

@@ -1,5 +1,7 @@
 package contexty
 
+import "context"
+
 // FixedCounter returns a token count derived from message structure for testing.
 // Enables realistic eviction tests: removing one "heavy" message frees many tokens.
 type FixedCounter struct {
@@ -12,7 +14,8 @@ type FixedCounter struct {
 }
 
 // Count returns the sum over msgs of (base + len(Content)*TokensPerContentPart + len(ToolCalls)*TokensPerToolCall).
-func (c *FixedCounter) Count(msgs []Message) (int, error) {
+func (c *FixedCounter) Count(ctx context.Context, msgs []Message) (int, error) {
+	_ = ctx
 	var total int
 	for _, m := range msgs {
 		total += c.TokensPerMessage
