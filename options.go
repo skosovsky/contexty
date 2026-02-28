@@ -2,8 +2,9 @@ package contexty
 
 // truncateConfig holds options for TruncateOldestStrategy.
 type truncateConfig struct {
-	keepPairs   bool
-	minMessages int
+	keepPairs      bool
+	minMessages    int
+	protectedRoles []string // roles that must not be removed when truncating
 }
 
 // TruncateOption configures TruncateOldestStrategy behavior.
@@ -25,5 +26,19 @@ func MinMessages(n int) TruncateOption {
 		if n > 0 {
 			c.minMessages = n
 		}
+	}
+}
+
+// ProtectRole marks a role so that messages with this role are never removed when truncating.
+// The first removable message (or user+assistant pair when KeepUserAssistantPairs is set) is
+// removed instead. Duplicate roles are not added; the config stays deduplicated.
+func ProtectRole(role string) TruncateOption {
+	return func(c *truncateConfig) {
+		for _, r := range c.protectedRoles {
+			if r == role {
+				return
+			}
+		}
+		c.protectedRoles = append(c.protectedRoles, role)
 	}
 }

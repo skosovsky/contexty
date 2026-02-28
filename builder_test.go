@@ -113,6 +113,7 @@ func TestCompile_EmptyBuilder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, msgs)
 	assert.Zero(t, report.TotalTokensUsed)
+	assert.Equal(t, 100, report.RemainingTokens)
 	assert.Empty(t, report.BlocksDropped)
 }
 
@@ -163,6 +164,8 @@ func TestCompile_OneBlockFits(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, msgs, 2)
 	assert.Equal(t, 20, report.TotalTokensUsed)
+	assert.Equal(t, 80, report.RemainingTokens)
+	assert.Equal(t, 20, report.OriginalTokensPerBlock["a"])
 	assert.Equal(t, 20, report.TokensPerBlock["a"])
 	assert.Empty(t, report.BlocksDropped)
 }
@@ -272,6 +275,9 @@ func TestCompile_ReportAccuracy(t *testing.T) {
 	assert.Len(t, msgs, 1)
 	assert.Equal(t, 10, report.TotalTokensUsed)
 	assert.Equal(t, 30, report.OriginalTokens)
+	assert.Equal(t, 5, report.RemainingTokens)
+	assert.Equal(t, 10, report.OriginalTokensPerBlock["must"])
+	assert.Equal(t, 20, report.OriginalTokensPerBlock["drop"])
 	assert.Equal(t, 10, report.TokensPerBlock["must"])
 	assert.Contains(t, report.BlocksDropped, "drop")
 	assert.Equal(t, "dropped", report.Evictions["drop"])
@@ -287,12 +293,49 @@ func (overflowStrategy) Apply(ctx context.Context, msgs []Message, _ int, _ int,
 	return msgs, nil
 }
 
+func TestCompile_BlockMaxTokensLocalLimit(t *testing.T) {
+	// Global limit 1000; RAG block has MaxTokens=200 and 50 msgs = 500 tokens -> truncated to 200 (20 msgs).
+	counter := &FixedCounter{TokensPerMessage: 10}
+	ragMsgs := make([]Message, 50)
+	for i := range 50 {
+		ragMsgs[i] = TextMessage("user", "x")
+	}
+	b := NewBuilder(AllocatorConfig{MaxTokens: 1000, TokenCounter: counter})
+	b.AddBlock(MemoryBlock{
+		ID: "rag", Tier: TierRAG, MaxTokens: 200,
+		Strategy: NewTruncateOldestStrategy(),
+		Messages: ragMsgs,
+	})
+	msgs, report, err := b.Compile(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 500, report.OriginalTokensPerBlock["rag"])
+	assert.Equal(t, 200, report.TokensPerBlock["rag"])
+	assert.Len(t, msgs, 20)
+	assert.Equal(t, 200, report.TotalTokensUsed)
+	assert.Equal(t, 800, report.RemainingTokens)
+}
+
 func TestCompile_StrategyExceededBudget(t *testing.T) {
 	// Block 2 msgs = 20 tokens, budget 15. Strategy returns all msgs despite limit -> Compile must error.
 	b := NewBuilder(AllocatorConfig{MaxTokens: 15, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
 	b.AddBlock(MemoryBlock{
 		ID: "bad", Tier: TierRAG, Strategy: overflowStrategy{},
 		Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")},
+	})
+	_, _, err := b.Compile(context.Background())
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrStrategyExceededBudget)
+}
+
+func TestCompile_ProtectRoleOnlyMessageExceedsBudget(t *testing.T) {
+	// Single message with role "developer", ProtectRole("developer"); limit 5, message = 10 tokens.
+	// Strategy cannot remove the only message (protected), returns it; Compile re-counts and rejects.
+	counter := &FixedCounter{TokensPerMessage: 10}
+	b := NewBuilder(AllocatorConfig{MaxTokens: 5, TokenCounter: counter})
+	b.AddBlock(MemoryBlock{
+		ID: "hist", Tier: TierHistory,
+		Strategy: NewTruncateOldestStrategy(ProtectRole("developer")),
+		Messages: []Message{TextMessage("developer", "must stay")},
 	})
 	_, _, err := b.Compile(context.Background())
 	require.Error(t, err)

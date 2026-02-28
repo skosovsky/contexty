@@ -53,7 +53,7 @@ type truncateOldestStrategy struct {
 }
 
 // NewTruncateOldestStrategy returns a strategy that truncates from the oldest messages.
-// Options: KeepUserAssistantPairs, MinMessages.
+// Options: KeepUserAssistantPairs, MinMessages, ProtectRole.
 func NewTruncateOldestStrategy(opts ...TruncateOption) EvictionStrategy {
 	cfg := truncateConfig{}
 	for _, opt := range opts {
@@ -69,15 +69,33 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	if len(msgs) == 0 {
 		return nil, nil
 	}
+	var protected map[string]struct{}
+	if len(s.cfg.protectedRoles) > 0 {
+		protected = make(map[string]struct{}, len(s.cfg.protectedRoles))
+		for _, r := range s.cfg.protectedRoles {
+			protected[r] = struct{}{}
+		}
+	}
 	cur := slices.Clone(msgs)
 	total := originalTokens
 	maxIterations := len(cur)
 	for iter := 0; iter < maxIterations && total > limit && len(cur) > 0; iter++ {
+		// Find first removable index (skip protected roles from the start).
+		i := 0
+		for i < len(cur) && protected != nil {
+			if _, ok := protected[cur[i].Role]; !ok {
+				break
+			}
+			i++
+		}
+		if i >= len(cur) {
+			break // all remaining messages are protected
+		}
 		remove := 1
-		if s.cfg.keepPairs && len(cur) >= 2 && cur[0].Role == "user" && cur[1].Role == "assistant" {
+		if s.cfg.keepPairs && i+1 < len(cur) && cur[i].Role == "user" && cur[i+1].Role == "assistant" {
 			remove = 2
 		}
-		cur = cur[remove:]
+		cur = append(cur[:i], cur[i+remove:]...)
 		if len(cur) == 0 {
 			return nil, nil
 		}

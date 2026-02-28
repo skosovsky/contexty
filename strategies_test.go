@@ -174,6 +174,44 @@ func TestTruncateOldestStrategy(t *testing.T) {
 		require.ErrorIs(t, err, ErrTokenCountFailed)
 		assert.Contains(t, err.Error(), "exceeded original")
 	})
+
+	t.Run("ProtectRole keeps developer and system then removes first pair", func(t *testing.T) {
+		// [developer, system, user, assistant, user, assistant] = 60 tokens. Limit 41: after removing first pair -> [developer, system, user, assistant] = 40 <= 41, stop.
+		block := []Message{
+			TextMessage("developer", "dev"),
+			TextMessage("system", "sys"),
+			TextMessage("user", "1"),
+			TextMessage("assistant", "2"),
+			TextMessage("user", "3"),
+			TextMessage("assistant", "4"),
+		}
+		s := NewTruncateOldestStrategy(ProtectRole("developer"), ProtectRole("system"), KeepUserAssistantPairs(true))
+		got, err := s.Apply(context.Background(), block, 60, 41, counter)
+		require.NoError(t, err)
+		require.Len(t, got, 4)
+		assert.Equal(t, "developer", got[0].Role)
+		assert.Equal(t, "system", got[1].Role)
+		assert.Equal(t, "user", got[2].Role)
+		assert.Equal(t, "assistant", got[3].Role)
+		assert.Equal(t, "3", got[2].Content[0].Text)
+		assert.Equal(t, "4", got[3].Content[0].Text)
+	})
+
+	t.Run("ProtectRole developer only truncates from next index", func(t *testing.T) {
+		// [developer, user, assistant, user] = 40 tokens, limit 15 -> keep developer (10), need to remove 25. Remove user+assistant pair -> [developer, user] = 20 still over. Remove one -> [developer] = 10. So limit 10 gives [developer].
+		block := []Message{
+			TextMessage("developer", "dev"),
+			TextMessage("user", "1"),
+			TextMessage("assistant", "2"),
+			TextMessage("user", "3"),
+		}
+		s := NewTruncateOldestStrategy(ProtectRole("developer"), KeepUserAssistantPairs(true))
+		got, err := s.Apply(context.Background(), block, 40, 10, counter)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "developer", got[0].Role)
+		assert.Equal(t, "dev", got[0].Content[0].Text)
+	})
 }
 
 // failAfterNCallsCounter fails from the Nth Count call; used to trigger errors inside strategy loop.

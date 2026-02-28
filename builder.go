@@ -15,11 +15,13 @@ type AllocatorConfig struct {
 
 // CompileReport describes what happened during Compile: token usage and evictions.
 type CompileReport struct {
-	TotalTokensUsed int               // Total tokens in the final result
-	OriginalTokens  int               // Total tokens before eviction (all blocks considered)
-	TokensPerBlock  map[string]int    // Block ID -> tokens used in output
-	Evictions       map[string]string // Block ID -> strategy applied ("rejected", "dropped", "truncated", "summarized")
-	BlocksDropped   []string          // IDs of blocks completely removed (may contain duplicates if multiple blocks shared the same ID)
+	TotalTokensUsed        int               // Total tokens in the final result
+	OriginalTokens         int               // Total tokens before eviction (all blocks considered)
+	RemainingTokens        int               // MaxTokens minus TotalTokensUsed after compile
+	OriginalTokensPerBlock map[string]int    // Block ID -> tokens before eviction (before strategy applied)
+	TokensPerBlock         map[string]int    // Block ID -> tokens used in output
+	Evictions              map[string]string // Block ID -> strategy applied ("rejected", "dropped", "truncated", "summarized")
+	BlocksDropped          []string         // IDs of blocks completely removed (may contain duplicates if multiple blocks shared the same ID)
 }
 
 // Builder collects memory blocks and compiles them into a single message slice within the token budget.
@@ -54,8 +56,9 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 	}
 	counter := b.config.TokenCounter
 	report := CompileReport{
-		TokensPerBlock: make(map[string]int),
-		Evictions:      make(map[string]string),
+		TokensPerBlock:         make(map[string]int),
+		OriginalTokensPerBlock: make(map[string]int),
+		Evictions:              make(map[string]string),
 	}
 
 	// Stable sort by Tier
@@ -82,13 +85,19 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 			return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
 		}
 		report.OriginalTokens += blockTokens
+		report.OriginalTokensPerBlock[block.ID] = blockTokens
+
+		blockBudget := remaining
+		if block.MaxTokens > 0 && block.MaxTokens < remaining {
+			blockBudget = block.MaxTokens
+		}
 
 		var out []Message
 		var eviction string
-		if blockTokens <= remaining {
+		if blockTokens <= blockBudget {
 			out = block.Messages
 		} else {
-			out, err = block.Strategy.Apply(ctx, block.Messages, blockTokens, remaining, counter)
+			out, err = block.Strategy.Apply(ctx, block.Messages, blockTokens, blockBudget, counter)
 			if err != nil {
 				return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, err)
 			}
@@ -116,6 +125,7 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 		}
 	}
 
+	report.RemainingTokens = b.config.MaxTokens - report.TotalTokensUsed
 	return result, report, nil
 }
 

@@ -112,12 +112,15 @@ type Summarizer interface {
 
 // MemoryBlock is a logical group of messages with a Tier and an EvictionStrategy.
 // ID is used in CompileReport; empty ID is allowed.
+// MaxTokens is optional: when > 0 and less than the remaining global budget, Apply receives
+// this value as the limit so the block is capped locally (e.g. RAG block limited to 200 tokens).
 // CacheControl is for provider-specific prompt caching (e.g. Anthropic/Gemini); not interpreted in core.
 type MemoryBlock struct {
 	ID           string
 	Messages     []Message
 	Tier         Tier
 	Strategy     EvictionStrategy
+	MaxTokens    int    // Optional: hard per-block token limit (0 = no limit)
 	CacheControl string // Optional: caching rules for the block
 }
 
