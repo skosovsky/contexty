@@ -18,8 +18,17 @@ func main() {
 	}
 	fmt.Printf("Compiled %d messages\n", len(msgs))
 	for i, m := range msgs {
-		fmt.Printf("  [%d] %s: %q\n", i, m.Role, trunc(m.Content, 60))
+		fmt.Printf("  [%d] %s: %q\n", i, m.Role, trunc(contentText(m.Content), 60))
 	}
+}
+
+func contentText(parts []contexty.ContentPart) string {
+	for _, p := range parts {
+		if p.Type == "text" {
+			return p.Text
+		}
+	}
+	return ""
 }
 
 func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
@@ -34,14 +43,14 @@ func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
 		ID:       "persona",
 		Tier:     contexty.TierSystem,
 		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{{Role: "system", Content: "You are a medical assistant."}},
+		Messages: []contexty.Message{contexty.TextMessage("system", "You are a medical assistant.")},
 	})
 
 	builder.AddBlock(contexty.MemoryBlock{
 		ID:       "patient_card",
 		Tier:     contexty.TierCore,
 		Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{{Role: "system", Content: "Patient Name: Anna. Age: 30."}},
+		Messages: []contexty.Message{contexty.TextMessage("system", "Patient Name: Anna. Age: 30.")},
 	})
 
 	builder.AddBlock(contexty.MemoryBlock{
@@ -74,16 +83,16 @@ func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
 
 func fetchRAGMessages() []contexty.Message {
 	return []contexty.Message{
-		{Role: "system", Content: "Retrieved: Article about vitamin D and calcium."},
+		contexty.TextMessage("system", "Retrieved: Article about vitamin D and calcium."),
 	}
 }
 
 func fetchChatHistoryFromDB() []contexty.Message {
 	return []contexty.Message{
-		{Role: "user", Content: "What supplements should I take?"},
-		{Role: "assistant", Content: "Consider vitamin D and calcium based on your profile."},
-		{Role: "user", Content: "Any side effects?"},
-		{Role: "assistant", Content: "Generally well tolerated. Discuss with your doctor."},
+		contexty.TextMessage("user", "What supplements should I take?"),
+		contexty.TextMessage("assistant", "Consider vitamin D and calcium based on your profile."),
+		contexty.TextMessage("user", "Any side effects?"),
+		contexty.TextMessage("assistant", "Generally well tolerated. Discuss with your doctor."),
 	}
 }
 

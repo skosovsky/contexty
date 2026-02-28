@@ -7,6 +7,7 @@ import (
 )
 
 // strictStrategy returns an error if the block does not fit; otherwise passes through.
+// DRY: uses originalTokens only, no counter.Count call.
 type strictStrategy struct{}
 
 // NewStrictStrategy returns a strategy that fails with ErrBudgetExceeded when the block exceeds the limit.
@@ -15,21 +16,18 @@ func NewStrictStrategy() EvictionStrategy {
 	return &strictStrategy{}
 }
 
-func (s *strictStrategy) Apply(ctx context.Context, msgs []Message, limit int, counter TokenCounter) ([]Message, error) {
+func (s *strictStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, _ TokenCounter) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: strict: %w", err)
 	}
-	n, err := countBlockTokens(counter, msgs)
-	if err != nil {
-		return nil, fmt.Errorf("contexty: strict: %w", err)
-	}
-	if n > limit {
+	if originalTokens > limit {
 		return nil, ErrBudgetExceeded
 	}
 	return msgs, nil
 }
 
 // dropStrategy removes the entire block when it does not fit.
+// DRY: uses originalTokens only, no counter.Count call.
 type dropStrategy struct{}
 
 // NewDropStrategy returns a strategy that drops the block entirely when it exceeds the limit.
@@ -38,21 +36,18 @@ func NewDropStrategy() EvictionStrategy {
 	return &dropStrategy{}
 }
 
-func (s *dropStrategy) Apply(ctx context.Context, msgs []Message, limit int, counter TokenCounter) ([]Message, error) {
+func (s *dropStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, _ TokenCounter) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop: %w", err)
 	}
-	n, err := countBlockTokens(counter, msgs)
-	if err != nil {
-		return nil, fmt.Errorf("contexty: drop: %w", err)
-	}
-	if n > limit {
+	if originalTokens > limit {
 		return nil, nil
 	}
 	return msgs, nil
 }
 
 // truncateOldestStrategy removes messages from the start until the block fits.
+// Starts with total := originalTokens; re-counts remaining slice when trimming (unavoidable for per-message overhead).
 type truncateOldestStrategy struct {
 	cfg truncateConfig
 }
@@ -67,7 +62,7 @@ func NewTruncateOldestStrategy(opts ...TruncateOption) EvictionStrategy {
 	return &truncateOldestStrategy{cfg: cfg}
 }
 
-func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, limit int, counter TokenCounter) ([]Message, error) {
+func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: truncate: %w", err)
 	}
@@ -75,26 +70,25 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, limi
 		return nil, nil
 	}
 	cur := slices.Clone(msgs)
-	total, err := countBlockTokens(counter, cur)
-	if err != nil {
-		return nil, fmt.Errorf("contexty: truncate: %w", err)
-	}
-	// Guard against pathological TokenCounter: cap iterations so we always terminate.
+	total := originalTokens
 	maxIterations := len(cur)
 	for iter := 0; iter < maxIterations && total > limit && len(cur) > 0; iter++ {
 		remove := 1
 		if s.cfg.keepPairs && len(cur) >= 2 && cur[0].Role == "user" && cur[1].Role == "assistant" {
 			remove = 2
 		}
-		removedTokens, err := countBlockTokens(counter, cur[:remove])
+		cur = cur[remove:]
+		if len(cur) == 0 {
+			return nil, nil
+		}
+		var err error
+		total, err = counter.Count(cur)
 		if err != nil {
 			return nil, fmt.Errorf("contexty: truncate: %w", err)
 		}
-		if removedTokens > total {
-			return nil, fmt.Errorf("contexty: truncate: token counter inconsistent (removed > total): %w", ErrTokenCountFailed)
+		if total > originalTokens {
+			return nil, fmt.Errorf("contexty: truncate: %w: count exceeded original", ErrTokenCountFailed)
 		}
-		total -= removedTokens
-		cur = cur[remove:]
 	}
 	if len(cur) == 0 {
 		return nil, nil
@@ -106,6 +100,7 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, limi
 }
 
 // summarizeStrategy compresses the block via a Summarizer when it does not fit.
+// DRY: uses originalTokens for initial check; re-counts only the summary result.
 type summarizeStrategy struct {
 	summarizer Summarizer
 }
@@ -120,22 +115,18 @@ func NewSummarizeStrategy(summarizer Summarizer) EvictionStrategy {
 	return &summarizeStrategy{summarizer: summarizer}
 }
 
-func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, limit int, counter TokenCounter) ([]Message, error) {
+func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}
-	n, err := countBlockTokens(counter, msgs)
-	if err != nil {
-		return nil, fmt.Errorf("contexty: summarize: %w", err)
-	}
-	if n <= limit {
+	if originalTokens <= limit {
 		return msgs, nil
 	}
 	summary, err := s.summarizer.Summarize(ctx, msgs)
 	if err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}
-	summaryTokens, err := countBlockTokens(counter, []Message{summary})
+	summaryTokens, err := counter.Count([]Message{summary})
 	if err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}

@@ -77,20 +77,18 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 		if block.Strategy == nil {
 			return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, ErrNilStrategy)
 		}
-		blockTokens, err := countBlockTokens(counter, block.Messages)
+		blockTokens, err := counter.Count(block.Messages)
 		if err != nil {
 			return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
 		}
 		report.OriginalTokens += blockTokens
 
-		// TODO(v2): pass pre-counted blockTokens into Apply to avoid double token counting in strategies.
 		var out []Message
 		var eviction string
 		if blockTokens <= remaining {
 			out = block.Messages
-			// no eviction label
 		} else {
-			out, err = block.Strategy.Apply(ctx, block.Messages, remaining, counter)
+			out, err = block.Strategy.Apply(ctx, block.Messages, blockTokens, remaining, counter)
 			if err != nil {
 				return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, err)
 			}
@@ -104,7 +102,7 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 			report.Evictions[block.ID] = eviction
 		}
 		if len(out) > 0 {
-			used, err := countBlockTokens(counter, out)
+			used, err := counter.Count(out)
 			if err != nil {
 				return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
 			}

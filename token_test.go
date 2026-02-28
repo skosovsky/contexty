@@ -30,7 +30,8 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &CharFallbackCounter{CharsPerToken: tt.charsPerToken}
-			got, err := c.Count(tt.text)
+			msgs := []Message{TextMessage("user", tt.text)}
+			got, err := c.Count(msgs)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, ErrInvalidCharsPerToken)
@@ -44,10 +45,10 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 
 func TestFixedCounter_Count(t *testing.T) {
 	c := &FixedCounter{TokensPerMessage: 10}
-	got, err := c.Count("anything")
+	got, err := c.Count([]Message{TextMessage("user", "anything")})
 	require.NoError(t, err)
 	assert.Equal(t, 10, got)
-	got, _ = c.Count("")
+	got, _ = c.Count([]Message{TextMessage("user", "")})
 	assert.Equal(t, 10, got)
 }
 
@@ -60,7 +61,8 @@ func FuzzCharFallbackCounter(f *testing.F) {
 			t.Skip()
 		}
 		c := &CharFallbackCounter{CharsPerToken: charsPerToken}
-		n, err := c.Count(text)
+		msgs := []Message{TextMessage("user", text)}
+		n, err := c.Count(msgs)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -72,8 +74,8 @@ func FuzzCharFallbackCounter(f *testing.F) {
 
 func BenchmarkCharFallbackCounter(b *testing.B) {
 	c := &CharFallbackCounter{CharsPerToken: 4}
-	text := "The quick brown fox jumps over the lazy dog. "
+	msgs := []Message{TextMessage("user", "The quick brown fox jumps over the lazy dog. ")}
 	for i := 0; i < b.N; i++ {
-		_, _ = c.Count(text)
+		_, _ = c.Count(msgs)
 	}
 }

@@ -26,42 +26,44 @@ func TestTier_String(t *testing.T) {
 	}
 }
 
-func TestCountBlockTokens(t *testing.T) {
-	counter := &FixedCounter{TokensPerMessage: 5}
-	t.Run("empty slice", func(t *testing.T) {
-		n, err := countBlockTokens(counter, nil)
+func TestTokenCounter_CountMessages(t *testing.T) {
+	t.Run("FixedCounter empty slice", func(t *testing.T) {
+		counter := &FixedCounter{TokensPerMessage: 5}
+		n, err := counter.Count(nil)
 		require.NoError(t, err)
 		assert.Equal(t, 0, n)
-		n, err = countBlockTokens(counter, []Message{})
+		n, err = counter.Count([]Message{})
 		require.NoError(t, err)
 		assert.Equal(t, 0, n)
 	})
-	t.Run("single message", func(t *testing.T) {
-		msgs := []Message{{Role: "user", Content: "hi"}}
-		n, err := countBlockTokens(counter, msgs)
+	t.Run("FixedCounter single message", func(t *testing.T) {
+		counter := &FixedCounter{TokensPerMessage: 5}
+		msgs := []Message{TextMessage("user", "hi")}
+		n, err := counter.Count(msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 5, n)
 	})
-	t.Run("message with Name", func(t *testing.T) {
-		msgs := []Message{{Role: "tool", Name: "get_weather", Content: "sunny"}}
-		n, err := countBlockTokens(counter, msgs)
+	t.Run("FixedCounter message with Name", func(t *testing.T) {
+		counter := &FixedCounter{TokensPerMessage: 5}
+		msgs := []Message{{Role: "tool", Name: "get_weather", Content: []ContentPart{{Type: "text", Text: "sunny"}}}}
+		n, err := counter.Count(msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 5, n)
 	})
-	t.Run("two messages", func(t *testing.T) {
-		msgs := []Message{{Role: "user", Content: "a"}, {Role: "assistant", Content: "b"}}
-		n, err := countBlockTokens(counter, msgs)
+	t.Run("FixedCounter two messages", func(t *testing.T) {
+		counter := &FixedCounter{TokensPerMessage: 5}
+		msgs := []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}
+		n, err := counter.Count(msgs)
 		require.NoError(t, err)
 		assert.Equal(t, 10, n)
 	})
-	t.Run("Name included in token count", func(t *testing.T) {
-		// CharFallbackCounter counts by rune length; Name is prepended to the text, so more chars = more tokens.
+	t.Run("CharFallbackCounter Name included in token count", func(t *testing.T) {
 		c := &CharFallbackCounter{CharsPerToken: 4}
-		withoutName := []Message{{Role: "tool", Content: "result"}}
-		withName := []Message{{Role: "tool", Name: "get_weather", Content: "result"}}
-		nWithout, err := countBlockTokens(c, withoutName)
+		withoutName := []Message{{Role: "tool", Content: []ContentPart{{Type: "text", Text: "result"}}}}
+		withName := []Message{{Role: "tool", Name: "get_weather", Content: []ContentPart{{Type: "text", Text: "result"}}}}
+		nWithout, err := c.Count(withoutName)
 		require.NoError(t, err)
-		nWith, err := countBlockTokens(c, withName)
+		nWith, err := c.Count(withName)
 		require.NoError(t, err)
 		assert.Greater(t, nWith, nWithout, "message with Name should yield more tokens than without")
 	})

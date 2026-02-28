@@ -8,45 +8,61 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// messageText returns the concatenated text from all text parts of m.Content (for tests).
+func messageText(m Message) string {
+	var b strings.Builder
+	for _, p := range m.Content {
+		if p.Type == "text" {
+			b.WriteString(p.Text)
+		}
+	}
+	return b.String()
+}
+
 func TestInjectIntoSystem(t *testing.T) {
 	t.Run("empty blocks returns systemMsg as-is", func(t *testing.T) {
-		sys := Message{Role: "system", Content: "You are helpful."}
+		sys := TextMessage("system", "You are helpful.")
 		got := InjectIntoSystem(sys)
-		assert.Equal(t, sys, got)
+		assert.Equal(t, sys.Role, got.Role)
+		require.Len(t, got.Content, 1)
+		assert.Equal(t, "You are helpful.", got.Content[0].Text)
 	})
 
 	t.Run("one block", func(t *testing.T) {
-		sys := Message{Role: "system", Content: "Rules."}
-		got := InjectIntoSystem(sys, Message{Role: "system", Content: "User likes cats."})
-		require.Contains(t, got.Content, "Rules.")
-		require.Contains(t, got.Content, "<context>")
-		require.Contains(t, got.Content, "<fact>User likes cats.</fact>")
-		require.Contains(t, got.Content, "</context>")
+		sys := TextMessage("system", "Rules.")
+		got := InjectIntoSystem(sys, TextMessage("system", "User likes cats."))
+		text := messageText(got)
+		require.Contains(t, text, "Rules.")
+		require.Contains(t, text, "<context>")
+		require.Contains(t, text, "<fact>User likes cats.</fact>")
+		require.Contains(t, text, "</context>")
 		assert.Equal(t, "system", got.Role)
 	})
 
 	t.Run("two blocks", func(t *testing.T) {
-		sys := Message{Role: "system", Content: "Base"}
+		sys := TextMessage("system", "Base")
 		got := InjectIntoSystem(sys,
-			Message{Content: "Fact1"},
-			Message{Content: "Fact2"},
+			Message{Content: []ContentPart{{Type: "text", Text: "Fact1"}}},
+			Message{Content: []ContentPart{{Type: "text", Text: "Fact2"}}},
 		)
-		assert.True(t, strings.HasPrefix(got.Content, "Base\n<context>"))
-		assert.Contains(t, got.Content, "<fact>Fact1</fact>")
-		assert.Contains(t, got.Content, "<fact>Fact2</fact>")
-		assert.True(t, strings.HasSuffix(got.Content, "</context>"))
+		text := messageText(got)
+		assert.True(t, strings.HasPrefix(text, "Base\n<context>"))
+		assert.Contains(t, text, "<fact>Fact1</fact>")
+		assert.Contains(t, text, "<fact>Fact2</fact>")
+		assert.True(t, strings.HasSuffix(text, "</context>"))
 	})
 
 	t.Run("block with empty Content", func(t *testing.T) {
-		sys := Message{Role: "system", Content: "X"}
-		got := InjectIntoSystem(sys, Message{Content: ""})
-		assert.Contains(t, got.Content, "<fact></fact>")
+		sys := TextMessage("system", "X")
+		got := InjectIntoSystem(sys, Message{Content: []ContentPart{{Type: "text", Text: ""}}})
+		require.Contains(t, messageText(got), "<fact></fact>")
 	})
 
 	t.Run("block content is XML-escaped", func(t *testing.T) {
-		sys := Message{Role: "system", Content: "Base"}
-		got := InjectIntoSystem(sys, Message{Content: "Break </fact> and </context> here"})
-		require.Contains(t, got.Content, "&lt;/fact&gt;")
-		require.Contains(t, got.Content, "&lt;/context&gt;")
+		sys := TextMessage("system", "Base")
+		got := InjectIntoSystem(sys, Message{Content: []ContentPart{{Type: "text", Text: "Break </fact> and </context> here"}}})
+		text := messageText(got)
+		require.Contains(t, text, "&lt;/fact&gt;")
+		require.Contains(t, text, "&lt;/context&gt;")
 	})
 }

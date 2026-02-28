@@ -20,7 +20,7 @@
 //	builder.AddBlock(contexty.MemoryBlock{
 //	    ID: "persona", Tier: contexty.TierSystem,
 //	    Strategy: contexty.NewStrictStrategy(),
-//	    Messages: []contexty.Message{{Role: "system", Content: "You are a helpful assistant."}},
+//	    Messages: []contexty.Message{contexty.TextMessage("system", "You are a helpful assistant.")},
 //	})
 //	msgs, report, err := builder.Compile(ctx)
 //	// report.TotalTokensUsed, report.Evictions, report.BlocksDropped describe what happened.

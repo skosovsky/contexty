@@ -5,12 +5,44 @@ import (
 	"fmt"
 )
 
-// Message is the minimal unit of context: a single chat turn with role and text content.
-// v1 focuses on text only; Name is optional (e.g. for tool/function messages).
+// ContentPart represents a single part of message content (text or image).
+// Type is not validated in core; typical values are "text", "image_url".
+type ContentPart struct {
+	Type     string    // "text", "image_url", or provider-specific
+	Text     string    `json:"text,omitempty"`
+	ImageURL *ImageURL `json:"image_url,omitempty"`
+}
+
+// ImageURL holds URL and optional detail level for image content.
+// No URL validation or network checks in core.
+type ImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"` // e.g. "low", "high"
+}
+
+// ToolCall represents a tool/function call in agent messages.
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"` // typically "function"
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall holds function name and arguments (JSON string; not validated in core).
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// Message is the minimal unit of context: a single chat turn with role and content.
+// v2: Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
+// ToolCalls and Metadata support agents and prompt caching; no validation in core.
 type Message struct {
-	Role    string // system, user, assistant, tool
-	Content string // Text representation
-	Name    string // Optional: function name for tool messages
+	Role       string
+	Content    []ContentPart // Always slice; text-only = one part with Type "text"
+	Name       string        // Optional: function name for tool messages
+	ToolCalls  []ToolCall
+	ToolCallID string
+	Metadata   map[string]any
 }
 
 // Tier is the priority level of a memory block (lower number = higher priority).
@@ -49,24 +81,25 @@ func (t Tier) String() string {
 	}
 }
 
-// TokenCounter counts the number of tokens in a text string.
-// The library does not implement real tokenization; the caller injects an implementation
-// (e.g. tiktoken for OpenAI, or CharFallbackCounter for testing/rough estimation).
+// TokenCounter counts tokens for a slice of messages.
+// The library does not implement real tokenization; the caller injects an implementation.
+// Count must account for message structure (role, content parts, tool calls) and any
+// per-message overhead; no validation of content types or URLs in core.
 type TokenCounter interface {
-	Count(text string) (int, error)
+	Count(msgs []Message) (int, error)
 }
 
 // EvictionStrategy defines how to shrink or trim a block to fit the remaining budget.
 // Each MemoryBlock has its own strategy (strict, drop, truncate, summarize).
 //
-// Implementations of Apply must return a slice of messages whose total token count
-// (as measured by counter) does not exceed limit. Compile validates this postcondition
-// and returns ErrStrategyExceededBudget if a strategy violates it.
+// Apply receives originalTokens (pre-counted by Builder) for DRY; implementations must
+// return messages whose total token count <= limit. Compile re-counts output and
+// returns ErrStrategyExceededBudget if the contract is violated.
 type EvictionStrategy interface {
 	// Apply returns a subset of msgs that fits within limit tokens, or an error.
-	// The returned messages must have total token count <= limit; Compile enforces this.
-	// counter is used to count tokens; strategies must not store it.
-	Apply(ctx context.Context, msgs []Message, limit int, counter TokenCounter) ([]Message, error)
+	// originalTokens is the token count of msgs (from counter.Count(msgs)); use it to avoid re-counting.
+	// Returned messages must have total token count <= limit; Compile enforces this.
+	Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error)
 }
 
 // Summarizer compresses a slice of messages into a single summary message.
@@ -75,32 +108,29 @@ type Summarizer interface {
 	Summarize(ctx context.Context, msgs []Message) (Message, error)
 }
 
-// MemoryBlock is a logical group of messages (e.g. "Chat History" or "RAG Results")
-// with a Tier and an EvictionStrategy for when it does not fit the budget.
-// ID is used in CompileReport (TokensPerBlock, Evictions, BlocksDropped); empty ID is allowed.
+// MemoryBlock is a logical group of messages with a Tier and an EvictionStrategy.
+// ID is used in CompileReport; empty ID is allowed.
+// CacheControl is for provider-specific prompt caching (e.g. Anthropic/Gemini); not interpreted in core.
 type MemoryBlock struct {
-	ID       string
-	Messages []Message
-	Tier     Tier
-	Strategy EvictionStrategy
+	ID           string
+	Messages     []Message
+	Tier         Tier
+	Strategy     EvictionStrategy
+	CacheControl string // Optional: caching rules for the block
 }
 
-// countBlockTokens returns the total token count for all messages in the block.
-// Each message is counted by concatenating Role and Content for the counter;
-// used by Builder and strategies. Returns 0 for empty slice.
-func countBlockTokens(counter TokenCounter, msgs []Message) (int, error) {
-	var total int
-	for _, m := range msgs {
-		// Represent message for counting: role + content (name is optional metadata)
-		text := m.Role + "\n" + m.Content
-		if m.Name != "" {
-			text = m.Name + "\n" + text
-		}
-		n, err := counter.Count(text)
-		if err != nil {
-			return 0, err
-		}
-		total += n
+// TextMessage creates a simple text-only message (single ContentPart with Type "text").
+func TextMessage(role, text string) Message {
+	return Message{
+		Role:    role,
+		Content: []ContentPart{{Type: "text", Text: text}},
 	}
-	return total, nil
+}
+
+// MultipartMessage creates a message with multiple content parts (text, images, etc.).
+func MultipartMessage(role string, parts ...ContentPart) Message {
+	return Message{
+		Role:    role,
+		Content: parts,
+	}
 }

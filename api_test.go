@@ -21,22 +21,22 @@ func TestCompile_BlackBox(t *testing.T) {
 		ID:       "persona",
 		Tier:     contexty.TierSystem,
 		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{{Role: "system", Content: "You are a medical assistant."}},
+		Messages: []contexty.Message{contexty.TextMessage("system", "You are a medical assistant.")},
 	})
 	b.AddBlock(contexty.MemoryBlock{
 		ID:       "facts",
 		Tier:     contexty.TierCore,
 		Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{{Role: "system", Content: "Patient: Anna, 30yo."}},
+		Messages: []contexty.Message{contexty.TextMessage("system", "Patient: Anna, 30yo.")},
 	})
 	b.AddBlock(contexty.MemoryBlock{
 		ID:       "chat",
 		Tier:     contexty.TierHistory,
 		Strategy: contexty.NewTruncateOldestStrategy(),
 		Messages: []contexty.Message{
-			{Role: "user", Content: "What should I take?"},
-			{Role: "assistant", Content: "Consider vitamin D."},
-			{Role: "user", Content: "Any side effects?"},
+			contexty.TextMessage("user", "What should I take?"),
+			contexty.TextMessage("assistant", "Consider vitamin D."),
+			contexty.TextMessage("user", "Any side effects?"),
 		},
 	})
 	msgs, report, err := b.Compile(context.Background())

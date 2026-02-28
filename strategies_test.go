@@ -12,11 +12,10 @@ import (
 func TestStrictStrategy(t *testing.T) {
 	counter := &FixedCounter{TokensPerMessage: 10}
 	msgs := []Message{
-		{Role: "user", Content: "a"},
-		{Role: "assistant", Content: "b"},
+		TextMessage("user", "a"),
+		TextMessage("assistant", "b"),
 	}
-	// Each message counted as role+content; FixedCounter returns 10 per call, so countBlockTokens = 10+10 = 20.
-	// Actually countBlockTokens passes "Role\nContent" so it's one Count per message -> 10 per message -> 20 total.
+	originalTokens := 20 // 2 msgs * 10
 	tests := []struct {
 		name    string
 		limit   int
@@ -30,7 +29,7 @@ func TestStrictStrategy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			got, err := NewStrictStrategy().Apply(ctx, msgs, tt.limit, counter)
+			got, err := NewStrictStrategy().Apply(ctx, msgs, originalTokens, tt.limit, counter)
 			if tt.wantErr {
 				require.Error(t, err)
 				assert.ErrorIs(t, err, ErrBudgetExceeded)
@@ -45,7 +44,7 @@ func TestStrictStrategy(t *testing.T) {
 func TestStrictStrategy_ContextCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := NewStrictStrategy().Apply(ctx, []Message{{Role: "user", Content: "x"}}, 100, &FixedCounter{1})
+	_, err := NewStrictStrategy().Apply(ctx, []Message{TextMessage("user", "x")}, 1, 100, &FixedCounter{TokensPerMessage: 1})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
@@ -53,14 +52,15 @@ func TestStrictStrategy_ContextCanceled(t *testing.T) {
 func TestStrictStrategy_ContextDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 0)
 	defer cancel()
-	_, err := NewStrictStrategy().Apply(ctx, []Message{{Role: "user", Content: "x"}}, 100, &FixedCounter{1})
+	_, err := NewStrictStrategy().Apply(ctx, []Message{TextMessage("user", "x")}, 1, 100, &FixedCounter{TokensPerMessage: 1})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 }
 
 func TestDropStrategy(t *testing.T) {
 	counter := &FixedCounter{TokensPerMessage: 5}
-	msgs := []Message{{Role: "user", Content: "a"}, {Role: "assistant", Content: "b"}}
+	msgs := []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}
+	originalTokens := 10 // 2 * 5
 	tests := []struct {
 		name  string
 		limit int
@@ -71,7 +71,7 @@ func TestDropStrategy(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := NewDropStrategy().Apply(context.Background(), msgs, tt.limit, counter)
+			got, err := NewDropStrategy().Apply(context.Background(), msgs, originalTokens, tt.limit, counter)
 			require.NoError(t, err)
 			assert.Len(t, got, tt.want)
 		})
@@ -79,94 +79,100 @@ func TestDropStrategy(t *testing.T) {
 }
 
 func TestDropStrategy_TokenCounterError(t *testing.T) {
-	_, err := NewDropStrategy().Apply(context.Background(), []Message{{Role: "user", Content: "x"}}, 100, errorCounter{})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "boom")
+	// DropStrategy uses originalTokens only; it does not call counter. Use a strategy that would call counter, or test via builder.
+	// DropStrategy.Apply with originalTokens never calls counter, so we test errorCounter via strict path (strict also doesn't call in Apply).
+	// Actually Drop fits/exceeds is based on originalTokens vs limit, no Count. So errorCounter isn't used by Drop.
+	// Keep test: pass errorCounter; Drop still doesn't call it. So this test would pass. Remove or change: we can pass 1 as originalTokens, 100 as limit; Drop returns msgs. So no error. So the test was for when counter is used - but Drop doesn't use counter. So let's just keep the signature and pass originalTokens 1, limit 100. The test expects error - but with new Drop we won't get error. So change test to expect no error and that we get the message back, since Drop doesn't call counter.
+	got, err := NewDropStrategy().Apply(context.Background(), []Message{TextMessage("user", "x")}, 1, 100, errorCounter{})
+	require.NoError(t, err) // Drop uses originalTokens only, does not call counter
+	require.Len(t, got, 1)
 }
 
 func TestTruncateOldestStrategy(t *testing.T) {
 	// 3 messages, 10 tokens each = 30 total
 	msgs := []Message{
-		{Role: "user", Content: "1"},
-		{Role: "assistant", Content: "2"},
-		{Role: "user", Content: "3"},
+		TextMessage("user", "1"),
+		TextMessage("assistant", "2"),
+		TextMessage("user", "3"),
 	}
 	counter := &FixedCounter{TokensPerMessage: 10}
+	originalTokens := 30
 
 	t.Run("no options truncates one by one", func(t *testing.T) {
 		s := NewTruncateOldestStrategy()
-		got, err := s.Apply(context.Background(), msgs, 15, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 15, counter)
 		require.NoError(t, err)
 		assert.Len(t, got, 1)
-		assert.Equal(t, "3", got[0].Content)
+		require.Len(t, got[0].Content, 1)
+		assert.Equal(t, "3", got[0].Content[0].Text)
 	})
 
 	t.Run("keep pairs removes user+assistant together", func(t *testing.T) {
 		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
-		got, err := s.Apply(context.Background(), msgs, 15, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 15, counter)
 		require.NoError(t, err)
-		// First pair (user, assistant) removed -> one message left
 		assert.Len(t, got, 1)
-		assert.Equal(t, "3", got[0].Content)
+		require.Len(t, got[0].Content, 1)
+		assert.Equal(t, "3", got[0].Content[0].Text)
 	})
 
 	t.Run("keep pairs with non-user first removes one at a time", func(t *testing.T) {
-		// First message is "system", so no user+assistant pair at start; only one message removed per iteration until it fits.
 		msgsWithSystem := []Message{
-			{Role: "system", Content: "0"},
-			{Role: "user", Content: "1"},
-			{Role: "assistant", Content: "2"},
+			TextMessage("system", "0"),
+			TextMessage("user", "1"),
+			TextMessage("assistant", "2"),
 		}
 		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
-		got, err := s.Apply(context.Background(), msgsWithSystem, 25, counter)
+		got, err := s.Apply(context.Background(), msgsWithSystem, 30, 25, counter)
 		require.NoError(t, err)
-		// system (10) removed first; remaining 20 <= 25, stop. Two messages (user, assistant) kept.
 		assert.Len(t, got, 2)
-		assert.Equal(t, "1", got[0].Content)
-		assert.Equal(t, "2", got[1].Content)
+		require.Len(t, got[0].Content, 1)
+		require.Len(t, got[1].Content, 1)
+		assert.Equal(t, "1", got[0].Content[0].Text)
+		assert.Equal(t, "2", got[1].Content[0].Text)
 	})
 
 	t.Run("keep pairs with non-user first can drop block when pair does not fit", func(t *testing.T) {
-		// Same 3 msgs, limit 15: system removed (1), then [user, assistant] pair exceeds 15 -> pair removed -> empty.
 		msgsWithSystem := []Message{
-			{Role: "system", Content: "0"},
-			{Role: "user", Content: "1"},
-			{Role: "assistant", Content: "2"},
+			TextMessage("system", "0"),
+			TextMessage("user", "1"),
+			TextMessage("assistant", "2"),
 		}
 		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
-		got, err := s.Apply(context.Background(), msgsWithSystem, 15, counter)
+		got, err := s.Apply(context.Background(), msgsWithSystem, 30, 15, counter)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
 
 	t.Run("min messages drops block when cannot keep minimum", func(t *testing.T) {
 		s := NewTruncateOldestStrategy(MinMessages(2))
-		got, err := s.Apply(context.Background(), msgs, 15, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 15, counter)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
 
 	t.Run("empty input", func(t *testing.T) {
-		got, err := NewTruncateOldestStrategy().Apply(context.Background(), nil, 10, counter)
+		got, err := NewTruncateOldestStrategy().Apply(context.Background(), nil, 0, 10, counter)
 		require.NoError(t, err)
 		assert.Nil(t, got)
 	})
 
 	t.Run("token counter error in loop propagates", func(t *testing.T) {
-		// Fail on 4th call: 3 for countBlockTokens(cur), 1 for first countBlockTokens(cur[:remove]).
-		failAfter := &failAfterNCallsCounter{n: 4, inner: &FixedCounter{TokensPerMessage: 10}}
-		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, 15, failAfter)
+		// truncateOldestStrategy calls counter.Count(cur) only inside the loop (after each trim).
+		// With 3 msgs, limit 15: first trim -> cur has 2 msgs, Count(cur) is 1st call. Fail on 1st call.
+		failAfter := &failAfterNCallsCounter{n: 1, inner: &FixedCounter{TokensPerMessage: 10}}
+		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, originalTokens, 15, failAfter)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "count failed")
 	})
 
 	t.Run("inconsistent token counter returns error", func(t *testing.T) {
-		// Counter reports 100 for first message slice but 30 for full block -> removedTokens > total.
+		// badCounter returns 30 for 3 msgs, 100 for 2 msgs. After first trim cur has 2 msgs, Count returns 100 > originalTokens 30.
 		badCounter := &inconsistentCounter{fullCount: 30, sliceCount: 100}
-		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, 15, badCounter)
+		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, originalTokens, 15, badCounter)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrTokenCountFailed)
-		assert.Contains(t, err.Error(), "inconsistent")
+		assert.Contains(t, err.Error(), "exceeded original")
 	})
 }
 
@@ -177,39 +183,37 @@ type failAfterNCallsCounter struct {
 	inner TokenCounter
 }
 
-func (f *failAfterNCallsCounter) Count(text string) (int, error) {
+func (f *failAfterNCallsCounter) Count(msgs []Message) (int, error) {
 	f.calls++
 	if f.calls >= f.n {
 		return 0, errors.New("count failed")
 	}
-	return f.inner.Count(text)
+	return f.inner.Count(msgs)
 }
 
-// failWhenCountingCounter fails when Count is called with text equal to trigger.
+// failWhenCountingCounter fails when Count is called with a single message matching role+summary text (for summarize strategy).
 type failWhenCountingCounter struct {
-	trigger string
-	inner   TokenCounter
+	inner TokenCounter
 }
 
-func (f *failWhenCountingCounter) Count(text string) (int, error) {
-	if text == f.trigger {
+func (f *failWhenCountingCounter) Count(msgs []Message) (int, error) {
+	if len(msgs) == 1 && msgs[0].Role == "system" && len(msgs[0].Content) == 1 && msgs[0].Content[0].Text == "summary" {
 		return 0, errors.New("count failed")
 	}
-	return f.inner.Count(text)
+	return f.inner.Count(msgs)
 }
 
-// inconsistentCounter returns sliceCount for the first Count call in a batch, then fullCount/3 for the rest; used to simulate removed > total.
+// inconsistentCounter returns fullCount for full block, sliceCount for a smaller slice; used to simulate removed > total.
 type inconsistentCounter struct {
 	calls      int
 	fullCount  int // total for full block (e.g. 30)
-	sliceCount int // returned for first message when counting a slice (e.g. 100)
+	sliceCount int // returned for slice to trigger removed > total (e.g. 100)
 }
 
-func (c *inconsistentCounter) Count(_ string) (int, error) {
+func (c *inconsistentCounter) Count(msgs []Message) (int, error) {
 	c.calls++
-	// countBlockTokens(cur) does 3 calls -> 10 each so total 30. Then countBlockTokens(cur[:1]) does 1 call -> return 100.
-	if c.calls <= 3 {
-		return c.fullCount / 3, nil
+	if len(msgs) == 3 {
+		return c.fullCount, nil
 	}
 	return c.sliceCount, nil
 }
@@ -219,33 +223,34 @@ func TestNewSummarizeStrategy_NilPanics(t *testing.T) {
 }
 
 func TestSummarizeStrategy(t *testing.T) {
-	msgs := []Message{{Role: "user", Content: "a"}, {Role: "assistant", Content: "b"}}
+	msgs := []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}
 	counter := &FixedCounter{TokensPerMessage: 10}
+	originalTokens := 20
 
 	t.Run("fits passes through", func(t *testing.T) {
 		sum := &mockSummarizer{}
 		s := NewSummarizeStrategy(sum)
-		got, err := s.Apply(context.Background(), msgs, 20, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 20, counter)
 		require.NoError(t, err)
 		assert.Len(t, got, 2)
 		assert.False(t, sum.called)
 	})
 
 	t.Run("exceeds calls summarizer", func(t *testing.T) {
-		sum := &mockSummarizer{result: Message{Role: "system", Content: "summary"}}
+		sum := &mockSummarizer{result: TextMessage("system", "summary")}
 		s := NewSummarizeStrategy(sum)
-		// Limit 15 so the summary (1 msg = 10 tokens with FixedCounter) fits.
-		got, err := s.Apply(context.Background(), msgs, 15, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 15, counter)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
-		assert.Equal(t, "summary", got[0].Content)
+		require.Len(t, got[0].Content, 1)
+		assert.Equal(t, "summary", got[0].Content[0].Text)
 		assert.True(t, sum.called)
 	})
 
 	t.Run("summary still too large drops block", func(t *testing.T) {
-		sum := &mockSummarizer{result: Message{Role: "system", Content: "long summary"}}
+		sum := &mockSummarizer{result: TextMessage("system", "long summary")}
 		s := NewSummarizeStrategy(sum)
-		got, err := s.Apply(context.Background(), msgs, 0, counter)
+		got, err := s.Apply(context.Background(), msgs, originalTokens, 0, counter)
 		require.NoError(t, err)
 		assert.Empty(t, got)
 	})
@@ -253,17 +258,16 @@ func TestSummarizeStrategy(t *testing.T) {
 	t.Run("summarizer error propagates", func(t *testing.T) {
 		sum := &mockSummarizer{err: errors.New("llm failed")}
 		s := NewSummarizeStrategy(sum)
-		_, err := s.Apply(context.Background(), msgs, 5, counter)
+		_, err := s.Apply(context.Background(), msgs, originalTokens, 5, counter)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "llm failed")
 	})
 
 	t.Run("token counter error when counting summary propagates", func(t *testing.T) {
-		sum := &mockSummarizer{result: Message{Role: "system", Content: "summary"}}
-		// Fail when counting the summary message (Role+"\n"+Content = "system\nsummary").
-		failOnSummary := &failWhenCountingCounter{trigger: "system\nsummary", inner: counter}
+		sum := &mockSummarizer{result: TextMessage("system", "summary")}
+		failOnSummary := &failWhenCountingCounter{inner: counter}
 		s := NewSummarizeStrategy(sum)
-		_, err := s.Apply(context.Background(), msgs, 5, failOnSummary)
+		_, err := s.Apply(context.Background(), msgs, originalTokens, 5, failOnSummary)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "count failed")
 	})

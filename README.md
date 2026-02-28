@@ -34,7 +34,7 @@ func main() {
         ID:       "persona",
         Tier:     contexty.TierSystem,
         Strategy: contexty.NewStrictStrategy(),
-        Messages: []contexty.Message{{Role: "system", Content: "You are a helpful assistant."}},
+        Messages: []contexty.Message{contexty.TextMessage("system", "You are a helpful assistant.")},
     })
     msgs, report, err := builder.Compile(ctx)
     if err != nil {
@@ -53,9 +53,9 @@ func main() {
   - **Drop** — remove the block entirely (e.g. RAG).
   - **Truncate** — remove oldest messages until it fits (e.g. chat history).
   - **Summarize** — call your `Summarizer` to compress the block.
-- **Token counting**: The library does not tokenize; you inject a `TokenCounter` (e.g. [CharFallbackCounter](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter) for tests, or a tiktoken-based counter for production).
+- **Token counting**: The library does not tokenize; you inject a `TokenCounter` whose `Count(msgs []Message) (int, error)` counts tokens for a slice of messages (e.g. [CharFallbackCounter](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter) for tests, or a tiktoken-based counter for production). Message content is typed as `[]ContentPart` (text, image_url, etc.); use [TextMessage](https://pkg.go.dev/github.com/skosovsky/contexty#TextMessage) or [MultipartMessage](https://pkg.go.dev/github.com/skosovsky/contexty#MultipartMessage) for ergonomics.
 - **CompileReport**: After `Compile`, you get `TotalTokensUsed`, `TokensPerBlock`, `Evictions`, and `BlocksDropped` for observability.
-- **InjectIntoSystem**: Utility to merge auxiliary blocks into a single system message with XML-style tags (content is escaped).
+- **InjectIntoSystem**: Utility to merge auxiliary blocks into a single system message with XML-style tags. Only text parts (`ContentPart.Type == "text"`) are included; non-text parts are ignored. Content is XML-escaped.
 
 ## Strategies at a glance
 
@@ -66,7 +66,7 @@ func main() {
 | `NewTruncateOldestStrategy()` | Chat history                  | Oldest messages removed     |
 | `NewSummarizeStrategy(summarizer)` | Long blocks to compress   | Summarizer called; else dropped |
 
-Custom strategies must return messages whose total token count does not exceed the given limit; `Compile` validates this and returns `ErrStrategyExceededBudget` if the contract is violated.
+Custom strategies implement `Apply(ctx, msgs, originalTokens, limit, counter)` and must return messages whose total token count does not exceed the given limit; `Compile` validates this and returns `ErrStrategyExceededBudget` if the contract is violated. The library performs minimal validation (no provider-specific role/URL/JSON checks); the only strict guarantee is `TotalTokensUsed <= MaxTokens`.
 
 ## Example output (CompileReport)
 
