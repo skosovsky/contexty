@@ -1,5 +1,7 @@
 package contexty
 
+import "slices"
+
 // truncateConfig holds options for TruncateOldestStrategy.
 type truncateConfig struct {
 	keepPairs      bool
@@ -34,10 +36,8 @@ func MinMessages(n int) TruncateOption {
 // removed instead. Duplicate roles are not added; the config stays deduplicated.
 func ProtectRole(role string) TruncateOption {
 	return func(c *truncateConfig) {
-		for _, r := range c.protectedRoles {
-			if r == role {
-				return
-			}
+		if slices.Contains(c.protectedRoles, role) {
+			return
 		}
 		c.protectedRoles = append(c.protectedRoles, role)
 	}

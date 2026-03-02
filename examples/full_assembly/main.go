@@ -1,5 +1,6 @@
 // Full-assembly example: builds a multi-tier context (system, core, RAG, history)
-// and compiles it within a token budget. Run with: go run .
+// and compiles it within a token budget. Total content exceeds the limit so that
+// evictions (and optionally drops) are visible. Run with: go run .
 package main
 
 import (
@@ -32,10 +33,12 @@ func contentText(parts []contexty.ContentPart) string {
 }
 
 func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
-	counter := &contexty.CharFallbackCounter{CharsPerToken: 4}
+	// FixedCounter so total size is predictable; total content exceeds MaxTokens to trigger evictions.
+	counter := &contexty.FixedCounter{TokensPerMessage: 25}
+	const maxTokens = 200
 
 	builder := contexty.NewBuilder(contexty.AllocatorConfig{
-		MaxTokens:    4000,
+		MaxTokens:    maxTokens,
 		TokenCounter: counter,
 	})
 
@@ -75,8 +78,9 @@ func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
 		return nil, err
 	}
 
-	log.Printf("tokens used: %d/%d, evictions: %v, dropped: %v",
-		report.TotalTokensUsed, 4000, report.Evictions, report.BlocksDropped)
+	// All data together exceeds maxTokens; show how the allocator resolved it.
+	log.Printf("original tokens (all blocks): %d, used: %d/%d, evictions: %v, dropped: %v",
+		report.OriginalTokens, report.TotalTokensUsed, maxTokens, report.Evictions, report.BlocksDropped)
 
 	return finalMessages, nil
 }
@@ -84,6 +88,9 @@ func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
 func fetchRAGMessages() []contexty.Message {
 	return []contexty.Message{
 		contexty.TextMessage("system", "Retrieved: Article about vitamin D and calcium."),
+		contexty.TextMessage("system", "Retrieved: Summary on magnesium and sleep."),
+		contexty.TextMessage("system", "Retrieved: Guidelines for daily intake."),
+		contexty.TextMessage("system", "Retrieved: Drug interactions with supplements."),
 	}
 }
 
@@ -93,6 +100,10 @@ func fetchChatHistoryFromDB() []contexty.Message {
 		contexty.TextMessage("assistant", "Consider vitamin D and calcium based on your profile."),
 		contexty.TextMessage("user", "Any side effects?"),
 		contexty.TextMessage("assistant", "Generally well tolerated. Discuss with your doctor."),
+		contexty.TextMessage("user", "Can I take them at night?"),
+		contexty.TextMessage("assistant", "Vitamin D can be taken anytime. Magnesium may help sleep."),
+		contexty.TextMessage("user", "Thanks."),
+		contexty.TextMessage("assistant", "You're welcome. Ask if you need more."),
 	}
 }
 

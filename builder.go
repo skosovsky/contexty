@@ -21,7 +21,7 @@ type CompileReport struct {
 	OriginalTokensPerBlock map[string]int    // Block ID -> tokens before eviction (before strategy applied)
 	TokensPerBlock         map[string]int    // Block ID -> tokens used in output
 	Evictions              map[string]string // Block ID -> strategy applied ("rejected", "dropped", "truncated", "summarized")
-	BlocksDropped          []string         // IDs of blocks completely removed (may contain duplicates if multiple blocks shared the same ID)
+	BlocksDropped          []string          // IDs of blocks completely removed (may contain duplicates if multiple blocks shared the same ID)
 }
 
 // Builder collects memory blocks and compiles them into a single message slice within the token budget.
