@@ -61,13 +61,13 @@ func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
 		Role:    "assistant",
 		Content: []ContentPart{{Type: "text", Text: "ab"}},
 		ToolCalls: []ToolCall{{
-			ID:   "call_1",
-			Type: "function",
+			ID:       "call_1",
+			Type:     "function",
 			Function: FunctionCall{Name: "foo", Arguments: "{}"},
 		}},
 	}}
 	// With EstimateTool returning 10 per call: text tokens 1 + tool 10 = 11.
-	c := &CharFallbackCounter{CharsPerToken: 4, EstimateTool: func(call ToolCall) int { return 10 }}
+	c := &CharFallbackCounter{CharsPerToken: 4, EstimateTool: func(_ ToolCall) int { return 10 }}
 	got, err := c.Count(ctx, msgs)
 	require.NoError(t, err)
 	assert.Equal(t, 11, got, "text tokens (1) + EstimateTool(10) = 11")
