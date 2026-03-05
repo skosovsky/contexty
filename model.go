@@ -36,13 +36,15 @@ type FunctionCall struct {
 // Message is the minimal unit of context: a single chat turn with role and content.
 // v2: Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
 // ToolCalls and Metadata support agents and prompt caching; no validation in core.
+// CacheControl holds provider-specific cache metadata (e.g. {"type": "ephemeral"}); not interpreted in core.
 type Message struct {
-	Role       string
-	Content    []ContentPart // Always slice; text-only = one part with Type "text"
-	Name       string        // Optional: function name for tool messages
-	ToolCalls  []ToolCall
-	ToolCallID string
-	Metadata   map[string]any
+	Role         string
+	Content      []ContentPart // Always slice; text-only = one part with Type "text"
+	Name         string        // Optional: function name for tool messages
+	ToolCalls    []ToolCall
+	ToolCallID   string
+	Metadata     map[string]any
+	CacheControl map[string]any // Optional: cache hint for provider (e.g. ephemeral); set by Builder when block has CachePoint
 }
 
 // Tier is the priority level of a memory block (lower number = higher priority).
@@ -110,17 +112,23 @@ type Summarizer interface {
 	Summarize(ctx context.Context, msgs []Message) (Message, error)
 }
 
+// CacheTypeEphemeral is the cache type value set on the last message of a block when CachePoint is true.
+const CacheTypeEphemeral = "ephemeral"
+
 // MemoryBlock is a logical group of messages with a Tier and an EvictionStrategy.
 // ID is used in CompileReport; empty ID is allowed.
 // MaxTokens is optional: when > 0 and less than the remaining global budget, Apply receives
 // this value as the limit so the block is capped locally (e.g. RAG block limited to 200 tokens).
-// CacheControl is for provider-specific prompt caching (e.g. Anthropic/Gemini); not interpreted in core.
+// CachePoint: when true, Compile sets the last message of this block's output with CacheControl
+// so the provider can treat it as a cache boundary (e.g. ephemeral cache).
+// CacheControl (string) is for other provider-specific caching rules; not interpreted in core.
 type MemoryBlock struct {
 	ID           string
 	Messages     []Message
 	Tier         Tier
 	Strategy     EvictionStrategy
 	MaxTokens    int    // Optional: hard per-block token limit (0 = no limit)
+	CachePoint   bool   // If true, last message of block gets CacheControl set (e.g. type=ephemeral)
 	CacheControl string // Optional: caching rules for the block
 }
 

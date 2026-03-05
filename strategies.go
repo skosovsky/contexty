@@ -69,6 +69,37 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	if len(msgs) == 0 {
 		return nil, nil
 	}
+	if originalTokens <= limit {
+		return msgs, nil
+	}
+	// Binary search (suffix-based: "keep from index i") is only valid when we are free to drop
+	// any prefix by index. ProtectRole and KeepUserAssistantPairs require removing the "first
+	// removable" message or pair, which is not the same as cutting at an arbitrary index;
+	// using binary search with those options would break their semantics, so we keep the
+	// sequential path when either option is set.
+	if len(s.cfg.protectedRoles) == 0 && !s.cfg.keepPairs {
+		cur := slices.Clone(msgs)
+		bestValidIdx := len(cur)
+		low, high := 0, len(cur)
+		for low <= high {
+			mid := low + (high-low)/2
+			count, err := counter.Count(ctx, cur[mid:])
+			if err != nil {
+				return nil, fmt.Errorf("contexty: truncate: %w: %w", ErrTokenCountFailed, err)
+			}
+			if count <= limit {
+				bestValidIdx = mid
+				high = mid - 1
+			} else {
+				low = mid + 1
+			}
+		}
+		out := cur[bestValidIdx:]
+		if s.cfg.minMessages > 0 && len(out) < s.cfg.minMessages {
+			return nil, nil
+		}
+		return out, nil
+	}
 	var protected map[string]struct{}
 	if len(s.cfg.protectedRoles) > 0 {
 		protected = make(map[string]struct{}, len(s.cfg.protectedRoles))

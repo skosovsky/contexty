@@ -79,7 +79,7 @@ func Example_builderChatHistory() {
 
 func Example_injectIntoSystemXML() {
 	sys := contexty.TextMessage("system", "Base.")
-	got := contexty.InjectIntoSystem(sys,
+	got := contexty.InjectIntoSystem(sys, contexty.XMLFormatter("context"),
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact1"}}},
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact2"}}},
 	)
@@ -95,7 +95,7 @@ func Example_injectIntoSystemXML() {
 
 func ExampleInjectIntoSystem() {
 	sys := contexty.TextMessage("system", "You are a doctor.")
-	got := contexty.InjectIntoSystem(sys,
+	got := contexty.InjectIntoSystem(sys, contexty.XMLFormatter("context"),
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Patient has fever."}}},
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Allergies: none."}}},
 	)
@@ -103,5 +103,23 @@ func ExampleInjectIntoSystem() {
 	fmt.Println(len(got.Content) > 0 && len(got.Content[0].Text) > 0 && got.Content[0].Text[0] == 'Y')
 	// Output:
 	// system
+	// true
+}
+
+func ExampleInjectIntoSystem_markdown() {
+	sys := contexty.TextMessage("system", "Base instructions.")
+	got := contexty.InjectIntoSystem(sys, contexty.MarkdownListFormatter("Context:"),
+		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact A"}}},
+		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact B"}}},
+	)
+	text := got.Content[0].Text
+	fmt.Println(got.Role)
+	fmt.Println(strings.Contains(text, "### Context:\n"))
+	fmt.Println(strings.Contains(text, "- Fact A\n"))
+	fmt.Println(strings.Contains(text, "- Fact B\n"))
+	// Output:
+	// system
+	// true
+	// true
 	// true
 }

@@ -167,9 +167,10 @@ func TestTruncateOldestStrategy(t *testing.T) {
 	})
 
 	t.Run("inconsistent token counter returns error", func(t *testing.T) {
-		// badCounter returns 30 for 3 msgs, 100 for 2 msgs. After first trim cur has 2 msgs, Count returns 100 > originalTokens 30.
+		// badCounter returns 30 for 3 msgs, 100 for 2 msgs. Sequential path: after first trim cur has 2 msgs, Count returns 100 > originalTokens 30.
+		// KeepUserAssistantPairs forces sequential path (binary search is not used), so the invariant check runs.
 		badCounter := &inconsistentCounter{fullCount: 30, sliceCount: 100}
-		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, originalTokens, 15, badCounter)
+		_, err := NewTruncateOldestStrategy(KeepUserAssistantPairs(true)).Apply(context.Background(), msgs, originalTokens, 15, badCounter)
 		require.Error(t, err)
 		require.ErrorIs(t, err, ErrTokenCountFailed)
 		assert.Contains(t, err.Error(), "exceeded original")
@@ -212,6 +213,35 @@ func TestTruncateOldestStrategy(t *testing.T) {
 		assert.Equal(t, "developer", got[0].Role)
 		assert.Equal(t, "dev", got[0].Content[0].Text)
 	})
+}
+
+func TestTruncateOldestStrategy_BinarySearch(t *testing.T) {
+	// 100 messages, no ProtectRole / no KeepUserAssistantPairs -> binary search path.
+	// Binary search does O(log N) Count calls; for N=100 we expect at most ~7 (ceil(log2(100)) or 8 with margin).
+	msgs := make([]Message, 100)
+	for i := range 100 {
+		msgs[i] = TextMessage("user", "x")
+	}
+	inner := &FixedCounter{TokensPerMessage: 1}
+	tracker := &countCallsCounter{inner: inner}
+	s := NewTruncateOldestStrategy()
+	limit := 50 // keep at most 50 messages
+	originalTokens := 100
+	got, err := s.Apply(context.Background(), msgs, originalTokens, limit, tracker)
+	require.NoError(t, err)
+	require.Len(t, got, 50)
+	assert.LessOrEqual(t, tracker.calls, 8, "binary search should use at most 8 Count calls for 100 messages")
+}
+
+// countCallsCounter delegates to inner and records the number of Count invocations.
+type countCallsCounter struct {
+	calls int
+	inner TokenCounter
+}
+
+func (c *countCallsCounter) Count(ctx context.Context, msgs []Message) (int, error) {
+	c.calls++
+	return c.inner.Count(ctx, msgs)
 }
 
 // failAfterNCallsCounter fails from the Nth Count call; used to trigger errors inside strategy loop.

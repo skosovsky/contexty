@@ -111,6 +111,11 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 			report.Evictions[block.ID] = eviction
 		}
 		if len(out) > 0 {
+			if block.CachePoint {
+				clonedLast := out[len(out)-1]
+				clonedLast.CacheControl = map[string]any{"type": CacheTypeEphemeral}
+				out[len(out)-1] = clonedLast
+			}
 			used, err := counter.Count(ctx, out)
 			if err != nil {
 				return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
