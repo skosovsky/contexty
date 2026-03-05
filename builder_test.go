@@ -387,6 +387,39 @@ func TestCompile_DuplicateBlockID(t *testing.T) {
 	assert.Equal(t, 1, report.TokensPerBlock["dup"])
 }
 
+func TestBuilder_CachePoint(t *testing.T) {
+	counter := &FixedCounter{TokensPerMessage: 1}
+	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: counter})
+	b.AddBlock(MemoryBlock{
+		ID: "system", Tier: TierSystem, Strategy: NewStrictStrategy(), CachePoint: true,
+		Messages: []Message{
+			TextMessage("system", "You are helpful."),
+			TextMessage("system", "Rules: be concise."),
+		},
+	})
+	b.AddBlock(MemoryBlock{
+		ID: "scratch", Tier: TierScratchpad, Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("assistant", "Thinking...")},
+	})
+	msgs, _, err := b.Compile(context.Background())
+	require.NoError(t, err)
+	require.Len(t, msgs, 3)
+	// Only the last message of the first block (system) should have CacheControl set.
+	var withCache int
+	for i, m := range msgs {
+		if m.CacheControl != nil {
+			withCache++
+			typ, ok := m.CacheControl["type"]
+			require.True(t, ok, "message %d: CacheControl should have 'type'", i)
+			assert.Equal(t, CacheTypeEphemeral, typ, "message %d: type should be ephemeral", i)
+		}
+	}
+	assert.Equal(t, 1, withCache, "exactly one message should have CacheControl")
+	// That message must be the last of the first block (index 1: "Rules: be concise.").
+	assert.NotNil(t, msgs[1].CacheControl)
+	assert.Equal(t, "Rules: be concise.", msgs[1].Content[0].Text)
+}
+
 func FuzzCompile(f *testing.F) {
 	f.Add(50, 5, 10) // maxTokens, numBlocks, tokensPerMsg
 	f.Fuzz(func(t *testing.T, maxTokens, numBlocks, tokensPerMsg int) {
