@@ -107,41 +107,83 @@ func TestTruncateOldestStrategy(t *testing.T) {
 		assert.Equal(t, "3", got[0].Content[0].Text)
 	})
 
-	t.Run("keep pairs removes user+assistant together", func(t *testing.T) {
-		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
-		got, err := s.Apply(context.Background(), msgs, originalTokens, 15, counter)
+	t.Run("KeepTurnAtomicity removes assistant+tool chain as one unit", func(t *testing.T) {
+		// [user, assistant(tool_calls), tool, tool, user] = 50 tokens. Limit 21: remove user (10), then assistant+tool+tool (30) as one unit -> [user] = 10.
+		block := []Message{
+			TextMessage("user", "u1"),
+			{Role: "assistant", Content: []ContentPart{{Type: "text", Text: "call"}}, ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}}},
+			TextMessage("tool", "r1"),
+			TextMessage("tool", "r2"),
+			TextMessage("user", "u2"),
+		}
+		s := NewTruncateOldestStrategy(KeepTurnAtomicity(true))
+		got, err := s.Apply(context.Background(), block, 50, 21, counter)
 		require.NoError(t, err)
-		assert.Len(t, got, 1)
-		require.Len(t, got[0].Content, 1)
-		assert.Equal(t, "3", got[0].Content[0].Text)
+		require.Len(t, got, 1)
+		assert.Equal(t, "user", got[0].Role)
+		assert.Equal(t, "u2", got[0].Content[0].Text)
 	})
 
-	t.Run("keep pairs with non-user first removes one at a time", func(t *testing.T) {
+	t.Run("KeepTurnAtomicity with non-tool first removes one at a time", func(t *testing.T) {
 		msgsWithSystem := []Message{
 			TextMessage("system", "0"),
 			TextMessage("user", "1"),
 			TextMessage("assistant", "2"),
 		}
-		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
+		s := NewTruncateOldestStrategy(KeepTurnAtomicity(true))
 		got, err := s.Apply(context.Background(), msgsWithSystem, 30, 25, counter)
 		require.NoError(t, err)
 		assert.Len(t, got, 2)
-		require.Len(t, got[0].Content, 1)
-		require.Len(t, got[1].Content, 1)
 		assert.Equal(t, "1", got[0].Content[0].Text)
 		assert.Equal(t, "2", got[1].Content[0].Text)
 	})
 
-	t.Run("keep pairs with non-user first can drop block when pair does not fit", func(t *testing.T) {
+	t.Run("KeepTurnAtomicity with limit below one full turn leaves one message", func(t *testing.T) {
 		msgsWithSystem := []Message{
 			TextMessage("system", "0"),
 			TextMessage("user", "1"),
 			TextMessage("assistant", "2"),
 		}
-		s := NewTruncateOldestStrategy(KeepUserAssistantPairs(true))
+		s := NewTruncateOldestStrategy(KeepTurnAtomicity(true))
 		got, err := s.Apply(context.Background(), msgsWithSystem, 30, 15, counter)
 		require.NoError(t, err)
-		assert.Empty(t, got)
+		require.Len(t, got, 1)
+		assert.Equal(t, "2", got[0].Content[0].Text)
+	})
+
+	t.Run("KeepTurnAtomicity ToolCallID matching ends block at expected results", func(t *testing.T) {
+		// Assistant has 2 ToolCalls with IDs; two tool messages with matching ToolCallID -> block is assistant + 2 tools only.
+		block := []Message{
+			TextMessage("user", "u1"),
+			{Role: "assistant", Content: []ContentPart{{Type: "text", Text: "x"}}, ToolCalls: []ToolCall{
+				{ID: "call_a", Function: FunctionCall{Name: "f", Arguments: "{}"}},
+				{ID: "call_b", Function: FunctionCall{Name: "g", Arguments: "{}"}},
+			}},
+			{Role: "tool", Content: []ContentPart{{Type: "text", Text: "r1"}}, ToolCallID: "call_a"},
+			{Role: "tool", Content: []ContentPart{{Type: "text", Text: "r2"}}, ToolCallID: "call_b"},
+			TextMessage("user", "u2"),
+		}
+		s := NewTruncateOldestStrategy(KeepTurnAtomicity(true))
+		got, err := s.Apply(context.Background(), block, 50, 21, counter)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "user", got[0].Role)
+		assert.Equal(t, "u2", got[0].Content[0].Text)
+	})
+
+	t.Run("KeepTurnAtomicity fallback contiguous when ToolCallID empty", func(t *testing.T) {
+		// Tool messages without ToolCallID: whole contiguous run is one atomic block (existing test covers this).
+		block := []Message{
+			TextMessage("user", "u1"),
+			{Role: "assistant", Content: []ContentPart{{Type: "text", Text: "x"}}, ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}}},
+			TextMessage("tool", "r1"),
+			TextMessage("user", "u2"),
+		}
+		s := NewTruncateOldestStrategy(KeepTurnAtomicity(true))
+		got, err := s.Apply(context.Background(), block, 40, 21, counter)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "user", got[0].Role)
 	})
 
 	t.Run("min messages drops block when cannot keep minimum", func(t *testing.T) {
@@ -158,26 +200,15 @@ func TestTruncateOldestStrategy(t *testing.T) {
 	})
 
 	t.Run("token counter error in loop propagates", func(t *testing.T) {
-		// truncateOldestStrategy calls counter.Count(ctx, cur) only inside the loop (after each trim).
-		// With 3 msgs, limit 15: first trim -> cur has 2 msgs, Count(cur) is 1st call. Fail on 1st call.
+		// Truncate calls CountPerMessage once at start; fail on 1st call to verify error propagates.
 		failAfter := &failAfterNCallsCounter{n: 1, inner: &FixedCounter{TokensPerMessage: 10}}
 		_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, originalTokens, 15, failAfter)
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "count failed")
 	})
 
-	t.Run("inconsistent token counter returns error", func(t *testing.T) {
-		// badCounter returns 30 for 3 msgs, 100 for 2 msgs. Sequential path: after first trim cur has 2 msgs, Count returns 100 > originalTokens 30.
-		// KeepUserAssistantPairs forces sequential path (binary search is not used), so the invariant check runs.
-		badCounter := &inconsistentCounter{fullCount: 30, sliceCount: 100}
-		_, err := NewTruncateOldestStrategy(KeepUserAssistantPairs(true)).Apply(context.Background(), msgs, originalTokens, 15, badCounter)
-		require.Error(t, err)
-		require.ErrorIs(t, err, ErrTokenCountFailed)
-		assert.Contains(t, err.Error(), "exceeded original")
-	})
-
-	t.Run("ProtectRole keeps developer and system then removes first pair", func(t *testing.T) {
-		// [developer, system, user, assistant, user, assistant] = 60 tokens. Limit 41: after removing first pair -> [developer, system, user, assistant] = 40 <= 41, stop.
+	t.Run("ProtectRole keeps developer and system then removes first two messages", func(t *testing.T) {
+		// [developer, system, user, assistant, user, assistant] = 60 tokens. Limit 41: remove first user and assistant -> [developer, system, user, assistant] = 40 <= 41.
 		block := []Message{
 			TextMessage("developer", "dev"),
 			TextMessage("system", "sys"),
@@ -186,7 +217,7 @@ func TestTruncateOldestStrategy(t *testing.T) {
 			TextMessage("user", "3"),
 			TextMessage("assistant", "4"),
 		}
-		s := NewTruncateOldestStrategy(ProtectRole("developer"), ProtectRole("system"), KeepUserAssistantPairs(true))
+		s := NewTruncateOldestStrategy(ProtectRole("developer"), ProtectRole("system"))
 		got, err := s.Apply(context.Background(), block, 60, 41, counter)
 		require.NoError(t, err)
 		require.Len(t, got, 4)
@@ -199,14 +230,14 @@ func TestTruncateOldestStrategy(t *testing.T) {
 	})
 
 	t.Run("ProtectRole developer only truncates from next index", func(t *testing.T) {
-		// [developer, user, assistant, user] = 40 tokens, limit 15 -> keep developer (10), need to remove 25. Remove user+assistant pair -> [developer, user] = 20 still over. Remove one -> [developer] = 10. So limit 10 gives [developer].
+		// [developer, user, assistant, user] = 40 tokens, limit 10 -> remove user, assistant, user -> [developer] = 10.
 		block := []Message{
 			TextMessage("developer", "dev"),
 			TextMessage("user", "1"),
 			TextMessage("assistant", "2"),
 			TextMessage("user", "3"),
 		}
-		s := NewTruncateOldestStrategy(ProtectRole("developer"), KeepUserAssistantPairs(true))
+		s := NewTruncateOldestStrategy(ProtectRole("developer"))
 		got, err := s.Apply(context.Background(), block, 40, 10, counter)
 		require.NoError(t, err)
 		require.Len(t, got, 1)
@@ -216,8 +247,8 @@ func TestTruncateOldestStrategy(t *testing.T) {
 }
 
 func TestTruncateOldestStrategy_BinarySearch(t *testing.T) {
-	// 100 messages, no ProtectRole / no KeepUserAssistantPairs -> binary search path.
-	// Binary search does O(log N) Count calls; for N=100 we expect at most ~7 (ceil(log2(100)) or 8 with margin).
+	// 100 messages, no ProtectRole / no KeepTurnAtomicity -> binary search path.
+	// O(1) truncation: one CountPerMessage call, then only arithmetic (no Count in loop).
 	msgs := make([]Message, 100)
 	for i := range 100 {
 		msgs[i] = TextMessage("user", "x")
@@ -225,12 +256,12 @@ func TestTruncateOldestStrategy_BinarySearch(t *testing.T) {
 	inner := &FixedCounter{TokensPerMessage: 1}
 	tracker := &countCallsCounter{inner: inner}
 	s := NewTruncateOldestStrategy()
-	limit := 50 // keep at most 50 messages
+	limit := 50
 	originalTokens := 100
 	got, err := s.Apply(context.Background(), msgs, originalTokens, limit, tracker)
 	require.NoError(t, err)
 	require.Len(t, got, 50)
-	assert.LessOrEqual(t, tracker.calls, 8, "binary search should use at most 8 Count calls for 100 messages")
+	assert.Equal(t, 1, tracker.calls, "truncate must call CountPerMessage once, not Count in loop")
 }
 
 // countCallsCounter delegates to inner and records the number of Count invocations.
@@ -242,6 +273,11 @@ type countCallsCounter struct {
 func (c *countCallsCounter) Count(ctx context.Context, msgs []Message) (int, error) {
 	c.calls++
 	return c.inner.Count(ctx, msgs)
+}
+
+func (c *countCallsCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	c.calls++
+	return c.inner.CountPerMessage(ctx, msgs)
 }
 
 // failAfterNCallsCounter fails from the Nth Count call; used to trigger errors inside strategy loop.
@@ -259,6 +295,14 @@ func (f *failAfterNCallsCounter) Count(ctx context.Context, msgs []Message) (int
 	return f.inner.Count(ctx, msgs)
 }
 
+func (f *failAfterNCallsCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	f.calls++
+	if f.calls >= f.n {
+		return nil, errors.New("count failed")
+	}
+	return f.inner.CountPerMessage(ctx, msgs)
+}
+
 // failWhenCountingCounter fails when Count is called with a single message matching role+summary text (for summarize strategy).
 type failWhenCountingCounter struct {
 	inner TokenCounter
@@ -271,19 +315,31 @@ func (f *failWhenCountingCounter) Count(ctx context.Context, msgs []Message) (in
 	return f.inner.Count(ctx, msgs)
 }
 
-// inconsistentCounter returns fullCount for full block, sliceCount for a smaller slice; used to simulate removed > total.
-type inconsistentCounter struct {
-	calls      int
-	fullCount  int // total for full block (e.g. 30)
-	sliceCount int // returned for slice to trigger removed > total (e.g. 100)
+func (f *failWhenCountingCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	if len(msgs) == 1 && msgs[0].Role == "system" && len(msgs[0].Content) == 1 && msgs[0].Content[0].Text == "summary" {
+		return nil, errors.New("count failed")
+	}
+	return f.inner.CountPerMessage(ctx, msgs)
 }
 
-func (c *inconsistentCounter) Count(_ context.Context, msgs []Message) (int, error) {
-	c.calls++
-	if len(msgs) == 3 {
-		return c.fullCount, nil
-	}
-	return c.sliceCount, nil
+func TestTruncateOldestStrategy_CountPerMessageWrongLength(t *testing.T) {
+	badCounter := &wrongLengthCounter{}
+	msgs := []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}
+	_, err := NewTruncateOldestStrategy().Apply(context.Background(), msgs, 20, 15, badCounter)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTokenCountFailed)
+	assert.Contains(t, err.Error(), "returned 1 weights for 2 messages")
+}
+
+type wrongLengthCounter struct{}
+
+func (wrongLengthCounter) Count(_ context.Context, msgs []Message) (int, error) {
+	return len(msgs) * 10, nil
+}
+
+func (wrongLengthCounter) CountPerMessage(_ context.Context, msgs []Message) ([]int, error) {
+	// Wrong: return one weight instead of len(msgs).
+	return []int{10}, nil
 }
 
 func TestNewSummarizeStrategy_NilPanics(t *testing.T) {
@@ -337,6 +393,7 @@ func TestSummarizeStrategy(t *testing.T) {
 		s := NewSummarizeStrategy(sum)
 		_, err := s.Apply(context.Background(), msgs, originalTokens, 5, failOnSummary)
 		require.Error(t, err)
+		require.ErrorIs(t, err, ErrTokenCountFailed)
 		assert.Contains(t, err.Error(), "count failed")
 	})
 }

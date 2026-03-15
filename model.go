@@ -44,7 +44,7 @@ type Message struct {
 	ToolCalls    []ToolCall
 	ToolCallID   string
 	Metadata     map[string]any
-	CacheControl map[string]any // Optional: cache hint for provider (e.g. ephemeral); set by Builder when block has CachePoint
+	CacheControl map[string]any // Optional: cache hint for provider; set by Builder from block.CacheControl when non-nil
 }
 
 // Tier is the priority level of a memory block (lower number = higher priority).
@@ -87,10 +87,12 @@ func (t Tier) String() string {
 // The library does not implement real tokenization; the caller injects an implementation.
 // Count must account for message structure (role, content parts, tool calls) and any
 // per-message overhead; no validation of content types or URLs in core.
+// CountPerMessage returns one weight per message (same order as msgs); used for O(1) eviction loops.
 // The context is passed from Compile and may be used for cancellation or timeouts
 // (e.g. when counting involves a network call to a tokenization service).
 type TokenCounter interface {
 	Count(ctx context.Context, msgs []Message) (int, error)
+	CountPerMessage(ctx context.Context, msgs []Message) ([]int, error)
 }
 
 // EvictionStrategy defines how to shrink or trim a block to fit the remaining budget.
@@ -112,24 +114,19 @@ type Summarizer interface {
 	Summarize(ctx context.Context, msgs []Message) (Message, error)
 }
 
-// CacheTypeEphemeral is the cache type value set on the last message of a block when CachePoint is true.
-const CacheTypeEphemeral = "ephemeral"
-
 // MemoryBlock is a logical group of messages with a Tier and an EvictionStrategy.
 // ID is used in CompileReport; empty ID is allowed.
 // MaxTokens is optional: when > 0 and less than the remaining global budget, Apply receives
 // this value as the limit so the block is capped locally (e.g. RAG block limited to 200 tokens).
-// CachePoint: when true, Compile sets the last message of this block's output with CacheControl
-// so the provider can treat it as a cache boundary (e.g. ephemeral cache).
-// CacheControl (string) is for other provider-specific caching rules; not interpreted in core.
+// CacheControl: when non-nil and non-empty, Compile sets the last message of this block's output
+// with this map so the provider can treat it as a cache boundary; not interpreted in core.
 type MemoryBlock struct {
 	ID           string
 	Messages     []Message
 	Tier         Tier
 	Strategy     EvictionStrategy
-	MaxTokens    int    // Optional: hard per-block token limit (0 = no limit)
-	CachePoint   bool   // If true, last message of block gets CacheControl set (e.g. type=ephemeral)
-	CacheControl string // Optional: caching rules for the block
+	MaxTokens    int            // Optional: hard per-block token limit (0 = no limit)
+	CacheControl map[string]any // Optional: applied to last message of block output when non-empty
 }
 
 // TextMessage creates a simple text-only message (single ContentPart with Type "text").

@@ -4,19 +4,19 @@ import "slices"
 
 // truncateConfig holds options for TruncateOldestStrategy.
 type truncateConfig struct {
-	keepPairs      bool
-	minMessages    int
-	protectedRoles []string // roles that must not be removed when truncating
+	keepTurnAtomicity bool
+	minMessages       int
+	protectedRoles    []string // roles that must not be removed when truncating
 }
 
 // TruncateOption configures TruncateOldestStrategy behavior.
 type TruncateOption func(*truncateConfig)
 
-// KeepUserAssistantPairs ensures messages are removed in user-assistant pairs
-// from the start, so that dialog coherence is preserved (no orphan user or assistant).
-func KeepUserAssistantPairs(keep bool) TruncateOption {
+// KeepTurnAtomicity ensures tool-call chains (assistant with ToolCalls + following tool results)
+// are removed or kept as a single unit, so that tool turns are not split.
+func KeepTurnAtomicity(keep bool) TruncateOption {
 	return func(c *truncateConfig) {
-		c.keepPairs = keep
+		c.keepTurnAtomicity = keep
 	}
 }
 
@@ -32,8 +32,8 @@ func MinMessages(n int) TruncateOption {
 }
 
 // ProtectRole marks a role so that messages with this role are never removed when truncating.
-// The first removable message (or user+assistant pair when KeepUserAssistantPairs is set) is
-// removed instead. Duplicate roles are not added; the config stays deduplicated.
+// The first removable message (or atomic tool-turn when KeepTurnAtomicity is set) is removed instead.
+// Duplicate roles are not added; the config stays deduplicated.
 func ProtectRole(role string) TruncateOption {
 	return func(c *truncateConfig) {
 		if slices.Contains(c.protectedRoles, role) {

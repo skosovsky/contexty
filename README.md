@@ -72,9 +72,9 @@ func main() {
 
 ## Key abstractions and contracts
 
-- **Token Counter** ([token.go](token.go)): Implement `TokenCounter` with `Count(ctx context.Context, msgs []Message) (int, error)`. The context is passed from `Compile` for cancellation and timeouts (e.g. when calling a remote tokenization service). Use [CharFallbackCounter](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter) for prototyping; optional [EstimateTool](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter.EstimateTool) for custom tool-call token weights. To plug in your own tokenizer (e.g. tiktoken), implement the interface and pass it in `AllocatorConfig.TokenCounter`.
-- **Strategies** ([strategies.go](strategies.go)): Built-in strategies — **Strict** (error if block does not fit), **Drop** (remove block), **Truncate** (remove oldest messages; options: KeepUserAssistantPairs, MinMessages, ProtectRole), **Summarize** (call your `Summarizer`). Custom strategies implement `Apply(ctx, msgs, originalTokens, limit, counter)` and must return messages whose total token count ≤ limit; `Compile` enforces this and returns `ErrStrategyExceededBudget` on violation.
-- **Formatter** ([formatter.go](formatter.go)): [InjectIntoSystem](https://pkg.go.dev/github.com/skosovsky/contexty#InjectIntoSystem)(systemMsg, formatter, facts...) merges formatted facts into a system message. Use [XMLFormatter](https://pkg.go.dev/github.com/skosovsky/contexty#XMLFormatter)("context") for `<context>`/`<fact>` XML, or [MarkdownListFormatter](https://pkg.go.dev/github.com/skosovsky/contexty#MarkdownListFormatter)("Context:") for a markdown list; only text parts are included; XML formatter escapes content. Example: `sys := contexty.InjectIntoSystem(systemMsg, contexty.XMLFormatter("context"), fact1, fact2)` or `contexty.MarkdownListFormatter("Context:")` for list output.
+- **Token Counter** ([token.go](token.go)): Implement `TokenCounter` with `Count(ctx, msgs) (int, error)` and `CountPerMessage(ctx, msgs) ([]int, error)` (one weight per message, same order; used for O(1) eviction). Context is passed from `Compile` for cancellation and timeouts. Use [CharFallbackCounter](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter) for prototyping; optional [EstimateTool](https://pkg.go.dev/github.com/skosovsky/contexty#CharFallbackCounter.EstimateTool) for custom tool-call token weights; [ToolCallOverhead](https://pkg.go.dev/github.com/skosovsky/contexty#ToolCallOverhead) is added per tool call. To plug in your own tokenizer, implement both methods and pass it in `AllocatorConfig.TokenCounter`.
+- **Strategies** ([strategies.go](strategies.go)): Built-in strategies — **Strict** (error if block does not fit), **Drop** (remove block), **Truncate** (remove oldest messages; options: KeepTurnAtomicity, MinMessages, ProtectRole), **Summarize** (call your `Summarizer`). Custom strategies implement `Apply(ctx, msgs, originalTokens, limit, counter)` and must return messages whose total token count ≤ limit; `Compile` enforces this and returns `ErrStrategyExceededBudget` on violation.
+- **Formatter** ([formatter.go](formatter.go)): [InjectIntoSystem](https://pkg.go.dev/github.com/skosovsky/contexty#InjectIntoSystem)(systemMsg, formatter, facts...) appends formatted facts as a new text `ContentPart` with a `\n\n` separator. Non-destructive for multimodal content: existing parts are preserved. Use [XMLFormatter](https://pkg.go.dev/github.com/skosovsky/contexty#XMLFormatter)("context") or [MarkdownListFormatter](https://pkg.go.dev/github.com/skosovsky/contexty#MarkdownListFormatter)("Context:"); only text from facts is included; XML formatter escapes content.
 - **Fact Extractor** ([factextractor.go](factextractor.go)): Interface for extracting facts from conversation history; reserved for v2 — the allocator does not use it yet.
 
 ## How limits are resolved
@@ -92,24 +92,33 @@ What gets dropped or truncated is thus determined by block order (tiers + AddBlo
 
 - **Message model**: [Message](https://pkg.go.dev/github.com/skosovsky/contexty#Message) has Role, Content (`[]ContentPart`), Name, ToolCalls, ToolCallID, Metadata. [ContentPart](https://pkg.go.dev/github.com/skosovsky/contexty#ContentPart): Type (e.g. `"text"`, `"image_url"`), Text, ImageURL. Helpers: [TextMessage](https://pkg.go.dev/github.com/skosovsky/contexty#TextMessage), [MultipartMessage](https://pkg.go.dev/github.com/skosovsky/contexty#MultipartMessage). Multimodal content is supported without provider-specific validation in core.
 - **Tiers**: System, Core, RAG, History, Scratchpad; lower number = higher priority. Custom tiers via `Tier(N)`.
-- **MemoryBlock**: ID, Messages, Tier, Strategy; optional **MaxTokens** (per-block token cap), **CachePoint** (set CacheControl on last message of block for provider cache boundary), **CacheControl** (string; for provider prompt caching; not interpreted in core).
+- **MemoryBlock**: ID, Messages, Tier, Strategy; optional **MaxTokens** (per-block token cap), **CacheControl** (`map[string]any`; when non-empty, applied to the last message of the block output for provider cache boundary; not interpreted in core). Example with custom cache map:
+
+```go
+builder.AddBlock(contexty.MemoryBlock{
+    ID: "system", Tier: contexty.TierSystem, Strategy: contexty.NewStrictStrategy(),
+    CacheControl: map[string]any{"type": "ephemeral"},
+    Messages:     []contexty.Message{contexty.TextMessage("system", "You are helpful.")},
+})
+```
+
 - **Builder**: [NewBuilder](https://pkg.go.dev/github.com/skosovsky/contexty#NewBuilder)(config), [AddBlock](https://pkg.go.dev/github.com/skosovsky/contexty#Builder.AddBlock), [Compile](https://pkg.go.dev/github.com/skosovsky/contexty#Builder.Compile)(ctx). A builder can be reused: call AddBlock and Compile multiple times; each Compile uses the current list of blocks (blocks are not cleared).
 - **Token counting**: You inject a `TokenCounter`; context is passed from Compile for cancellation/timeouts. CharFallbackCounter and optional EstimateTool; or your own implementation (e.g. tiktoken).
-- **Eviction strategies**: Strict, Drop, TruncateOldest (KeepUserAssistantPairs, MinMessages, ProtectRole), Summarize(Summarizer). Custom strategy: implement Apply; contract enforced by Compile. Eviction labels in report: `"rejected"`, `"dropped"`, `"truncated"`, `"summarized"`, or `"evicted"` for custom.
+- **Eviction strategies**: Strict, Drop, TruncateOldest (KeepTurnAtomicity, MinMessages, ProtectRole), Summarize(Summarizer). Custom strategy: implement Apply; contract enforced by Compile. Eviction labels in report: `"rejected"`, `"dropped"`, `"truncated"`, `"summarized"`, or `"evicted"` for custom.
 - **Summarizer**: Interface used by SummarizeStrategy: `Summarize(ctx, msgs) (Message, error)`.
 - **CompileReport**: TotalTokensUsed, RemainingTokens, OriginalTokens, OriginalTokensPerBlock, TokensPerBlock, Evictions, BlocksDropped (see below).
 - **Validation policy**: Minimal validation in core (no provider-specific role/URL/JSON checks). The only hard guarantee is `TotalTokensUsed ≤ MaxTokens`; strategy output is checked and `ErrStrategyExceededBudget` is returned on violation.
 
 ## Strategies at a glance
 
-| Strategy              | When to use                          | If block doesn't fit        |
-|-----------------------|--------------------------------------|-----------------------------|
-| `NewStrictStrategy()` | System persona, rules (must fit)     | Returns error               |
-| `NewDropStrategy()`   | RAG, optional facts                 | Block removed               |
-| `NewTruncateOldestStrategy(opts...)` | Chat history                  | Oldest messages removed; opts: KeepUserAssistantPairs, MinMessages, ProtectRole |
-| `NewSummarizeStrategy(summarizer)` | Long blocks to compress   | Summarizer called; else dropped |
+| Strategy                             | When to use                      | If block doesn't fit                                                            |
+| ------------------------------------ | -------------------------------- | ------------------------------------------------------------------------------- |
+| `NewStrictStrategy()`                | System persona, rules (must fit) | Returns error                                                                   |
+| `NewDropStrategy()`                  | RAG, optional facts              | Block removed                                                                   |
+| `NewTruncateOldestStrategy(opts...)` | Chat history                     | Oldest messages removed; opts: KeepTurnAtomicity, MinMessages, ProtectRole |
+| `NewSummarizeStrategy(summarizer)`   | Long blocks to compress          | Summarizer called; else dropped                                                 |
 
-Truncate options: `KeepUserAssistantPairs(true)` keeps user/assistant pairs; `MinMessages(n)` drops the block if fewer than n messages would remain; `ProtectRole("developer")` never removes messages with that role—the first removable message (or pair) is removed instead.
+Truncate options: `KeepTurnAtomicity(true)` keeps tool-call chains (assistant with ToolCalls + following tool results) as one unit so they are not split; `MinMessages(n)` drops the block if fewer than n messages would remain; `ProtectRole("developer")` never removes messages with that role—the first removable message or atomic tool-turn is removed instead.
 
 ## CompileReport
 
@@ -127,14 +136,14 @@ After `Compile(ctx)`:
 
 Use `errors.Is(err, contexty.Err...)` to handle specific failures:
 
-| Error | When |
-|-------|------|
-| `ErrInvalidConfig` | MaxTokens ≤ 0 or TokenCounter == nil |
-| `ErrNilStrategy` | A MemoryBlock has nil Strategy |
-| `ErrTokenCountFailed` | TokenCounter.Count returned an error |
-| `ErrBudgetExceeded` | StrictStrategy: block does not fit in remaining budget |
+| Error                       | When                                                                       |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `ErrInvalidConfig`          | MaxTokens ≤ 0 or TokenCounter == nil                                       |
+| `ErrNilStrategy`            | A MemoryBlock has nil Strategy                                             |
+| `ErrTokenCountFailed`       | TokenCounter.Count or CountPerMessage failed; or CountPerMessage returned wrong length (contract violation) |
+| `ErrBudgetExceeded`         | StrictStrategy: block does not fit in remaining budget                     |
 | `ErrStrategyExceededBudget` | Strategy returned messages exceeding remaining budget (contract violation) |
-| `ErrInvalidCharsPerToken` | CharFallbackCounter with CharsPerToken ≤ 0 |
+| `ErrInvalidCharsPerToken`   | CharFallbackCounter with CharsPerToken ≤ 0                                 |
 
 Example: if the system block with Strict strategy does not fit, `Compile` returns an error that wraps or equals `ErrBudgetExceeded`.
 

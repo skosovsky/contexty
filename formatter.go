@@ -2,6 +2,7 @@ package contexty
 
 import (
 	"html"
+	"slices"
 	"strings"
 )
 
@@ -51,18 +52,20 @@ func MarkdownListFormatter(header string) FactFormatter {
 	}
 }
 
-// InjectIntoSystem merges formatted facts into the system message. Only text parts (Type "text") of
-// systemMsg are used; other part types are ignored. If facts is empty, returns systemMsg unchanged.
-// The formatter is applied to facts to produce the injected string (e.g. XMLFormatter("context") or MarkdownListFormatter("Context:")).
+// InjectIntoSystem appends formatted facts to the system message as a new text ContentPart.
+// Non-destructive for multimodal content: existing Content parts are preserved; a new part with
+// "\n\n" + injected text is appended so existing text and images are unchanged.
+// If facts is empty, returns systemMsg unchanged.
 func InjectIntoSystem(systemMsg Message, formatter FactFormatter, facts ...Message) Message {
 	if len(facts) == 0 {
 		return systemMsg
 	}
 	injectedText := formatter(facts)
-	mergedText := textFromContent(systemMsg.Content) + "\n" + injectedText
+	content := slices.Clone(systemMsg.Content)
+	content = append(content, ContentPart{Type: "text", Text: "\n\n" + injectedText})
 	return Message{
 		Role:         systemMsg.Role,
-		Content:      []ContentPart{{Type: "text", Text: mergedText}},
+		Content:      content,
 		Name:         systemMsg.Name,
 		ToolCalls:    systemMsg.ToolCalls,
 		ToolCallID:   systemMsg.ToolCallID,

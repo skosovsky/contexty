@@ -9,6 +9,9 @@ import (
 // that are not Type "text" (e.g. image_url). No validation or network checks.
 const DefaultTokensPerNonTextPart = 85
 
+// ToolCallOverhead is the pessimistic token overhead added per tool call (structure, IDs, etc.).
+const ToolCallOverhead = 20
+
 // ToolCallEstimator returns the token weight of a single tool call.
 // When non-nil in CharFallbackCounter, it is used for ToolCalls instead of rune-based fallback.
 type ToolCallEstimator func(call ToolCall) int
@@ -30,44 +33,61 @@ type CharFallbackCounter struct {
 
 // Count returns the estimated token count for all messages.
 // Text from ContentPart (Type "text") is measured in runes; non-text parts use a constant weight.
-// ToolCalls: if EstimateTool is set, its result is summed; otherwise runes of Arguments+Name are used.
+// ToolCalls: if EstimateTool is set, its result is summed; otherwise runes of Arguments+Name are used, plus ToolCallOverhead per call.
 // Returns ErrInvalidCharsPerToken if CharsPerToken <= 0.
 func (c *CharFallbackCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	if c.CharsPerToken <= 0 {
-		return 0, ErrInvalidCharsPerToken
+	weights, err := c.CountPerMessage(ctx, msgs)
+	if err != nil {
+		return 0, err
 	}
-	_ = ctx // reserved for cancellation/timeouts in network-backed implementations
+	var sum int
+	for _, w := range weights {
+		sum += w
+	}
+	return sum, nil
+}
+
+// CountPerMessage returns one token weight per message in the same order as msgs.
+// Used by eviction strategies for O(1) truncation without re-counting in a loop.
+func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	if c.CharsPerToken <= 0 {
+		return nil, ErrInvalidCharsPerToken
+	}
+	_ = ctx
 	nonTextWeight := c.TokensPerNonTextPart
 	if nonTextWeight <= 0 {
 		nonTextWeight = DefaultTokensPerNonTextPart
 	}
-	var totalRunes int
-	var toolTokens int
-	for _, m := range msgs {
-		totalRunes += utf8.RuneCountInString(m.Name)
+	out := make([]int, len(msgs))
+	for i, m := range msgs {
+		var runes int
+		runes += utf8.RuneCountInString(m.Name)
 		for _, p := range m.Content {
 			if p.Type == "text" {
-				totalRunes += utf8.RuneCountInString(p.Text)
+				runes += utf8.RuneCountInString(p.Text)
 			} else {
-				totalRunes += nonTextWeight * c.CharsPerToken
+				runes += nonTextWeight * c.CharsPerToken
 			}
 		}
+		var toolTokens int
 		if len(m.ToolCalls) > 0 && c.EstimateTool != nil {
 			for _, tc := range m.ToolCalls {
-				toolTokens += c.EstimateTool(tc)
+				toolTokens += c.EstimateTool(tc) + ToolCallOverhead
 			}
 		} else {
 			for _, tc := range m.ToolCalls {
-				totalRunes += utf8.RuneCountInString(tc.Function.Arguments)
-				totalRunes += utf8.RuneCountInString(tc.Function.Name)
+				runes += utf8.RuneCountInString(tc.Function.Arguments)
+				runes += utf8.RuneCountInString(tc.Function.Name)
+				toolTokens += ToolCallOverhead
 			}
 		}
+		tokensFromRunes := 0
+		if runes > 0 {
+			tokensFromRunes = (runes + c.CharsPerToken - 1) / c.CharsPerToken
+		}
+		out[i] = tokensFromRunes + toolTokens
 	}
-	tokensFromRunes := 0
-	if totalRunes > 0 {
-		tokensFromRunes = (totalRunes + c.CharsPerToken - 1) / c.CharsPerToken
-	}
-	return tokensFromRunes + toolTokens, nil
+	return out, nil
 }
 
 // Compile-time interface check.
