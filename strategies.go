@@ -117,44 +117,58 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	}
 	cur := slices.Clone(msgs)
 	weightsCur := slices.Clone(weights)
+	deleted := make([]bool, len(cur))
 	total := originalTokens
-	maxIterations := len(cur)
-	for iter := 0; iter < maxIterations && total > limit && len(cur) > 0; iter++ {
-		i := 0
-		for i < len(cur) && protected != nil {
-			if _, ok := protected[cur[i].Role]; !ok {
-				break
+	searchStart := 0
+	for total > limit {
+		i := -1
+		for j := searchStart; j < len(cur); j++ {
+			if deleted[j] {
+				continue
 			}
-			i++
-		}
-		if i >= len(cur) {
+			if protected != nil {
+				if _, ok := protected[cur[j].Role]; ok {
+					continue
+				}
+			}
+			i = j
 			break
 		}
-		remove := 1
+		if i == -1 {
+			break
+		}
+		endIdx := i
 		if s.cfg.keepTurnAtomicity && cur[i].Role == "assistant" && len(cur[i].ToolCalls) > 0 {
-			remove = s.toolTurnBlockSize(cur, i)
+			endIdx = s.toolTurnBlockSize(cur, i, deleted)
 		}
-		removedSum := 0
-		for k := i; k < i+remove && k < len(weightsCur); k++ {
-			removedSum += weightsCur[k]
+		for k := i; k <= endIdx && k < len(cur); k++ {
+			if !deleted[k] {
+				deleted[k] = true
+				total -= weightsCur[k]
+			}
 		}
-		total -= removedSum
-		cur = append(cur[:i], cur[i+remove:]...)
-		weightsCur = append(weightsCur[:i], weightsCur[i+remove:]...)
-		if len(cur) == 0 {
-			return nil, nil
+		searchStart = endIdx + 1
+	}
+	out := make([]Message, 0, len(cur))
+	for idx, m := range cur {
+		if !deleted[idx] {
+			out = append(out, m)
 		}
 	}
-	if s.cfg.minMessages > 0 && len(cur) < s.cfg.minMessages {
+	if len(out) == 0 {
 		return nil, nil
 	}
-	return cur, nil
+	if s.cfg.minMessages > 0 && len(out) < s.cfg.minMessages {
+		return nil, nil
+	}
+	return out, nil
 }
 
-// toolTurnBlockSize returns the number of messages that form an atomic tool-turn block
+// toolTurnBlockSize returns the last index (inclusive) of the atomic tool-turn block
 // starting at startIdx (assistant with ToolCalls). Uses expectedIDs for strict matching
 // when ToolCallID is set; falls back to contiguous tool messages on anomaly or empty IDs.
-func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int) int {
+// When deleted is non-nil, skips indices j with deleted[j] when scanning for the block end.
+func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int, deleted []bool) int {
 	msg := cur[startIdx]
 	expectedIDs := make(map[string]bool)
 	for _, tc := range msg.ToolCalls {
@@ -165,6 +179,9 @@ func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int) 
 	expectedCount := len(msg.ToolCalls)
 	endIdx := startIdx
 	for j := startIdx + 1; j < len(cur); j++ {
+		if deleted != nil && deleted[j] {
+			continue
+		}
 		if cur[j].Role != "tool" {
 			break
 		}
@@ -180,7 +197,7 @@ func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int) 
 			break
 		}
 	}
-	return endIdx - startIdx + 1
+	return endIdx
 }
 
 // summarizeStrategy compresses the block via a Summarizer when it does not fit.
