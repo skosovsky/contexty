@@ -337,7 +337,7 @@ func (wrongLengthCounter) Count(_ context.Context, msgs []Message) (int, error) 
 	return len(msgs) * 10, nil
 }
 
-func (wrongLengthCounter) CountPerMessage(_ context.Context, msgs []Message) ([]int, error) {
+func (wrongLengthCounter) CountPerMessage(_ context.Context, _ []Message) ([]int, error) {
 	// Wrong: return one weight instead of len(msgs).
 	return []int{10}, nil
 }

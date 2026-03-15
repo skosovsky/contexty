@@ -85,15 +85,17 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	// using binary search with those options would break their semantics, so we use the
 	// sequential path when either option is set.
 	if len(s.cfg.protectedRoles) == 0 && !s.cfg.keepTurnAtomicity {
+		// Build suffix sums once so binary search can use O(1) lookup per iteration.
+		// suffixSum[i] = token count of msgs[i:]
+		suffixSum := make([]int, len(weights)+1)
+		for i := len(weights) - 1; i >= 0; i-- {
+			suffixSum[i] = suffixSum[i+1] + weights[i]
+		}
 		bestValidIdx := len(msgs)
 		low, high := 0, len(msgs)
 		for low <= high {
 			mid := low + (high-low)/2
-			suffixSum := 0
-			for k := mid; k < len(weights); k++ {
-				suffixSum += weights[k]
-			}
-			if suffixSum <= limit {
+			if suffixSum[mid] <= limit {
 				bestValidIdx = mid
 				high = mid - 1
 			} else {
