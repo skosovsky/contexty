@@ -83,10 +83,9 @@ func Example_injectIntoSystemXML() {
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact1"}}},
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact2"}}},
 	)
-	text := got.Content[0].Text
 	fmt.Println(got.Role)
-	fmt.Println(len(text) > 0 && text[:1] == "B")
-	fmt.Println(strings.Contains(text, "<context>") && strings.Contains(text, "<fact>"))
+	fmt.Println(got.Content[0].Text == "Base.")
+	fmt.Println(len(got.Content) == 2 && strings.Contains(got.Content[1].Text, "<context>") && strings.Contains(got.Content[1].Text, "<fact>"))
 	// Output:
 	// system
 	// true
@@ -112,11 +111,12 @@ func ExampleInjectIntoSystem_markdown() {
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact A"}}},
 		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact B"}}},
 	)
-	text := got.Content[0].Text
+	// Injected facts are in the second ContentPart (non-destructive append).
+	injected := got.Content[1].Text
 	fmt.Println(got.Role)
-	fmt.Println(strings.Contains(text, "### Context:\n"))
-	fmt.Println(strings.Contains(text, "- Fact A\n"))
-	fmt.Println(strings.Contains(text, "- Fact B\n"))
+	fmt.Println(strings.Contains(injected, "### Context:\n"))
+	fmt.Println(strings.Contains(injected, "- Fact A\n"))
+	fmt.Println(strings.Contains(injected, "- Fact B\n"))
 	// Output:
 	// system
 	// true

@@ -15,18 +15,32 @@ type FixedCounter struct {
 
 // Count returns the sum over msgs of (base + len(Content)*TokensPerContentPart + len(ToolCalls)*TokensPerToolCall).
 func (c *FixedCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	_ = ctx
+	weights, err := c.CountPerMessage(ctx, msgs)
+	if err != nil {
+		return 0, err
+	}
 	var total int
-	for _, m := range msgs {
-		total += c.TokensPerMessage
-		if c.TokensPerContentPart != 0 {
-			total += len(m.Content) * c.TokensPerContentPart
-		}
-		if c.TokensPerToolCall != 0 {
-			total += len(m.ToolCalls) * c.TokensPerToolCall
-		}
+	for _, w := range weights {
+		total += w
 	}
 	return total, nil
+}
+
+// CountPerMessage returns one weight per message: TokensPerMessage + optional ContentPart/ToolCall extras.
+func (c *FixedCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	_ = ctx
+	out := make([]int, len(msgs))
+	for i, m := range msgs {
+		w := c.TokensPerMessage
+		if c.TokensPerContentPart != 0 {
+			w += len(m.Content) * c.TokensPerContentPart
+		}
+		if c.TokensPerToolCall != 0 {
+			w += len(m.ToolCalls) * c.TokensPerToolCall
+		}
+		out[i] = w
+	}
+	return out, nil
 }
 
 // Compile-time interface check for testing helper.

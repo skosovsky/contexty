@@ -44,7 +44,7 @@ func TestMarkdownListFormatter(t *testing.T) {
 
 func TestInjectIntoSystem(t *testing.T) {
 	xmlF := XMLFormatter("context")
-	t.Run("empty blocks returns systemMsg as-is", func(t *testing.T) {
+	t.Run("empty facts returns systemMsg as-is", func(t *testing.T) {
 		sys := TextMessage("system", "You are helpful.")
 		got := InjectIntoSystem(sys, xmlF)
 		assert.Equal(t, sys.Role, got.Role)
@@ -63,14 +63,16 @@ func TestInjectIntoSystem(t *testing.T) {
 		assert.Equal(t, "system", got.Role)
 	})
 
-	t.Run("two blocks", func(t *testing.T) {
+	t.Run("two blocks appends part with separator", func(t *testing.T) {
 		sys := TextMessage("system", "Base")
 		got := InjectIntoSystem(sys, xmlF,
 			Message{Content: []ContentPart{{Type: "text", Text: "Fact1"}}},
 			Message{Content: []ContentPart{{Type: "text", Text: "Fact2"}}},
 		)
-		text := messageText(got)
-		assert.True(t, strings.HasPrefix(text, "Base\n<context>"))
+		require.Len(t, got.Content, 2)
+		assert.Equal(t, "Base", got.Content[0].Text)
+		text := got.Content[1].Text
+		assert.True(t, strings.HasPrefix(text, "\n\n<context>"))
 		assert.Contains(t, text, "<fact>Fact1</fact>")
 		assert.Contains(t, text, "<fact>Fact2</fact>")
 		assert.True(t, strings.HasSuffix(text, "</context>"))
@@ -90,7 +92,7 @@ func TestInjectIntoSystem(t *testing.T) {
 		require.Contains(t, text, "&lt;/context&gt;")
 	})
 
-	t.Run("multimodal block with text and image_url returns only text", func(t *testing.T) {
+	t.Run("multimodal: preserves existing content and appends text part", func(t *testing.T) {
 		sys := TextMessage("system", "You are helpful.")
 		block := Message{
 			Content: []ContentPart{
@@ -99,7 +101,8 @@ func TestInjectIntoSystem(t *testing.T) {
 			},
 		}
 		got := InjectIntoSystem(sys, xmlF, block)
-		require.Len(t, got.Content, 1)
+		require.Len(t, got.Content, 2)
+		assert.Equal(t, "You are helpful.", got.Content[0].Text)
 		text := messageText(got)
 		require.Contains(t, text, "Fact with text")
 		require.NotContains(t, text, "https://example.com")

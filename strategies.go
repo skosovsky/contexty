@@ -53,7 +53,7 @@ type truncateOldestStrategy struct {
 }
 
 // NewTruncateOldestStrategy returns a strategy that truncates from the oldest messages.
-// Options: KeepUserAssistantPairs, MinMessages, ProtectRole.
+// Options: KeepTurnAtomicity, MinMessages, ProtectRole.
 func NewTruncateOldestStrategy(opts ...TruncateOption) EvictionStrategy {
 	cfg := truncateConfig{}
 	for _, opt := range opts {
@@ -72,33 +72,39 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	if originalTokens <= limit {
 		return msgs, nil
 	}
+	weights, err := counter.CountPerMessage(ctx, msgs)
+	if err != nil {
+		return nil, fmt.Errorf("contexty: truncate: %w: %w", ErrTokenCountFailed, err)
+	}
+	if len(weights) != len(msgs) {
+		return nil, fmt.Errorf("token counter returned %d weights for %d messages: %w", len(weights), len(msgs), ErrTokenCountFailed)
+	}
 	// Binary search (suffix-based: "keep from index i") is only valid when we are free to drop
-	// any prefix by index. ProtectRole and KeepUserAssistantPairs require removing the "first
-	// removable" message or pair, which is not the same as cutting at an arbitrary index;
-	// using binary search with those options would break their semantics, so we keep the
+	// any prefix by index. ProtectRole and KeepTurnAtomicity require removing the "first
+	// removable" message or atomic tool-turn, which is not the same as cutting at an arbitrary index;
+	// using binary search with those options would break their semantics, so we use the
 	// sequential path when either option is set.
-	if len(s.cfg.protectedRoles) == 0 && !s.cfg.keepPairs {
-		cur := slices.Clone(msgs)
-		bestValidIdx := len(cur)
-		low, high := 0, len(cur)
+	if len(s.cfg.protectedRoles) == 0 && !s.cfg.keepTurnAtomicity {
+		bestValidIdx := len(msgs)
+		low, high := 0, len(msgs)
 		for low <= high {
 			mid := low + (high-low)/2
-			count, err := counter.Count(ctx, cur[mid:])
-			if err != nil {
-				return nil, fmt.Errorf("contexty: truncate: %w: %w", ErrTokenCountFailed, err)
+			suffixSum := 0
+			for k := mid; k < len(weights); k++ {
+				suffixSum += weights[k]
 			}
-			if count <= limit {
+			if suffixSum <= limit {
 				bestValidIdx = mid
 				high = mid - 1
 			} else {
 				low = mid + 1
 			}
 		}
-		out := cur[bestValidIdx:]
+		out := msgs[bestValidIdx:]
 		if s.cfg.minMessages > 0 && len(out) < s.cfg.minMessages {
 			return nil, nil
 		}
-		return out, nil
+		return slices.Clone(out), nil
 	}
 	var protected map[string]struct{}
 	if len(s.cfg.protectedRoles) > 0 {
@@ -108,10 +114,10 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 		}
 	}
 	cur := slices.Clone(msgs)
+	weightsCur := slices.Clone(weights)
 	total := originalTokens
 	maxIterations := len(cur)
 	for iter := 0; iter < maxIterations && total > limit && len(cur) > 0; iter++ {
-		// Find first removable index (skip protected roles from the start).
 		i := 0
 		for i < len(cur) && protected != nil {
 			if _, ok := protected[cur[i].Role]; !ok {
@@ -120,32 +126,59 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 			i++
 		}
 		if i >= len(cur) {
-			break // all remaining messages are protected
+			break
 		}
 		remove := 1
-		if s.cfg.keepPairs && i+1 < len(cur) && cur[i].Role == "user" && cur[i+1].Role == "assistant" {
-			remove = 2
+		if s.cfg.keepTurnAtomicity && cur[i].Role == "assistant" && len(cur[i].ToolCalls) > 0 {
+			remove = s.toolTurnBlockSize(cur, i)
 		}
+		removedSum := 0
+		for k := i; k < i+remove && k < len(weightsCur); k++ {
+			removedSum += weightsCur[k]
+		}
+		total -= removedSum
 		cur = append(cur[:i], cur[i+remove:]...)
+		weightsCur = append(weightsCur[:i], weightsCur[i+remove:]...)
 		if len(cur) == 0 {
 			return nil, nil
 		}
-		var err error
-		total, err = counter.Count(ctx, cur)
-		if err != nil {
-			return nil, fmt.Errorf("contexty: truncate: %w", err)
-		}
-		if total > originalTokens {
-			return nil, fmt.Errorf("contexty: truncate: %w: count exceeded original", ErrTokenCountFailed)
-		}
-	}
-	if len(cur) == 0 {
-		return nil, nil
 	}
 	if s.cfg.minMessages > 0 && len(cur) < s.cfg.minMessages {
 		return nil, nil
 	}
 	return cur, nil
+}
+
+// toolTurnBlockSize returns the number of messages that form an atomic tool-turn block
+// starting at startIdx (assistant with ToolCalls). Uses expectedIDs for strict matching
+// when ToolCallID is set; falls back to contiguous tool messages on anomaly or empty IDs.
+func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int) int {
+	msg := cur[startIdx]
+	expectedIDs := make(map[string]bool)
+	for _, tc := range msg.ToolCalls {
+		if tc.ID != "" {
+			expectedIDs[tc.ID] = true
+		}
+	}
+	expectedCount := len(msg.ToolCalls)
+	endIdx := startIdx
+	for j := startIdx + 1; j < len(cur); j++ {
+		if cur[j].Role != "tool" {
+			break
+		}
+		if cur[j].ToolCallID != "" {
+			if !expectedIDs[cur[j].ToolCallID] {
+				break
+			}
+			delete(expectedIDs, cur[j].ToolCallID)
+		}
+		endIdx = j
+		expectedCount--
+		if expectedCount <= 0 && len(expectedIDs) == 0 {
+			break
+		}
+	}
+	return endIdx - startIdx + 1
 }
 
 // summarizeStrategy compresses the block via a Summarizer when it does not fit.
@@ -177,7 +210,7 @@ func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, originalT
 	}
 	summaryTokens, err := counter.Count(ctx, []Message{summary})
 	if err != nil {
-		return nil, fmt.Errorf("contexty: summarize: %w", err)
+		return nil, fmt.Errorf("contexty: summarize: %w: %w", ErrTokenCountFailed, err)
 	}
 	if summaryTokens > limit {
 		return nil, nil

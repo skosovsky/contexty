@@ -37,6 +37,10 @@ func (errorCounter) Count(context.Context, []Message) (int, error) {
 	return 0, errors.New("boom")
 }
 
+func (errorCounter) CountPerMessage(context.Context, []Message) ([]int, error) {
+	return nil, errors.New("boom")
+}
+
 func TestCompile_TokenCounterError(t *testing.T) {
 	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: errorCounter{}})
 	b.AddBlock(MemoryBlock{
@@ -61,6 +65,14 @@ func (f *failOnNthCallCounter) Count(ctx context.Context, msgs []Message) (int, 
 		return 0, errors.New("count failed")
 	}
 	return f.inner.Count(ctx, msgs)
+}
+
+func (f *failOnNthCallCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	f.calls++
+	if f.calls >= f.n {
+		return nil, errors.New("count failed")
+	}
+	return f.inner.CountPerMessage(ctx, msgs)
 }
 
 func TestCompile_TokenCounterErrorOnRecount(t *testing.T) {
@@ -387,15 +399,17 @@ func TestCompile_DuplicateBlockID(t *testing.T) {
 	assert.Equal(t, 1, report.TokensPerBlock["dup"])
 }
 
-func TestBuilder_CachePoint(t *testing.T) {
+func TestBuilder_CacheControl(t *testing.T) {
 	counter := &FixedCounter{TokensPerMessage: 1}
+	blockMsgs := []Message{
+		TextMessage("system", "You are helpful."),
+		TextMessage("system", "Rules: be concise."),
+	}
 	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: counter})
 	b.AddBlock(MemoryBlock{
-		ID: "system", Tier: TierSystem, Strategy: NewStrictStrategy(), CachePoint: true,
-		Messages: []Message{
-			TextMessage("system", "You are helpful."),
-			TextMessage("system", "Rules: be concise."),
-		},
+		ID: "system", Tier: TierSystem, Strategy: NewStrictStrategy(),
+		CacheControl: map[string]any{"type": "ephemeral"},
+		Messages:     blockMsgs,
 	})
 	b.AddBlock(MemoryBlock{
 		ID: "scratch", Tier: TierScratchpad, Strategy: NewStrictStrategy(),
@@ -411,13 +425,16 @@ func TestBuilder_CachePoint(t *testing.T) {
 			withCache++
 			typ, ok := m.CacheControl["type"]
 			require.True(t, ok, "message %d: CacheControl should have 'type'", i)
-			assert.Equal(t, CacheTypeEphemeral, typ, "message %d: type should be ephemeral", i)
+			assert.Equal(t, "ephemeral", typ, "message %d: type should be ephemeral", i)
 		}
 	}
 	assert.Equal(t, 1, withCache, "exactly one message should have CacheControl")
-	// That message must be the last of the first block (index 1: "Rules: be concise.").
 	assert.NotNil(t, msgs[1].CacheControl)
 	assert.Equal(t, "Rules: be concise.", msgs[1].Content[0].Text)
+	// Compile must not mutate the original block.Messages.
+	for i := range blockMsgs {
+		assert.Nil(t, blockMsgs[i].CacheControl, "original block message %d must not have CacheControl set", i)
+	}
 }
 
 func FuzzCompile(f *testing.F) {

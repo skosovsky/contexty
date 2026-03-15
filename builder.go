@@ -111,10 +111,12 @@ func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error)
 			report.Evictions[block.ID] = eviction
 		}
 		if len(out) > 0 {
-			if block.CachePoint {
-				clonedLast := out[len(out)-1]
-				clonedLast.CacheControl = map[string]any{"type": CacheTypeEphemeral}
-				out[len(out)-1] = clonedLast
+			if len(block.CacheControl) > 0 {
+				out = slices.Clone(out)
+				lastIdx := len(out) - 1
+				clonedLast := out[lastIdx]
+				clonedLast.CacheControl = block.CacheControl
+				out[lastIdx] = clonedLast
 			}
 			used, err := counter.Count(ctx, out)
 			if err != nil {

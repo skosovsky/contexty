@@ -67,7 +67,7 @@ func buildAgentContext(ctx context.Context) ([]contexty.Message, error) {
 		ID:   "chat_history",
 		Tier: contexty.TierHistory,
 		Strategy: contexty.NewTruncateOldestStrategy(
-			contexty.KeepUserAssistantPairs(true),
+			contexty.KeepTurnAtomicity(true),
 			contexty.MinMessages(2),
 		),
 		Messages: fetchChatHistoryFromDB(),

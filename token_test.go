@@ -54,6 +54,43 @@ func TestFixedCounter_Count(t *testing.T) {
 	assert.Equal(t, 10, got)
 }
 
+func TestFixedCounter_CountPerMessage(t *testing.T) {
+	ctx := context.Background()
+	msgs := []Message{
+		TextMessage("user", "a"),
+		TextMessage("assistant", "b"),
+		TextMessage("user", "c"),
+	}
+	c := &FixedCounter{TokensPerMessage: 5}
+	weights, err := c.CountPerMessage(ctx, msgs)
+	require.NoError(t, err)
+	require.Len(t, weights, len(msgs), "CountPerMessage must return one weight per message")
+	var sum int
+	for _, w := range weights {
+		sum += w
+	}
+	total, _ := c.Count(ctx, msgs)
+	assert.Equal(t, total, sum, "sum of weights must equal Count result")
+}
+
+func TestCharFallbackCounter_CountPerMessage(t *testing.T) {
+	ctx := context.Background()
+	msgs := []Message{
+		TextMessage("user", "hello"),
+		TextMessage("assistant", "world"),
+	}
+	c := &CharFallbackCounter{CharsPerToken: 4}
+	weights, err := c.CountPerMessage(ctx, msgs)
+	require.NoError(t, err)
+	require.Len(t, weights, len(msgs), "CountPerMessage must return one weight per message")
+	var sum int
+	for _, w := range weights {
+		sum += w
+	}
+	total, _ := c.Count(ctx, msgs)
+	assert.Equal(t, total, sum, "sum of weights must equal Count result")
+}
+
 func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
 	ctx := context.Background()
 	// Message with text "ab" (2 runes) and one ToolCall. Without EstimateTool: (2+2)/4 = 1 token (Name empty, Arguments "{}" = 2 runes).
@@ -66,16 +103,16 @@ func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
 			Function: FunctionCall{Name: "foo", Arguments: "{}"},
 		}},
 	}}
-	// With EstimateTool returning 10 per call: text tokens 1 + tool 10 = 11.
+	// With EstimateTool returning 10 per call: text tokens 1 + (10 + ToolCallOverhead) = 1 + 30 = 31.
 	c := &CharFallbackCounter{CharsPerToken: 4, EstimateTool: func(_ ToolCall) int { return 10 }}
 	got, err := c.Count(ctx, msgs)
 	require.NoError(t, err)
-	assert.Equal(t, 11, got, "text tokens (1) + EstimateTool(10) = 11")
-	// Without EstimateTool: runes from text (2) + Name (0) + Function.Name (3) + Arguments (2) = 7 runes -> 2 tokens.
+	assert.Equal(t, 31, got, "text tokens (1) + EstimateTool(10) + ToolCallOverhead(20) = 31")
+	// Without EstimateTool: runes -> 2 tokens + ToolCallOverhead(20) = 22.
 	cNoEst := &CharFallbackCounter{CharsPerToken: 4}
 	gotNoEst, err := cNoEst.Count(ctx, msgs)
 	require.NoError(t, err)
-	assert.Equal(t, 2, gotNoEst, "rune-based fallback for tool call")
+	assert.Equal(t, 22, gotNoEst, "rune-based fallback (2 tokens) + ToolCallOverhead(20) = 22")
 }
 
 func FuzzCharFallbackCounter(f *testing.F) {
