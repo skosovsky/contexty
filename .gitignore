@@ -1,5 +1,8 @@
 coverage.out
 *.test
+*.exe
 .DS_Store
 vendor/
 .cursor/
+.serena/
+.cache/

@@ -11,7 +11,7 @@ import (
 type strictStrategy struct{}
 
 // NewStrictStrategy returns a strategy that fails with ErrBudgetExceeded when the block exceeds the limit.
-// Use for TierSystem and other blocks that must never be evicted.
+// Use for blocks that must never be evicted.
 func NewStrictStrategy() EvictionStrategy {
 	return &strictStrategy{}
 }
@@ -31,7 +31,7 @@ func (s *strictStrategy) Apply(ctx context.Context, msgs []Message, originalToke
 type dropStrategy struct{}
 
 // NewDropStrategy returns a strategy that drops the block entirely when it exceeds the limit.
-// Use for RAG or other optional blocks where partial content is worse than none.
+// Use for optional blocks where partial content is worse than none.
 func NewDropStrategy() EvictionStrategy {
 	return &dropStrategy{}
 }
@@ -44,6 +44,42 @@ func (s *dropStrategy) Apply(ctx context.Context, msgs []Message, originalTokens
 		return nil, nil
 	}
 	return msgs, nil
+}
+
+// dropTailStrategy removes messages from the end until the block fits.
+type dropTailStrategy struct{}
+
+// NewDropTailStrategy returns a strategy that removes trailing messages one by one until the block fits.
+func NewDropTailStrategy() EvictionStrategy {
+	return &dropTailStrategy{}
+}
+
+func (s *dropTailStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("contexty: drop tail: %w", err)
+	}
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	if originalTokens <= limit {
+		return msgs, nil
+	}
+
+	out := slices.Clone(msgs)
+	for len(out) > 1 {
+		out = out[:len(out)-1]
+		tokens, err := counter.Count(ctx, out)
+		if err != nil {
+			return nil, fmt.Errorf("contexty: drop tail: %w: %w", ErrTokenCountFailed, err)
+		}
+		if tokens <= limit {
+			return out, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("contexty: drop tail: %w", err)
+		}
+	}
+	return nil, ErrBlockTooLarge
 }
 
 // truncateOldestStrategy removes messages from the start until the block fits.
@@ -241,6 +277,7 @@ func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, originalT
 var (
 	_ EvictionStrategy = (*strictStrategy)(nil)
 	_ EvictionStrategy = (*dropStrategy)(nil)
+	_ EvictionStrategy = (*dropTailStrategy)(nil)
 	_ EvictionStrategy = (*truncateOldestStrategy)(nil)
 	_ EvictionStrategy = (*summarizeStrategy)(nil)
 )

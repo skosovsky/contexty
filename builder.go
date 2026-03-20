@@ -1,152 +1,139 @@
 package contexty
 
 import (
-	"cmp"
 	"context"
 	"fmt"
-	"slices"
 )
 
-// AllocatorConfig configures the token budget and how to count tokens.
-type AllocatorConfig struct {
-	MaxTokens    int          // Total token budget (must be > 0)
-	TokenCounter TokenCounter // Required; used by Compile
+type registeredBlock struct {
+	name  string
+	block MemoryBlock
 }
 
-// CompileReport describes what happened during Compile: token usage and evictions.
-type CompileReport struct {
-	TotalTokensUsed        int               // Total tokens in the final result
-	OriginalTokens         int               // Total tokens before eviction (all blocks considered)
-	RemainingTokens        int               // MaxTokens minus TotalTokensUsed after compile
-	OriginalTokensPerBlock map[string]int    // Block ID -> tokens before eviction (before strategy applied)
-	TokensPerBlock         map[string]int    // Block ID -> tokens used in output
-	Evictions              map[string]string // Block ID -> strategy applied ("rejected", "dropped", "truncated", "summarized")
-	BlocksDropped          []string          // IDs of blocks completely removed (may contain duplicates if multiple blocks shared the same ID)
-}
-
-// Builder collects memory blocks and compiles them into a single message slice within the token budget.
-// A Builder can be reused: call AddBlock and Compile multiple times. Each Compile uses the current
-// list of blocks (blocks are not cleared after Compile). For a fresh compile, create a new Builder.
+// Builder collects named memory blocks and builds them into a final message slice within the token budget.
+// A Builder can be reused: call AddBlock and Build multiple times. Each Build uses the current
+// list of registered blocks (blocks are not cleared after Build). For a fresh build, create a new Builder.
 type Builder struct {
-	config AllocatorConfig
-	blocks []MemoryBlock
+	maxTokens int
+	counter   TokenCounter
+	formatter Formatter
+	blocks    []registeredBlock
 }
 
-// NewBuilder returns a new Builder with the given config. Config is not validated until Compile.
-func NewBuilder(cfg AllocatorConfig) *Builder {
+// NewBuilder returns a new Builder with the given token budget and counter.
+// Arguments are validated when Build is called.
+func NewBuilder(maxTokens int, counter TokenCounter) *Builder {
 	return &Builder{
-		config: cfg,
-		blocks: nil,
+		maxTokens: maxTokens,
+		counter:   counter,
 	}
 }
 
-// AddBlock appends a block and returns the builder for chaining.
-func (b *Builder) AddBlock(block MemoryBlock) *Builder {
-	b.blocks = append(b.blocks, block)
+// AddBlock appends a named block and returns the builder for chaining.
+// The builder snapshots the provided block so later caller mutation does not
+// affect future builds. Panics if name is empty.
+func (b *Builder) AddBlock(name string, block MemoryBlock) *Builder {
+	if name == "" {
+		panic("contexty: AddBlock called with empty name")
+	}
+	b.blocks = append(b.blocks, registeredBlock{
+		name:  name,
+		block: cloneBlock(block),
+	})
 	return b
 }
 
-// Compile assembles all blocks into a single []Message that fits within MaxTokens.
-// Blocks are processed in Tier order (stable sort); within the same Tier, insertion order is kept.
-// Returns the final messages, a report, and an error (e.g. invalid config or StrictStrategy overflow).
-// Compile can be called multiple times on the same Builder; each call uses the current blocks.
-func (b *Builder) Compile(ctx context.Context) ([]Message, CompileReport, error) {
-	if b.config.MaxTokens <= 0 || b.config.TokenCounter == nil {
-		return nil, CompileReport{}, ErrInvalidConfig
+// WithFormatter sets the formatter used to assemble post-eviction blocks.
+// Panics if f is nil.
+func (b *Builder) WithFormatter(f Formatter) *Builder {
+	if f == nil {
+		panic("contexty: WithFormatter called with nil Formatter")
 	}
-	counter := b.config.TokenCounter
-	report := CompileReport{
-		TokensPerBlock:         make(map[string]int),
-		OriginalTokensPerBlock: make(map[string]int),
-		Evictions:              make(map[string]string),
+	b.formatter = f
+	return b
+}
+
+// Build assembles all blocks into a final []Message that fits within maxTokens.
+// Blocks are budgeted strictly in AddBlock registration order. Each build
+// creates fresh post-eviction snapshots before invoking the formatter, so the
+// builder remains repeatable even if strategies or formatters mutate their input.
+func (b *Builder) Build(ctx context.Context) ([]Message, error) {
+	if b.maxTokens <= 0 || b.counter == nil {
+		return nil, ErrInvalidConfig
 	}
+	counter := b.counter
+	remaining := b.maxTokens
+	postEviction := make([]NamedBlock, 0, len(b.blocks))
 
-	// Stable sort by Tier
-	sorted := slices.Clone(b.blocks)
-	slices.SortStableFunc(sorted, func(x, y MemoryBlock) int {
-		return cmp.Compare(x.Tier, y.Tier)
-	})
-
-	var result []Message
-	remaining := b.config.MaxTokens
-
-	for _, block := range sorted {
+	for _, registered := range b.blocks {
 		if err := ctx.Err(); err != nil {
-			return nil, CompileReport{}, fmt.Errorf("contexty: compile: %w", err)
+			return nil, fmt.Errorf("contexty: build: %w", err)
 		}
+		block := cloneBlock(registered.block)
 		if len(block.Messages) == 0 {
 			continue
 		}
 		if block.Strategy == nil {
-			return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, ErrNilStrategy)
+			return nil, fmt.Errorf("block %q: %w", registered.name, ErrNilStrategy)
 		}
 		blockTokens, err := counter.Count(ctx, block.Messages)
 		if err != nil {
-			return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
+			return nil, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
 		}
-		report.OriginalTokens += blockTokens
-		report.OriginalTokensPerBlock[block.ID] = blockTokens
 
 		blockBudget := remaining
-		if block.MaxTokens > 0 && block.MaxTokens < remaining {
+		if block.MaxTokens > 0 && block.MaxTokens < blockBudget {
 			blockBudget = block.MaxTokens
 		}
-
 		var out []Message
-		var eviction string
 		if blockTokens <= blockBudget {
-			out = block.Messages
+			out = cloneMessages(block.Messages)
 		} else {
 			out, err = block.Strategy.Apply(ctx, block.Messages, blockTokens, blockBudget, counter)
 			if err != nil {
-				return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, err)
+				return nil, fmt.Errorf("block %q: %w", registered.name, err)
 			}
-			eviction = evictionLabel(block.Strategy)
-			if len(out) == 0 {
-				report.BlocksDropped = append(report.BlocksDropped, block.ID)
-			}
-		}
-
-		if eviction != "" {
-			report.Evictions[block.ID] = eviction
 		}
 		if len(out) > 0 {
+			out = cloneMessages(out)
 			if len(block.CacheControl) > 0 {
-				out = slices.Clone(out)
 				lastIdx := len(out) - 1
-				clonedLast := out[lastIdx]
-				clonedLast.CacheControl = block.CacheControl
-				out[lastIdx] = clonedLast
+				out[lastIdx].CacheControl = cloneMap(block.CacheControl)
 			}
 			used, err := counter.Count(ctx, out)
 			if err != nil {
-				return nil, CompileReport{}, fmt.Errorf("block %q: %w: %w", block.ID, ErrTokenCountFailed, err)
+				return nil, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
 			}
-			if used > remaining {
-				return nil, CompileReport{}, fmt.Errorf("block %q: %w", block.ID, ErrStrategyExceededBudget)
+			if used > blockBudget {
+				return nil, fmt.Errorf("block %q: %w", registered.name, ErrStrategyExceededBudget)
 			}
-			report.TokensPerBlock[block.ID] = used
 			remaining -= used
-			report.TotalTokensUsed += used
-			result = append(result, out...)
+			postEviction = append(postEviction, NamedBlock{
+				Name: registered.name,
+				Block: MemoryBlock{
+					Strategy:     block.Strategy,
+					Messages:     out,
+					MaxTokens:    block.MaxTokens,
+					CacheControl: cloneMap(block.CacheControl),
+				},
+			})
 		}
 	}
 
-	report.RemainingTokens = b.config.MaxTokens - report.TotalTokensUsed
-	return result, report, nil
-}
-
-func evictionLabel(s EvictionStrategy) string {
-	switch s.(type) {
-	case *strictStrategy:
-		return "rejected"
-	case *dropStrategy:
-		return "dropped"
-	case *truncateOldestStrategy:
-		return "truncated"
-	case *summarizeStrategy:
-		return "summarized"
-	default:
-		return "evicted"
+	formatter := b.formatter
+	if formatter == nil {
+		formatter = DefaultFormatter{}
 	}
+	finalMessages, err := formatter.Format(ctx, cloneNamedBlocks(postEviction))
+	if err != nil {
+		return nil, fmt.Errorf("contexty: format: %w", err)
+	}
+	finalTokens, err := counter.Count(ctx, finalMessages)
+	if err != nil {
+		return nil, fmt.Errorf("contexty: format: %w: %w", ErrTokenCountFailed, err)
+	}
+	if finalTokens > b.maxTokens {
+		return nil, fmt.Errorf("contexty: format: %w", ErrFormatterExceededBudget)
+	}
+	return finalMessages, nil
 }

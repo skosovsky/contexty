@@ -9,479 +9,325 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCompile_Validation(t *testing.T) {
-	counter := &FixedCounter{TokensPerMessage: 1}
-	tests := []struct {
-		name   string
-		maxTok int
-		tc     TokenCounter
-	}{
-		{"MaxTokens zero", 0, counter},
-		{"MaxTokens negative", -1, counter},
-		{"TokenCounter nil", 100, nil},
+type formatterFunc func(context.Context, []NamedBlock) ([]Message, error)
+
+func (f formatterFunc) Format(ctx context.Context, blocks []NamedBlock) ([]Message, error) {
+	return f(ctx, blocks)
+}
+
+type stubSummarizer struct {
+	calls  int
+	result Message
+	err    error
+}
+
+func (s *stubSummarizer) Summarize(_ context.Context, _ []Message) (Message, error) {
+	s.calls++
+	if s.err != nil {
+		return Message{}, s.err
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			b := NewBuilder(AllocatorConfig{MaxTokens: tt.maxTok, TokenCounter: tt.tc})
-			_, _, err := b.Compile(context.Background())
-			require.Error(t, err)
-			assert.ErrorIs(t, err, ErrInvalidConfig)
-		})
-	}
+	return s.result, nil
 }
 
-// errorCounter is a test double that always returns an error from Count.
-type errorCounter struct{}
-
-func (errorCounter) Count(context.Context, []Message) (int, error) {
-	return 0, errors.New("boom")
-}
-
-func (errorCounter) CountPerMessage(context.Context, []Message) ([]int, error) {
-	return nil, errors.New("boom")
-}
-
-func TestCompile_TokenCounterError(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: errorCounter{}})
-	b.AddBlock(MemoryBlock{
-		ID: "x", Tier: TierSystem, Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "hello")},
-	})
-	_, _, err := b.Compile(context.Background())
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrTokenCountFailed)
-}
-
-// failOnNthCallCounter fails on the Nth call to Count; used for recount path.
-type failOnNthCallCounter struct {
-	n     int
+type mutationCheckingFormatter struct {
 	calls int
-	inner TokenCounter
 }
 
-func (f *failOnNthCallCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	f.calls++
-	if f.calls >= f.n {
-		return 0, errors.New("count failed")
+type invalidBudgetStrategy struct {
+	out []Message
+}
+
+func (f *mutationCheckingFormatter) Format(ctx context.Context, blocks []NamedBlock) ([]Message, error) {
+	if got := blocks[0].Block.Messages[0].Content[0].Text; got != "original" {
+		return nil, errors.New("formatter mutation leaked into next build")
 	}
-	return f.inner.Count(ctx, msgs)
-}
-
-func (f *failOnNthCallCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	blocks[0].Block.Messages[0].Content[0].Text = "mutated"
 	f.calls++
-	if f.calls >= f.n {
-		return nil, errors.New("count failed")
-	}
-	return f.inner.CountPerMessage(ctx, msgs)
+	return DefaultFormatter{}.Format(ctx, blocks)
 }
 
-func TestCompile_TokenCounterErrorOnRecount(t *testing.T) {
-	// One block: 3 msgs = 30 tokens, budget 25. Truncate returns 1 msg. Compile recounts -> 3rd Count call fails.
-	inner := &FixedCounter{TokensPerMessage: 10}
-	counter := &failOnNthCallCounter{n: 3, inner: inner}
-	b := NewBuilder(AllocatorConfig{MaxTokens: 25, TokenCounter: counter})
-	b.AddBlock(MemoryBlock{
-		ID: "hist", Tier: TierHistory, Strategy: NewTruncateOldestStrategy(),
-		Messages: []Message{
-			TextMessage("user", "1"),
-			TextMessage("assistant", "2"),
-			TextMessage("user", "3"),
-		},
-	})
-	_, _, err := b.Compile(context.Background())
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrTokenCountFailed)
-	assert.Contains(t, err.Error(), "count failed")
+func (s invalidBudgetStrategy) Apply(_ context.Context, _ []Message, _ int, _ int, _ TokenCounter) ([]Message, error) {
+	return cloneMessages(s.out), nil
 }
 
-func TestCompile_NilStrategy(t *testing.T) {
-	t.Run("block does not fit", func(t *testing.T) {
-		// Block has 2 msgs = 20 tokens; budget 15 so strategy would be applied -> nil Strategy triggers ErrNilStrategy.
-		b := NewBuilder(AllocatorConfig{MaxTokens: 15, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-		b.AddBlock(MemoryBlock{
-			ID: "overflow", Tier: TierRAG, Strategy: nil,
-			Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")},
-		})
-		_, _, err := b.Compile(context.Background())
+func TestBuild_InvalidConfig(t *testing.T) {
+	t.Run("max tokens must be positive", func(t *testing.T) {
+		_, err := NewBuilder(0, &FixedCounter{TokensPerMessage: 1}).Build(context.Background())
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrNilStrategy)
+		assert.ErrorIs(t, err, ErrInvalidConfig)
 	})
-	t.Run("block fits budget", func(t *testing.T) {
-		// Block fits (2 msgs = 20 tokens, budget 100). Early validation still rejects nil Strategy.
-		b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-		b.AddBlock(MemoryBlock{
-			ID: "fits", Tier: TierRAG, Strategy: nil,
-			Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")},
-		})
-		_, _, err := b.Compile(context.Background())
+
+	t.Run("token counter is required", func(t *testing.T) {
+		_, err := NewBuilder(10, nil).Build(context.Background())
 		require.Error(t, err)
-		assert.ErrorIs(t, err, ErrNilStrategy)
+		assert.ErrorIs(t, err, ErrInvalidConfig)
 	})
 }
 
-func TestCompile_EmptyBuilder(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Empty(t, msgs)
-	assert.Zero(t, report.TotalTokensUsed)
-	assert.Equal(t, 100, report.RemainingTokens)
-	assert.Empty(t, report.BlocksDropped)
+func TestAddBlock_EmptyNamePanics(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 1})
+	assert.Panics(t, func() {
+		b.AddBlock("", MemoryBlock{Strategy: NewStrictStrategy()})
+	})
 }
 
-func TestCompile_BuilderReuse(t *testing.T) {
-	counter := &FixedCounter{TokensPerMessage: 1}
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: counter})
-	b.AddBlock(MemoryBlock{
-		ID: "a", Tier: TierSystem, Strategy: NewStrictStrategy(),
+func TestWithFormatter_NilPanics(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 1})
+	assert.Panics(t, func() {
+		b.WithFormatter(nil)
+	})
+}
+
+func TestBuild_OrderOnlyPriority(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("first", MemoryBlock{
+		Strategy: NewDropStrategy(),
 		Messages: []Message{TextMessage("system", "first")},
 	})
-	msgs1, report1, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	require.Len(t, msgs1, 1)
-	require.Len(t, msgs1[0].Content, 1)
-	assert.Equal(t, "first", msgs1[0].Content[0].Text)
-	assert.Equal(t, 1, report1.TotalTokensUsed)
-
-	// Second Compile without adding blocks: same result
-	msgs2, report2, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	require.Len(t, msgs2, 1)
-	require.Len(t, msgs2[0].Content, 1)
-	assert.Equal(t, "first", msgs2[0].Content[0].Text)
-	assert.Equal(t, 1, report2.TotalTokensUsed)
-
-	// AddBlock and Compile again: result includes both blocks
-	b.AddBlock(MemoryBlock{
-		ID: "b", Tier: TierCore, Strategy: NewStrictStrategy(),
+	b.AddBlock("second", MemoryBlock{
+		Strategy: NewDropStrategy(),
 		Messages: []Message{TextMessage("system", "second")},
 	})
-	msgs3, report3, err := b.Compile(context.Background())
+
+	msgs, err := b.Build(context.Background())
 	require.NoError(t, err)
-	require.Len(t, msgs3, 2)
-	require.Len(t, msgs3[0].Content, 1)
-	require.Len(t, msgs3[1].Content, 1)
-	assert.Equal(t, "first", msgs3[0].Content[0].Text)
-	assert.Equal(t, "second", msgs3[1].Content[0].Text)
-	assert.Equal(t, 2, report3.TotalTokensUsed)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "first", msgs[0].Content[0].Text)
 }
 
-func TestCompile_OneBlockFits(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{
-		ID: "a", Tier: TierSystem, Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("user", "x"), TextMessage("assistant", "y")},
+func TestBuild_NilStrategyErrorIncludesName(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("broken", MemoryBlock{
+		Messages: []Message{TextMessage("system", "x")},
 	})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, msgs, 2)
-	assert.Equal(t, 20, report.TotalTokensUsed)
-	assert.Equal(t, 80, report.RemainingTokens)
-	assert.Equal(t, 20, report.OriginalTokensPerBlock["a"])
-	assert.Equal(t, 20, report.TokensPerBlock["a"])
-	assert.Empty(t, report.BlocksDropped)
-}
 
-func TestCompile_TierOrdering(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "history", Tier: TierHistory, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("user", "h")}})
-	b.AddBlock(MemoryBlock{ID: "system", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "s")}})
-	msgs, _, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	require.Len(t, msgs, 2)
-	assert.Equal(t, "system", msgs[0].Role)
-	assert.Equal(t, "user", msgs[1].Role)
-}
-
-func TestCompile_SameTierInsertionOrder(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "first", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "1")}})
-	b.AddBlock(MemoryBlock{ID: "second", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "2")}})
-	msgs, _, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	require.Len(t, msgs, 2)
-	require.Len(t, msgs[0].Content, 1)
-	require.Len(t, msgs[1].Content, 1)
-	assert.Equal(t, "1", msgs[0].Content[0].Text)
-	assert.Equal(t, "2", msgs[1].Content[0].Text)
-}
-
-func TestCompile_StrictOverflow(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 5, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{ID: "sys", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "big")}})
-	_, _, err := b.Compile(context.Background())
+	_, err := b.Build(context.Background())
 	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrBudgetExceeded)
+	require.ErrorIs(t, err, ErrNilStrategy)
+	assert.Contains(t, err.Error(), `block "broken"`)
 }
 
-func TestCompile_DropOverflow(t *testing.T) {
-	// Budget 15: core (1 msg = 10) fits; rag (2 msgs = 20) exceeds remaining 5 and is dropped.
-	b := NewBuilder(AllocatorConfig{MaxTokens: 15, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{ID: "rag", Tier: TierRAG, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}})
-	b.AddBlock(MemoryBlock{ID: "core", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "c")}})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, msgs, 1)
-	require.Len(t, msgs[0].Content, 1)
-	assert.Equal(t, "c", msgs[0].Content[0].Text)
-	assert.Contains(t, report.BlocksDropped, "rag")
-}
-
-func TestCompile_TruncateHistory(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 25, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{
-		ID: "chat", Tier: TierHistory, Strategy: NewTruncateOldestStrategy(),
+func TestBuild_IsRepeatableAcrossStrategies(t *testing.T) {
+	sum := &stubSummarizer{result: TextMessage("system", "summary")}
+	b := NewBuilder(100, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("keep", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "keep")},
+	})
+	b.AddBlock("drop", MemoryBlock{
+		Strategy:  NewDropStrategy(),
+		MaxTokens: 10,
 		Messages: []Message{
-			TextMessage("user", "1"),
-			TextMessage("assistant", "2"),
-			TextMessage("user", "3"),
+			TextMessage("system", "drop-1"),
+			TextMessage("system", "drop-2"),
 		},
 	})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(msgs), 2)
-	assert.Equal(t, "truncated", report.Evictions["chat"])
-	total := report.TotalTokensUsed
-	assert.LessOrEqual(t, total, 25)
-}
-
-func TestCompile_BlockWithEmptyMessagesSkipped(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "empty", Tier: TierRAG, Strategy: NewDropStrategy(), Messages: nil})
-	b.AddBlock(MemoryBlock{ID: "ok", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "x")}})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, msgs, 1)
-	require.Len(t, msgs[0].Content, 1)
-	assert.Equal(t, "x", msgs[0].Content[0].Text)
-	_, has := report.TokensPerBlock["empty"]
-	assert.False(t, has)
-}
-
-func TestCompile_ContextCanceled(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 1000, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "a", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "x")}})
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, _, err := b.Compile(ctx)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.Canceled)
-}
-
-func TestCompile_ContextDeadlineExceeded(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 1000, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "a", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "x")}})
-	ctx, cancel := context.WithTimeout(context.Background(), 0)
-	defer cancel()
-	_, _, err := b.Compile(ctx)
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-func TestCompile_ReportAccuracy(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 15, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{ID: "must", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "s")}})
-	b.AddBlock(MemoryBlock{ID: "drop", Tier: TierRAG, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")}})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, msgs, 1)
-	assert.Equal(t, 10, report.TotalTokensUsed)
-	assert.Equal(t, 30, report.OriginalTokens)
-	assert.Equal(t, 5, report.RemainingTokens)
-	assert.Equal(t, 10, report.OriginalTokensPerBlock["must"])
-	assert.Equal(t, 20, report.OriginalTokensPerBlock["drop"])
-	assert.Equal(t, 10, report.TokensPerBlock["must"])
-	assert.Contains(t, report.BlocksDropped, "drop")
-	assert.Equal(t, "dropped", report.Evictions["drop"])
-}
-
-// overflowStrategy violates the EvictionStrategy contract: when block exceeds limit it still returns all msgs.
-type overflowStrategy struct{}
-
-func (overflowStrategy) Apply(ctx context.Context, msgs []Message, _ int, _ int, _ TokenCounter) ([]Message, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return msgs, nil
-}
-
-func TestCompile_BlockMaxTokensLocalLimit(t *testing.T) {
-	// Global limit 1000; RAG block has MaxTokens=200 and 50 msgs = 500 tokens -> truncated to 200 (20 msgs).
-	counter := &FixedCounter{TokensPerMessage: 10}
-	ragMsgs := make([]Message, 50)
-	for i := range 50 {
-		ragMsgs[i] = TextMessage("user", "x")
-	}
-	b := NewBuilder(AllocatorConfig{MaxTokens: 1000, TokenCounter: counter})
-	b.AddBlock(MemoryBlock{
-		ID: "rag", Tier: TierRAG, MaxTokens: 200,
-		Strategy: NewTruncateOldestStrategy(),
-		Messages: ragMsgs,
+	b.AddBlock("truncate", MemoryBlock{
+		Strategy:  NewTruncateOldestStrategy(),
+		MaxTokens: 10,
+		Messages: []Message{
+			TextMessage("user", "old"),
+			TextMessage("assistant", "new"),
+		},
 	})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Equal(t, 500, report.OriginalTokensPerBlock["rag"])
-	assert.Equal(t, 200, report.TokensPerBlock["rag"])
-	assert.Len(t, msgs, 20)
-	assert.Equal(t, 200, report.TotalTokensUsed)
-	assert.Equal(t, 800, report.RemainingTokens)
-}
-
-func TestCompile_StrategyExceededBudget(t *testing.T) {
-	// Block 2 msgs = 20 tokens, budget 15. Strategy returns all msgs despite limit -> Compile must error.
-	b := NewBuilder(AllocatorConfig{MaxTokens: 15, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{
-		ID: "bad", Tier: TierRAG, Strategy: overflowStrategy{},
-		Messages: []Message{TextMessage("user", "a"), TextMessage("assistant", "b")},
+	b.AddBlock("summary", MemoryBlock{
+		Strategy:  NewSummarizeStrategy(sum),
+		MaxTokens: 10,
+		Messages: []Message{
+			TextMessage("user", "long"),
+			TextMessage("assistant", "block"),
+		},
 	})
-	_, _, err := b.Compile(context.Background())
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrStrategyExceededBudget)
-}
-
-func TestCompile_ProtectRoleOnlyMessageExceedsBudget(t *testing.T) {
-	// Single message with role "developer", ProtectRole("developer"); limit 5, message = 10 tokens.
-	// Strategy cannot remove the only message (protected), returns it; Compile re-counts and rejects.
-	counter := &FixedCounter{TokensPerMessage: 10}
-	b := NewBuilder(AllocatorConfig{MaxTokens: 5, TokenCounter: counter})
-	b.AddBlock(MemoryBlock{
-		ID: "hist", Tier: TierHistory,
-		Strategy: NewTruncateOldestStrategy(ProtectRole("developer")),
-		Messages: []Message{TextMessage("developer", "must stay")},
+	b.AddBlock("tail", MemoryBlock{
+		Strategy:  NewDropTailStrategy(),
+		MaxTokens: 20,
+		Messages: []Message{
+			TextMessage("system", "tail-1"),
+			TextMessage("system", "tail-2"),
+			TextMessage("system", "tail-3"),
+		},
 	})
-	_, _, err := b.Compile(context.Background())
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrStrategyExceededBudget)
-}
 
-func TestCompile_TotalTokensNeverExceedsMax(t *testing.T) {
-	// Invariant: on success, report.TotalTokensUsed <= MaxTokens.
-	b := NewBuilder(AllocatorConfig{MaxTokens: 25, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{ID: "sys", Tier: TierSystem, Strategy: NewStrictStrategy(), Messages: []Message{TextMessage("system", "s")}})
-	b.AddBlock(MemoryBlock{ID: "hist", Tier: TierHistory, Strategy: NewTruncateOldestStrategy(), Messages: []Message{
-		TextMessage("user", "1"), TextMessage("assistant", "2"), TextMessage("user", "3"),
-	}})
-	_, report, err := b.Compile(context.Background())
+	first, err := b.Build(context.Background())
 	require.NoError(t, err)
-	assert.LessOrEqual(t, report.TotalTokensUsed, 25)
-}
-
-// customStrategy is a test double that implements EvictionStrategy to exercise evictionLabel default.
-type customStrategy struct{}
-
-func (customStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, _ TokenCounter) ([]Message, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if originalTokens <= limit {
-		return msgs, nil
-	}
-	return nil, nil
-}
-
-func TestCompile_CustomStrategyEvictionLabel(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 5, TokenCounter: &FixedCounter{TokensPerMessage: 10}})
-	b.AddBlock(MemoryBlock{ID: "custom", Tier: TierRAG, Strategy: customStrategy{}, Messages: []Message{TextMessage("user", "x")}})
-	_, report, err := b.Compile(context.Background())
+	second, err := b.Build(context.Background())
 	require.NoError(t, err)
-	assert.Equal(t, "evicted", report.Evictions["custom"])
+
+	require.Len(t, first, 5)
+	require.Len(t, second, 5)
+	assert.Equal(t, first, second)
+	assert.Equal(t, []string{"keep", "new", "summary", "tail-1", "tail-2"}, []string{
+		first[0].Content[0].Text,
+		first[1].Content[0].Text,
+		first[2].Content[0].Text,
+		first[3].Content[0].Text,
+		first[4].Content[0].Text,
+	})
+	assert.Equal(t, 2, sum.calls)
 }
 
-func TestCompile_DuplicateBlockID(t *testing.T) {
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: &FixedCounter{TokensPerMessage: 1}})
-	b.AddBlock(MemoryBlock{ID: "dup", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "first")}})
-	b.AddBlock(MemoryBlock{ID: "dup", Tier: TierCore, Strategy: NewDropStrategy(), Messages: []Message{TextMessage("system", "second")}})
-	msgs, report, err := b.Compile(context.Background())
-	require.NoError(t, err)
-	assert.Len(t, msgs, 2)
-	// Last block overwrites in report (same ID).
-	assert.Contains(t, report.TokensPerBlock, "dup")
-	assert.Equal(t, 1, report.TokensPerBlock["dup"])
-}
-
-func TestBuilder_CacheControl(t *testing.T) {
-	counter := &FixedCounter{TokensPerMessage: 1}
-	blockMsgs := []Message{
-		TextMessage("system", "You are helpful."),
-		TextMessage("system", "Rules: be concise."),
-	}
-	b := NewBuilder(AllocatorConfig{MaxTokens: 100, TokenCounter: counter})
-	b.AddBlock(MemoryBlock{
-		ID: "system", Tier: TierSystem, Strategy: NewStrictStrategy(),
+func TestBuild_AddBlockSnapshotsInput(t *testing.T) {
+	block := MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{{
+			Role: "system",
+			Content: []ContentPart{
+				{Type: "text", Text: "original"},
+				{Type: "image_url", ImageURL: &ImageURL{URL: "https://example.com/original.png", Detail: "low"}},
+			},
+			Metadata: map[string]any{"scope": "original"},
+		}},
 		CacheControl: map[string]any{"type": "ephemeral"},
-		Messages:     blockMsgs,
+	}
+
+	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("snapshot", block)
+
+	block.Messages[0].Content[0].Text = "mutated"
+	block.Messages[0].Content[1].ImageURL.URL = "https://example.com/mutated.png"
+	block.Messages[0].Metadata["scope"] = "mutated"
+	block.CacheControl["type"] = "changed"
+
+	msgs, err := b.Build(context.Background())
+	require.NoError(t, err)
+	require.Len(t, msgs, 1)
+	assert.Equal(t, "original", msgs[0].Content[0].Text)
+	require.NotNil(t, msgs[0].Content[1].ImageURL)
+	assert.Equal(t, "https://example.com/original.png", msgs[0].Content[1].ImageURL.URL)
+	assert.Equal(t, "original", msgs[0].Metadata["scope"])
+	assert.Equal(t, "ephemeral", msgs[0].CacheControl["type"])
+}
+
+func TestBuild_FormatterMutationDoesNotAffectFutureBuilds(t *testing.T) {
+	formatter := &mutationCheckingFormatter{}
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("snapshot", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "original")},
 	})
-	b.AddBlock(MemoryBlock{
-		ID: "scratch", Tier: TierScratchpad, Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("assistant", "Thinking...")},
+	b.WithFormatter(formatter)
+
+	first, err := b.Build(context.Background())
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	assert.Equal(t, "mutated", first[0].Content[0].Text)
+
+	second, err := b.Build(context.Background())
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	assert.Equal(t, "mutated", second[0].Content[0].Text)
+	assert.Equal(t, 2, formatter.calls)
+}
+
+func TestBuild_FormatterOverBudget(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("only", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "x")},
 	})
-	msgs, _, err := b.Compile(context.Background())
+	b.WithFormatter(formatterFunc(func(_ context.Context, _ []NamedBlock) ([]Message, error) {
+		return []Message{
+			TextMessage("system", "x"),
+			TextMessage("system", "y"),
+		}, nil
+	}))
+
+	_, err := b.Build(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrFormatterExceededBudget)
+}
+
+func TestBuild_StrategyCannotExceedLocalBlockBudget(t *testing.T) {
+	b := NewBuilder(30, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("limited", MemoryBlock{
+		Strategy: invalidBudgetStrategy{
+			out: []Message{
+				TextMessage("system", "first"),
+				TextMessage("system", "second"),
+			},
+		},
+		MaxTokens: 10,
+		Messages: []Message{
+			TextMessage("system", "first"),
+			TextMessage("system", "second"),
+		},
+	})
+
+	_, err := b.Build(context.Background())
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrStrategyExceededBudget)
+}
+
+func TestBuild_DefaultFormatterPreservesOrderAndCacheControl(t *testing.T) {
+	b := NewBuilder(30, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("alpha", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{
+			TextMessage("system", "alpha-1"),
+			TextMessage("system", "alpha-2"),
+		},
+		CacheControl: map[string]any{"type": "ephemeral"},
+	})
+	b.AddBlock("beta", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{
+			TextMessage("system", "beta-1"),
+		},
+		CacheControl: map[string]any{"mode": "sticky"},
+	})
+
+	msgs, err := b.Build(context.Background())
 	require.NoError(t, err)
 	require.Len(t, msgs, 3)
-	// Only the last message of the first block (system) should have CacheControl set.
-	var withCache int
-	for i, m := range msgs {
-		if m.CacheControl != nil {
-			withCache++
-			typ, ok := m.CacheControl["type"]
-			require.True(t, ok, "message %d: CacheControl should have 'type'", i)
-			assert.Equal(t, "ephemeral", typ, "message %d: type should be ephemeral", i)
-		}
-	}
-	assert.Equal(t, 1, withCache, "exactly one message should have CacheControl")
-	assert.NotNil(t, msgs[1].CacheControl)
-	assert.Equal(t, "Rules: be concise.", msgs[1].Content[0].Text)
-	// Compile must not mutate the original block.Messages.
-	for i := range blockMsgs {
-		assert.Nil(t, blockMsgs[i].CacheControl, "original block message %d must not have CacheControl set", i)
-	}
+	assert.Equal(t, "alpha-1", msgs[0].Content[0].Text)
+	assert.Nil(t, msgs[0].CacheControl)
+	assert.Equal(t, "alpha-2", msgs[1].Content[0].Text)
+	assert.Equal(t, "ephemeral", msgs[1].CacheControl["type"])
+	assert.Equal(t, "beta-1", msgs[2].Content[0].Text)
+	assert.Equal(t, "sticky", msgs[2].CacheControl["mode"])
 }
 
-func FuzzCompile(f *testing.F) {
-	f.Add(50, 5, 10) // maxTokens, numBlocks, tokensPerMsg
-	f.Fuzz(func(t *testing.T, maxTokens, numBlocks, tokensPerMsg int) {
-		if maxTokens <= 0 || numBlocks <= 0 || numBlocks > 20 || tokensPerMsg <= 0 || tokensPerMsg > 100 {
-			t.Skip()
-		}
-		counter := &FixedCounter{TokensPerMessage: tokensPerMsg}
-		b := NewBuilder(AllocatorConfig{MaxTokens: maxTokens, TokenCounter: counter})
-		for range numBlocks {
-			b.AddBlock(MemoryBlock{
-				ID: "b", Tier: TierHistory, Strategy: NewDropStrategy(),
-				Messages: []Message{TextMessage("user", "x")},
-			})
-		}
-		msgs, report, err := b.Compile(context.Background())
-		if err != nil {
-			return
-		}
-		if report.TotalTokensUsed > maxTokens {
-			t.Errorf("TotalTokensUsed %d > MaxTokens %d", report.TotalTokensUsed, maxTokens)
-		}
-		if len(msgs) > numBlocks {
-			t.Errorf("len(msgs)=%d > numBlocks=%d", len(msgs), numBlocks)
-		}
+func TestBuild_CustomFormatterReceivesNamedBlocks(t *testing.T) {
+	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("first", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "a")},
 	})
+	b.AddBlock("second", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "b")},
+	})
+
+	var gotNames []string
+	b.WithFormatter(formatterFunc(func(ctx context.Context, blocks []NamedBlock) ([]Message, error) {
+		for _, block := range blocks {
+			gotNames = append(gotNames, block.Name)
+		}
+		return DefaultFormatter{}.Format(ctx, blocks)
+	}))
+
+	_, err := b.Build(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, []string{"first", "second"}, gotNames)
 }
 
-func BenchmarkCompile(b *testing.B) {
-	counter := &FixedCounter{TokensPerMessage: 10}
-	blocks := make([]MemoryBlock, 0, 10)
-	for range 10 {
-		blocks = append(blocks, MemoryBlock{
-			ID: "b", Tier: TierHistory, Strategy: NewTruncateOldestStrategy(),
-			Messages: []Message{
-				TextMessage("user", "Hello"),
-				TextMessage("assistant", "Hi there!"),
-			},
-		})
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		build := NewBuilder(AllocatorConfig{MaxTokens: 500, TokenCounter: counter})
-		for _, blk := range blocks {
-			build.AddBlock(blk)
-		}
-		_, _, _ = build.Compile(context.Background())
-	}
+func TestBuild_PassesContextToFormatter(t *testing.T) {
+	type ctxKey string
+
+	const key ctxKey = "trace"
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("only", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage("system", "x")},
+	})
+
+	var got any
+	b.WithFormatter(formatterFunc(func(ctx context.Context, blocks []NamedBlock) ([]Message, error) {
+		got = ctx.Value(key)
+		return DefaultFormatter{}.Format(ctx, blocks)
+	}))
+
+	_, err := b.Build(context.WithValue(context.Background(), key, "span-123"))
+	require.NoError(t, err)
+	assert.Equal(t, "span-123", got)
 }

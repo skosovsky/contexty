@@ -8,118 +8,133 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
-func ExampleNewBuilder() {
-	counter := &contexty.CharFallbackCounter{CharsPerToken: 4}
-	builder := contexty.NewBuilder(contexty.AllocatorConfig{
-		MaxTokens:    100,
-		TokenCounter: counter,
-	})
-	builder.AddBlock(contexty.MemoryBlock{
-		ID: "sys", Tier: contexty.TierSystem, Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "You are helpful.")},
-	})
-	msgs, report, err := builder.Compile(context.Background())
-	if err != nil {
-		return
-	}
-	fmt.Printf("messages: %d, tokens: %d\n", len(msgs), report.TotalTokensUsed)
-	// Output: messages: 1, tokens: 4
+type loggingFormatter struct {
+	next contexty.Formatter
 }
 
-func ExampleBuilder_Compile() {
-	counter := &contexty.CharFallbackCounter{CharsPerToken: 4}
-	b := contexty.NewBuilder(contexty.AllocatorConfig{MaxTokens: 50, TokenCounter: counter})
-	b.AddBlock(contexty.MemoryBlock{
-		ID: "core", Tier: contexty.TierCore, Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "User: Alice")},
-	})
-	b.AddBlock(contexty.MemoryBlock{
-		ID: "history", Tier: contexty.TierHistory, Strategy: contexty.NewTruncateOldestStrategy(),
+func (f loggingFormatter) Format(ctx context.Context, blocks []contexty.NamedBlock) ([]contexty.Message, error) {
+	msgs, err := f.next.Format(ctx, blocks)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("blocks=%d messages=%d\n", len(blocks), len(msgs))
+	return msgs, nil
+}
+
+type loggingStrategy struct {
+	next contexty.EvictionStrategy
+}
+
+func (s loggingStrategy) Apply(ctx context.Context, msgs []contexty.Message, originalTokens int, limit int, counter contexty.TokenCounter) ([]contexty.Message, error) {
+	out, err := s.next.Apply(ctx, msgs, originalTokens, limit, counter)
+	if err != nil {
+		return nil, err
+	}
+	after, err := counter.Count(ctx, out)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Printf("before=%d after=%d\n", originalTokens, after)
+	return out, nil
+}
+
+func applyEvictionMiddleware(strategy contexty.EvictionStrategy, middlewares ...contexty.EvictionMiddleware) contexty.EvictionStrategy {
+	wrapped := strategy
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		wrapped = middlewares[i](wrapped)
+	}
+	return wrapped
+}
+
+func applyFormatterMiddleware(formatter contexty.Formatter, middlewares ...contexty.FormatterMiddleware) contexty.Formatter {
+	wrapped := formatter
+	for i := len(middlewares) - 1; i >= 0; i-- {
+		wrapped = middlewares[i](wrapped)
+	}
+	return wrapped
+}
+
+func messageText(msg contexty.Message) string {
+	var builder strings.Builder
+	for _, part := range msg.Content {
+		if part.Type == "text" {
+			builder.WriteString(part.Text)
+		}
+	}
+	return builder.String()
+}
+
+func ExampleBuilder_Build() {
+	builder := contexty.NewBuilder(30, &contexty.FixedCounter{TokensPerMessage: 10})
+	builder.AddBlock("instructions", contexty.MemoryBlock{
+		Strategy: contexty.NewStrictStrategy(),
 		Messages: []contexty.Message{
-			contexty.TextMessage("user", "Hi"),
-			contexty.TextMessage("assistant", "Hello!"),
+			contexty.TextMessage("system", "You are helpful."),
 		},
 	})
-	msgs, report, err := b.Compile(context.Background())
+	builder.AddBlock("conversation", contexty.MemoryBlock{
+		Strategy: contexty.NewTruncateOldestStrategy(),
+		Messages: []contexty.Message{
+			contexty.TextMessage("user", "hello"),
+			contexty.TextMessage("assistant", "hi"),
+			contexty.TextMessage("user", "need a summary"),
+		},
+	})
+
+	msgs, err := builder.Build(context.Background())
 	if err != nil {
 		return
 	}
-	fmt.Printf("msgs=%d evictions=%v\n", len(msgs), report.Evictions)
-	// Output: msgs=3 evictions=map[]
+	fmt.Printf("messages=%d last=%s\n", len(msgs), messageText(msgs[len(msgs)-1]))
+	// Output: messages=3 last=need a summary
 }
 
-func Example_builderChatHistory() {
-	// System (1 msg) + history (6 msgs); 50 tokens each = 350 total, limit 300 -> truncate removes 1.
-	counter := &contexty.FixedCounter{TokensPerMessage: 50}
-	b := contexty.NewBuilder(contexty.AllocatorConfig{MaxTokens: 300, TokenCounter: counter})
-	b.AddBlock(contexty.MemoryBlock{
-		ID: "sys", Tier: contexty.TierSystem, Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "You are helpful.")},
+func ExampleEvictionMiddleware() {
+	loggingMiddleware := contexty.EvictionMiddleware(func(next contexty.EvictionStrategy) contexty.EvictionStrategy {
+		return loggingStrategy{next: next}
 	})
-	history := []contexty.Message{
-		contexty.TextMessage("user", "hi"),
-		contexty.TextMessage("assistant", "hello"),
-		contexty.TextMessage("user", "hi"),
-		contexty.TextMessage("assistant", "hello"),
-		contexty.TextMessage("user", "hi"),
-		contexty.TextMessage("assistant", "hello"),
+	strategy := applyEvictionMiddleware(contexty.NewDropTailStrategy(), loggingMiddleware)
+	counter := &contexty.FixedCounter{TokensPerMessage: 10}
+	msgs := []contexty.Message{
+		contexty.TextMessage("system", "first"),
+		contexty.TextMessage("system", "second"),
+		contexty.TextMessage("system", "third"),
 	}
-	b.AddBlock(contexty.MemoryBlock{
-		ID: "history", Tier: contexty.TierHistory, Strategy: contexty.NewTruncateOldestStrategy(),
-		Messages: history,
-	})
-	msgs, report, err := b.Compile(context.Background())
+
+	out, err := strategy.Apply(context.Background(), msgs, 30, 20, counter)
 	if err != nil {
 		return
 	}
-	fmt.Printf("messages: %d, tokens: %d, eviction(history)=%q\n",
-		len(msgs), report.TotalTokensUsed, report.Evictions["history"])
-	// Output: messages: 6, tokens: 300, eviction(history)="truncated"
+	fmt.Printf("kept=%d\n", len(out))
+	// Output:
+	// before=30 after=20
+	// kept=2
 }
 
-func Example_injectIntoSystemXML() {
-	sys := contexty.TextMessage("system", "Base.")
-	got := contexty.InjectIntoSystem(sys, contexty.XMLFormatter("context"),
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact1"}}},
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact2"}}},
-	)
-	fmt.Println(got.Role)
-	fmt.Println(got.Content[0].Text == "Base.")
-	fmt.Println(len(got.Content) == 2 && strings.Contains(got.Content[1].Text, "<context>") && strings.Contains(got.Content[1].Text, "<fact>"))
-	// Output:
-	// system
-	// true
-	// true
-}
+func ExampleFormatterMiddleware() {
+	loggingMiddleware := contexty.FormatterMiddleware(func(next contexty.Formatter) contexty.Formatter {
+		return loggingFormatter{next: next}
+	})
 
-func ExampleInjectIntoSystem() {
-	sys := contexty.TextMessage("system", "You are a doctor.")
-	got := contexty.InjectIntoSystem(sys, contexty.XMLFormatter("context"),
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Patient has fever."}}},
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Allergies: none."}}},
-	)
-	fmt.Println(got.Role)
-	fmt.Println(len(got.Content) > 0 && len(got.Content[0].Text) > 0 && got.Content[0].Text[0] == 'Y')
-	// Output:
-	// system
-	// true
-}
+	builder := contexty.NewBuilder(20, &contexty.FixedCounter{TokensPerMessage: 10})
+	builder.AddBlock("instructions", contexty.MemoryBlock{
+		Strategy: contexty.NewStrictStrategy(),
+		Messages: []contexty.Message{contexty.TextMessage("system", "A")},
+	})
+	builder.AddBlock("notes", contexty.MemoryBlock{
+		Strategy: contexty.NewStrictStrategy(),
+		Messages: []contexty.Message{contexty.TextMessage("system", "B")},
+	})
+	builder.WithFormatter(applyFormatterMiddleware(contexty.DefaultFormatter{}, loggingMiddleware))
 
-func ExampleInjectIntoSystem_markdown() {
-	sys := contexty.TextMessage("system", "Base instructions.")
-	got := contexty.InjectIntoSystem(sys, contexty.MarkdownListFormatter("Context:"),
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact A"}}},
-		contexty.Message{Content: []contexty.ContentPart{{Type: "text", Text: "Fact B"}}},
-	)
-	// Injected facts are in the second ContentPart (non-destructive append).
-	injected := got.Content[1].Text
-	fmt.Println(got.Role)
-	fmt.Println(strings.Contains(injected, "### Context:\n"))
-	fmt.Println(strings.Contains(injected, "- Fact A\n"))
-	fmt.Println(strings.Contains(injected, "- Fact B\n"))
+	msgs, err := builder.Build(context.Background())
+	if err != nil {
+		return
+	}
+	fmt.Println(messageText(msgs[0]))
+	fmt.Println(messageText(msgs[1]))
 	// Output:
-	// system
-	// true
-	// true
-	// true
+	// blocks=2 messages=2
+	// A
+	// B
 }

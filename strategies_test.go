@@ -79,13 +79,121 @@ func TestDropStrategy(t *testing.T) {
 }
 
 func TestDropStrategy_TokenCounterError(t *testing.T) {
-	// DropStrategy uses originalTokens only; it does not call counter. Use a strategy that would call counter, or test via builder.
-	// DropStrategy.Apply with originalTokens never calls counter, so we test errorCounter via strict path (strict also doesn't call in Apply).
-	// Actually Drop fits/exceeds is based on originalTokens vs limit, no Count. So errorCounter isn't used by Drop.
-	// Keep test: pass errorCounter; Drop still doesn't call it. So this test would pass. Remove or change: we can pass 1 as originalTokens, 100 as limit; Drop returns msgs. So no error. So the test was for when counter is used - but Drop doesn't use counter. So let's just keep the signature and pass originalTokens 1, limit 100. The test expects error - but with new Drop we won't get error. So change test to expect no error and that we get the message back, since Drop doesn't call counter.
-	got, err := NewDropStrategy().Apply(context.Background(), []Message{TextMessage("user", "x")}, 1, 100, errorCounter{})
-	require.NoError(t, err) // Drop uses originalTokens only, does not call counter
+	got, err := NewDropStrategy().Apply(
+		context.Background(),
+		[]Message{TextMessage("user", "x")},
+		1,
+		100,
+		&FixedCounter{TokensPerMessage: 1},
+	)
+	require.NoError(t, err)
 	require.Len(t, got, 1)
+}
+
+func TestDropTailStrategy(t *testing.T) {
+	counter := &FixedCounter{TokensPerMessage: 10}
+	msgs := []Message{
+		TextMessage("system", "1"),
+		TextMessage("system", "2"),
+		TextMessage("system", "3"),
+	}
+
+	t.Run("fits passes through", func(t *testing.T) {
+		got, err := NewDropTailStrategy().Apply(context.Background(), msgs, 30, 30, counter)
+		require.NoError(t, err)
+		assert.Len(t, got, 3)
+	})
+
+	t.Run("drops from tail until block fits", func(t *testing.T) {
+		got, err := NewDropTailStrategy().Apply(context.Background(), msgs, 30, 20, counter)
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		assert.Equal(t, "1", got[0].Content[0].Text)
+		assert.Equal(t, "2", got[1].Content[0].Text)
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		got, err := NewDropTailStrategy().Apply(context.Background(), nil, 0, 10, counter)
+		require.NoError(t, err)
+		assert.Nil(t, got)
+	})
+
+	t.Run("single oversize message returns ErrBlockTooLarge", func(t *testing.T) {
+		tracker := &countCallsCounter{inner: counter}
+		got, err := NewDropTailStrategy().Apply(
+			context.Background(),
+			[]Message{TextMessage("system", "only")},
+			10,
+			5,
+			tracker,
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrBlockTooLarge)
+		assert.Nil(t, got)
+		assert.Equal(t, 0, tracker.calls)
+	})
+
+	t.Run("token counter error propagates", func(t *testing.T) {
+		failAfter := &failAfterNCallsCounter{n: 1, inner: counter}
+		_, err := NewDropTailStrategy().Apply(context.Background(), msgs, 30, 20, failAfter)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrTokenCountFailed)
+		assert.Contains(t, err.Error(), "count failed")
+	})
+
+	t.Run("context canceled propagates", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := NewDropTailStrategy().Apply(ctx, msgs, 30, 20, counter)
+		require.Error(t, err)
+		require.ErrorIs(t, err, context.Canceled)
+	})
+
+	t.Run("drops to one message when that is enough", func(t *testing.T) {
+		twoMsgs := []Message{
+			TextMessage("system", "1"),
+			TextMessage("system", "2"),
+		}
+		tracker := &countCallsCounter{inner: counter}
+		got, err := NewDropTailStrategy().Apply(
+			context.Background(),
+			twoMsgs,
+			20,
+			10,
+			tracker,
+		)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "1", got[0].Content[0].Text)
+		assert.Equal(t, 1, tracker.calls)
+	})
+
+	t.Run("trimming to one oversize message does not do extra recount", func(t *testing.T) {
+		tracker := &countCallsCounter{inner: counter}
+		got, err := NewDropTailStrategy().Apply(
+			context.Background(),
+			msgs,
+			30,
+			5,
+			tracker,
+		)
+		require.Error(t, err)
+		require.ErrorIs(t, err, ErrBlockTooLarge)
+		assert.Nil(t, got)
+		assert.Equal(t, 2, tracker.calls)
+	})
+
+	t.Run("context canceled after loop recount propagates", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancelAfterCount := &cancelAfterFirstCountCounter{
+			inner:  counter,
+			cancel: cancel,
+		}
+
+		_, err := NewDropTailStrategy().Apply(ctx, msgs, 30, 15, cancelAfterCount)
+		require.Error(t, err)
+		require.ErrorIs(t, err, context.Canceled)
+	})
 }
 
 func TestTruncateOldestStrategy(t *testing.T) {
@@ -320,6 +428,28 @@ func (f *failWhenCountingCounter) CountPerMessage(ctx context.Context, msgs []Me
 		return nil, errors.New("count failed")
 	}
 	return f.inner.CountPerMessage(ctx, msgs)
+}
+
+type cancelAfterFirstCountCounter struct {
+	calls  int
+	inner  TokenCounter
+	cancel context.CancelFunc
+}
+
+func (c *cancelAfterFirstCountCounter) Count(ctx context.Context, msgs []Message) (int, error) {
+	c.calls++
+	tokens, err := c.inner.Count(ctx, msgs)
+	if err != nil {
+		return 0, err
+	}
+	if c.calls == 1 {
+		c.cancel()
+	}
+	return tokens, nil
+}
+
+func (c *cancelAfterFirstCountCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	return c.inner.CountPerMessage(ctx, msgs)
 }
 
 func TestTruncateOldestStrategy_CountPerMessageWrongLength(t *testing.T) {

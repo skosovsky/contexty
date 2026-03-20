@@ -10,39 +10,38 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
-// TestCompile_BlackBox runs an end-to-end scenario using only the public API.
-func TestCompile_BlackBox(t *testing.T) {
+// TestBuild_BlackBox runs an end-to-end scenario using only the public API.
+func TestBuild_BlackBox(t *testing.T) {
 	counter := &contexty.CharFallbackCounter{CharsPerToken: 4}
-	b := contexty.NewBuilder(contexty.AllocatorConfig{
-		MaxTokens:    200,
-		TokenCounter: counter,
-	})
-	b.AddBlock(contexty.MemoryBlock{
-		ID:       "persona",
-		Tier:     contexty.TierSystem,
+	builder := contexty.NewBuilder(200, counter)
+	builder.AddBlock("instructions", contexty.MemoryBlock{
 		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "You are a medical assistant.")},
-	})
-	b.AddBlock(contexty.MemoryBlock{
-		ID:       "facts",
-		Tier:     contexty.TierCore,
-		Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "Patient: Anna, 30yo.")},
-	})
-	b.AddBlock(contexty.MemoryBlock{
-		ID:       "chat",
-		Tier:     contexty.TierHistory,
-		Strategy: contexty.NewTruncateOldestStrategy(),
 		Messages: []contexty.Message{
-			contexty.TextMessage("user", "What should I take?"),
-			contexty.TextMessage("assistant", "Consider vitamin D."),
-			contexty.TextMessage("user", "Any side effects?"),
+			contexty.TextMessage("system", "Keep answers concise."),
 		},
 	})
-	msgs, report, err := b.Compile(context.Background())
+	builder.AddBlock("profile", contexty.MemoryBlock{
+		Strategy:  contexty.NewDropTailStrategy(),
+		MaxTokens: 20,
+		Messages: []contexty.Message{
+			contexty.TextMessage("system", "Name: Anna"),
+			contexty.TextMessage("system", "Timezone: ICT"),
+			contexty.TextMessage("system", "Prefers plain text"),
+		},
+	})
+	builder.AddBlock("dialogue", contexty.MemoryBlock{
+		Strategy: contexty.NewTruncateOldestStrategy(),
+		Messages: []contexty.Message{
+			contexty.TextMessage("user", "What should we do next?"),
+			contexty.TextMessage("assistant", "Implement the builder refactor."),
+			contexty.TextMessage("user", "Keep it compact."),
+		},
+	})
+
+	msgs, err := builder.Build(context.Background())
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(msgs), 1)
-	assert.LessOrEqual(t, report.TotalTokensUsed, 200)
-	assert.NotNil(t, report.TokensPerBlock)
-	assert.NotNil(t, report.Evictions)
+	total, err := counter.Count(context.Background(), msgs)
+	require.NoError(t, err)
+	assert.LessOrEqual(t, total, 200)
 }
