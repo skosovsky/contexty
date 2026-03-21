@@ -11,13 +11,27 @@ type registeredBlock struct {
 }
 
 // Builder collects named memory blocks and builds them into a final message slice within the token budget.
-// A Builder can be reused: call AddBlock and Build multiple times. Each Build uses the current
-// list of registered blocks (blocks are not cleared after Build). For a fresh build, create a new Builder.
+//
+// Concurrency: Builder is not safe for concurrent mutation. Do not call AddBlock, WithFormatter, or
+// SetBlockMessages from multiple goroutines on the same instance without external synchronization.
+// For concurrent request handling, build a template with NewBuilder + AddBlock, then call Clone per
+// request or goroutine and run Build/BuildDetailed on the copy.
+//
+// A Builder can be reused on one goroutine: call AddBlock and Build multiple times. Each Build uses
+// the current list of registered blocks (blocks are not cleared after Build). For a fresh build,
+// create a new Builder or Clone from a template.
 type Builder struct {
 	maxTokens int
 	counter   TokenCounter
 	formatter Formatter
 	blocks    []registeredBlock
+}
+
+// BuildResult contains the final formatted output plus raw post-eviction block
+// snapshots for orchestration and persistence.
+type BuildResult struct {
+	Messages []Message
+	Blocks   []NamedBlock
 }
 
 // NewBuilder returns a new Builder with the given token budget and counter.
@@ -31,7 +45,10 @@ func NewBuilder(maxTokens int, counter TokenCounter) *Builder {
 
 // AddBlock appends a named block and returns the builder for chaining.
 // The builder snapshots the provided block so later caller mutation does not
-// affect future builds. Panics if name is empty.
+// affect future builds.
+//
+// Fail-fast: panics if name is empty (programming error). For API that returns
+// errors instead, validate the name before calling AddBlock.
 func (b *Builder) AddBlock(name string, block MemoryBlock) *Builder {
 	if name == "" {
 		panic("contexty: AddBlock called with empty name")
@@ -53,13 +70,57 @@ func (b *Builder) WithFormatter(f Formatter) *Builder {
 	return b
 }
 
+// Clone returns a deep-copied builder snapshot that can be mutated independently.
+func (b *Builder) Clone() *Builder {
+	if b == nil {
+		return nil
+	}
+	cloned := &Builder{
+		maxTokens: b.maxTokens,
+		counter:   b.counter,
+		formatter: b.formatter,
+		blocks:    make([]registeredBlock, len(b.blocks)),
+	}
+	for i, block := range b.blocks {
+		cloned.blocks[i] = registeredBlock{
+			name:  block.name,
+			block: cloneBlock(block.block),
+		}
+	}
+	return cloned
+}
+
+// SetBlockMessages replaces the messages of a named block using a deep copy of msgs.
+func (b *Builder) SetBlockMessages(name string, msgs []Message) error {
+	if b == nil {
+		return fmt.Errorf("contexty: set block messages: nil builder")
+	}
+	for i := range b.blocks {
+		if b.blocks[i].name == name {
+			b.blocks[i].block.Messages = cloneMessages(msgs)
+			return nil
+		}
+	}
+	return fmt.Errorf("block %q: %w", name, ErrBlockNotFound)
+}
+
 // Build assembles all blocks into a final []Message that fits within maxTokens.
 // Blocks are budgeted strictly in AddBlock registration order. Each build
 // creates fresh post-eviction snapshots before invoking the formatter, so the
 // builder remains repeatable even if strategies or formatters mutate their input.
 func (b *Builder) Build(ctx context.Context) ([]Message, error) {
+	result, err := b.BuildDetailed(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return result.Messages, nil
+}
+
+// BuildDetailed assembles the configured blocks and returns formatter output plus
+// raw post-eviction block snapshots for orchestration.
+func (b *Builder) BuildDetailed(ctx context.Context) (BuildResult, error) {
 	if b.maxTokens <= 0 || b.counter == nil {
-		return nil, ErrInvalidConfig
+		return BuildResult{}, ErrInvalidConfig
 	}
 	counter := b.counter
 	remaining := b.maxTokens
@@ -67,18 +128,18 @@ func (b *Builder) Build(ctx context.Context) ([]Message, error) {
 
 	for _, registered := range b.blocks {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("contexty: build: %w", err)
+			return BuildResult{}, fmt.Errorf("contexty: build: %w", err)
 		}
 		block := cloneBlock(registered.block)
 		if len(block.Messages) == 0 {
 			continue
 		}
 		if block.Strategy == nil {
-			return nil, fmt.Errorf("block %q: %w", registered.name, ErrNilStrategy)
+			return BuildResult{}, fmt.Errorf("block %q: %w", registered.name, ErrNilStrategy)
 		}
 		blockTokens, err := counter.Count(ctx, block.Messages)
 		if err != nil {
-			return nil, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
+			return BuildResult{}, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
 		}
 
 		blockBudget := remaining
@@ -91,30 +152,25 @@ func (b *Builder) Build(ctx context.Context) ([]Message, error) {
 		} else {
 			out, err = block.Strategy.Apply(ctx, block.Messages, blockTokens, blockBudget, counter)
 			if err != nil {
-				return nil, fmt.Errorf("block %q: %w", registered.name, err)
+				return BuildResult{}, fmt.Errorf("block %q: %w", registered.name, err)
 			}
 		}
 		if len(out) > 0 {
-			out = cloneMessages(out)
-			if len(block.CacheControl) > 0 {
-				lastIdx := len(out) - 1
-				out[lastIdx].CacheControl = cloneMap(block.CacheControl)
-			}
-			used, err := counter.Count(ctx, out)
+			rawOut := cloneMessages(out)
+			used, err := counter.Count(ctx, rawOut)
 			if err != nil {
-				return nil, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
+				return BuildResult{}, fmt.Errorf("block %q: %w: %w", registered.name, ErrTokenCountFailed, err)
 			}
 			if used > blockBudget {
-				return nil, fmt.Errorf("block %q: %w", registered.name, ErrStrategyExceededBudget)
+				return BuildResult{}, fmt.Errorf("block %q: %w", registered.name, ErrStrategyExceededBudget)
 			}
 			remaining -= used
 			postEviction = append(postEviction, NamedBlock{
 				Name: registered.name,
 				Block: MemoryBlock{
-					Strategy:     block.Strategy,
-					Messages:     out,
-					MaxTokens:    block.MaxTokens,
-					CacheControl: cloneMap(block.CacheControl),
+					Strategy:  block.Strategy,
+					Messages:  rawOut,
+					MaxTokens: block.MaxTokens,
 				},
 			})
 		}
@@ -126,14 +182,17 @@ func (b *Builder) Build(ctx context.Context) ([]Message, error) {
 	}
 	finalMessages, err := formatter.Format(ctx, cloneNamedBlocks(postEviction))
 	if err != nil {
-		return nil, fmt.Errorf("contexty: format: %w", err)
+		return BuildResult{}, fmt.Errorf("contexty: format: %w", err)
 	}
 	finalTokens, err := counter.Count(ctx, finalMessages)
 	if err != nil {
-		return nil, fmt.Errorf("contexty: format: %w: %w", ErrTokenCountFailed, err)
+		return BuildResult{}, fmt.Errorf("contexty: format: %w: %w", ErrTokenCountFailed, err)
 	}
 	if finalTokens > b.maxTokens {
-		return nil, fmt.Errorf("contexty: format: %w", ErrFormatterExceededBudget)
+		return BuildResult{}, fmt.Errorf("contexty: format: %w", ErrFormatterExceededBudget)
 	}
-	return finalMessages, nil
+	return BuildResult{
+		Messages: cloneMessages(finalMessages),
+		Blocks:   cloneNamedBlocks(postEviction),
+	}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/skosovsky/contexty"
+	"github.com/skosovsky/contexty/testutil"
 )
 
 type loggingFormatter struct {
@@ -57,7 +58,7 @@ func applyFormatterMiddleware(formatter contexty.Formatter, middlewares ...conte
 func messageText(msg contexty.Message) string {
 	var builder strings.Builder
 	for _, part := range msg.Content {
-		if part.Type == "text" {
+		if part.Type == contexty.ContentPartTypeText {
 			builder.WriteString(part.Text)
 		}
 	}
@@ -69,15 +70,15 @@ func ExampleBuilder_Build() {
 	builder.AddBlock("instructions", contexty.MemoryBlock{
 		Strategy: contexty.NewStrictStrategy(),
 		Messages: []contexty.Message{
-			contexty.TextMessage("system", "You are helpful."),
+			contexty.TextMessage(contexty.RoleSystem, "You are helpful."),
 		},
 	})
 	builder.AddBlock("conversation", contexty.MemoryBlock{
-		Strategy: contexty.NewTruncateOldestStrategy(),
+		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{}),
 		Messages: []contexty.Message{
-			contexty.TextMessage("user", "hello"),
-			contexty.TextMessage("assistant", "hi"),
-			contexty.TextMessage("user", "need a summary"),
+			contexty.TextMessage(contexty.RoleUser, "hello"),
+			contexty.TextMessage(contexty.RoleAssistant, "hi"),
+			contexty.TextMessage(contexty.RoleUser, "need a summary"),
 		},
 	})
 
@@ -96,9 +97,9 @@ func ExampleEvictionMiddleware() {
 	strategy := applyEvictionMiddleware(contexty.NewDropTailStrategy(), loggingMiddleware)
 	counter := &contexty.FixedCounter{TokensPerMessage: 10}
 	msgs := []contexty.Message{
-		contexty.TextMessage("system", "first"),
-		contexty.TextMessage("system", "second"),
-		contexty.TextMessage("system", "third"),
+		contexty.TextMessage(contexty.RoleSystem, "first"),
+		contexty.TextMessage(contexty.RoleSystem, "second"),
+		contexty.TextMessage(contexty.RoleSystem, "third"),
 	}
 
 	out, err := strategy.Apply(context.Background(), msgs, 30, 20, counter)
@@ -119,11 +120,11 @@ func ExampleFormatterMiddleware() {
 	builder := contexty.NewBuilder(20, &contexty.FixedCounter{TokensPerMessage: 10})
 	builder.AddBlock("instructions", contexty.MemoryBlock{
 		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "A")},
+		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "A")},
 	})
 	builder.AddBlock("notes", contexty.MemoryBlock{
 		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "B")},
+		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "B")},
 	})
 	builder.WithFormatter(applyFormatterMiddleware(contexty.DefaultFormatter{}, loggingMiddleware))
 
@@ -137,4 +138,40 @@ func ExampleFormatterMiddleware() {
 	// blocks=2 messages=2
 	// A
 	// B
+}
+
+func ExampleThread_BuildContext() {
+	store := testutil.NewMemoryStore()
+	thread, err := contexty.NewThread(store, "thread-1", "history")
+	if err != nil {
+		return
+	}
+
+	builder := contexty.NewBuilder(20, &contexty.FixedCounter{TokensPerMessage: 10})
+	builder.AddBlock("instructions", contexty.MemoryBlock{
+		Strategy: contexty.NewStrictStrategy(),
+		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "Be concise.")},
+	})
+	builder.AddBlock("history", contexty.MemoryBlock{
+		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{}),
+	})
+
+	msgs, err := thread.BuildContext(context.Background(), builder, []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "first"),
+		contexty.TextMessage(contexty.RoleAssistant, "second"),
+	})
+	if err != nil {
+		return
+	}
+
+	fmt.Printf("messages=%d last=%s\n", len(msgs), messageText(msgs[len(msgs)-1]))
+
+	history, err := store.Load(context.Background(), "thread-1")
+	if err != nil {
+		return
+	}
+	fmt.Printf("stored=%d\n", len(history.Messages))
+	// Output:
+	// messages=2 last=second
+	// stored=1
 }

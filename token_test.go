@@ -31,7 +31,7 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &CharFallbackCounter{CharsPerToken: tt.charsPerToken}
-			msgs := []Message{TextMessage("user", tt.text)}
+			msgs := []Message{TextMessage(RoleUser, tt.text)}
 			got, err := c.Count(context.Background(), msgs)
 			if tt.wantErr {
 				require.Error(t, err)
@@ -47,19 +47,19 @@ func TestCharFallbackCounter_Count(t *testing.T) {
 func TestFixedCounter_Count(t *testing.T) {
 	ctx := context.Background()
 	c := &FixedCounter{TokensPerMessage: 10}
-	got, err := c.Count(ctx, []Message{TextMessage("user", "anything")})
+	got, err := c.Count(ctx, []Message{TextMessage(RoleUser, "anything")})
 	require.NoError(t, err)
 	assert.Equal(t, 10, got)
-	got, _ = c.Count(ctx, []Message{TextMessage("user", "")})
+	got, _ = c.Count(ctx, []Message{TextMessage(RoleUser, "")})
 	assert.Equal(t, 10, got)
 }
 
 func TestFixedCounter_CountPerMessage(t *testing.T) {
 	ctx := context.Background()
 	msgs := []Message{
-		TextMessage("user", "a"),
-		TextMessage("assistant", "b"),
-		TextMessage("user", "c"),
+		TextMessage(RoleUser, "a"),
+		TextMessage(RoleAssistant, "b"),
+		TextMessage(RoleUser, "c"),
 	}
 	c := &FixedCounter{TokensPerMessage: 5}
 	weights, err := c.CountPerMessage(ctx, msgs)
@@ -76,8 +76,8 @@ func TestFixedCounter_CountPerMessage(t *testing.T) {
 func TestCharFallbackCounter_CountPerMessage(t *testing.T) {
 	ctx := context.Background()
 	msgs := []Message{
-		TextMessage("user", "hello"),
-		TextMessage("assistant", "world"),
+		TextMessage(RoleUser, "hello"),
+		TextMessage(RoleAssistant, "world"),
 	}
 	c := &CharFallbackCounter{CharsPerToken: 4}
 	weights, err := c.CountPerMessage(ctx, msgs)
@@ -96,7 +96,7 @@ func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
 	// Message with text "ab" (2 runes) and one ToolCall. Without EstimateTool: (2+2)/4 = 1 token (Name empty, Arguments "{}" = 2 runes).
 	msgs := []Message{{
 		Role:    "assistant",
-		Content: []ContentPart{{Type: "text", Text: "ab"}},
+		Content: []ContentPart{{Type: ContentPartTypeText, Text: "ab"}},
 		ToolCalls: []ToolCall{{
 			ID:       "call_1",
 			Type:     "function",
@@ -124,7 +124,7 @@ func FuzzCharFallbackCounter(f *testing.F) {
 			t.Skip()
 		}
 		c := &CharFallbackCounter{CharsPerToken: charsPerToken}
-		msgs := []Message{TextMessage("user", text)}
+		msgs := []Message{TextMessage(RoleUser, text)}
 		n, err := c.Count(context.Background(), msgs)
 		if err != nil {
 			t.Fatal(err)
@@ -137,7 +137,7 @@ func FuzzCharFallbackCounter(f *testing.F) {
 
 func BenchmarkCharFallbackCounter(b *testing.B) {
 	c := &CharFallbackCounter{CharsPerToken: 4}
-	msgs := []Message{TextMessage("user", "The quick brown fox jumps over the lazy dog. ")}
+	msgs := []Message{TextMessage(RoleUser, "The quick brown fox jumps over the lazy dog. ")}
 	for i := 0; i < b.N; i++ {
 		_, _ = c.Count(context.Background(), msgs)
 	}

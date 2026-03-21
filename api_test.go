@@ -17,24 +17,24 @@ func TestBuild_BlackBox(t *testing.T) {
 	builder.AddBlock("instructions", contexty.MemoryBlock{
 		Strategy: contexty.NewStrictStrategy(),
 		Messages: []contexty.Message{
-			contexty.TextMessage("system", "Keep answers concise."),
+			contexty.TextMessage(contexty.RoleSystem, "Keep answers concise."),
 		},
 	})
 	builder.AddBlock("profile", contexty.MemoryBlock{
 		Strategy:  contexty.NewDropTailStrategy(),
 		MaxTokens: 20,
 		Messages: []contexty.Message{
-			contexty.TextMessage("system", "Name: Anna"),
-			contexty.TextMessage("system", "Timezone: ICT"),
-			contexty.TextMessage("system", "Prefers plain text"),
+			contexty.TextMessage(contexty.RoleSystem, "Name: Anna"),
+			contexty.TextMessage(contexty.RoleSystem, "Timezone: ICT"),
+			contexty.TextMessage(contexty.RoleSystem, "Prefers plain text"),
 		},
 	})
 	builder.AddBlock("dialogue", contexty.MemoryBlock{
-		Strategy: contexty.NewTruncateOldestStrategy(),
+		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{}),
 		Messages: []contexty.Message{
-			contexty.TextMessage("user", "What should we do next?"),
-			contexty.TextMessage("assistant", "Implement the builder refactor."),
-			contexty.TextMessage("user", "Keep it compact."),
+			contexty.TextMessage(contexty.RoleUser, "What should we do next?"),
+			contexty.TextMessage(contexty.RoleAssistant, "Implement the builder refactor."),
+			contexty.TextMessage(contexty.RoleUser, "Keep it compact."),
 		},
 	})
 

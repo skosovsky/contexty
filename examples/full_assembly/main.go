@@ -25,7 +25,7 @@ func main() {
 
 func contentText(parts []contexty.ContentPart) string {
 	for _, p := range parts {
-		if p.Type == "text" {
+		if p.Type == contexty.ContentPartTypeText {
 			return p.Text
 		}
 	}
@@ -46,7 +46,7 @@ func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
 
 	builder.AddBlock("profile", contexty.MemoryBlock{
 		Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "Patient Name: Anna. Age: 30.")},
+		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30.")},
 	})
 
 	builder.AddBlock("reference_material", contexty.MemoryBlock{
@@ -56,10 +56,10 @@ func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
 	})
 
 	builder.AddBlock("conversation", contexty.MemoryBlock{
-		Strategy: contexty.NewTruncateOldestStrategy(
-			contexty.KeepTurnAtomicity(true),
-			contexty.MinMessages(2),
-		),
+		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
+			KeepTurnAtomicity: true,
+			MinMessages:       2,
+		}),
 		Messages: fetchConversation(),
 	})
 
@@ -79,23 +79,23 @@ func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
 
 func fetchReferenceMessages() []contexty.Message {
 	return []contexty.Message{
-		contexty.TextMessage("system", "Retrieved: Article about vitamin D and calcium."),
-		contexty.TextMessage("system", "Retrieved: Summary on magnesium and sleep."),
-		contexty.TextMessage("system", "Retrieved: Guidelines for daily intake."),
-		contexty.TextMessage("system", "Retrieved: Drug interactions with supplements."),
+		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Article about vitamin D and calcium."),
+		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Summary on magnesium and sleep."),
+		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Guidelines for daily intake."),
+		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Drug interactions with supplements."),
 	}
 }
 
 func fetchConversation() []contexty.Message {
 	return []contexty.Message{
-		contexty.TextMessage("user", "What supplements should I take?"),
-		contexty.TextMessage("assistant", "Consider vitamin D and calcium based on your profile."),
-		contexty.TextMessage("user", "Any side effects?"),
-		contexty.TextMessage("assistant", "Generally well tolerated. Discuss with your doctor."),
-		contexty.TextMessage("user", "Can I take them at night?"),
-		contexty.TextMessage("assistant", "Vitamin D can be taken anytime. Magnesium may help sleep."),
-		contexty.TextMessage("user", "Thanks."),
-		contexty.TextMessage("assistant", "You're welcome. Ask if you need more."),
+		contexty.TextMessage(contexty.RoleUser, "What supplements should I take?"),
+		contexty.TextMessage(contexty.RoleAssistant, "Consider vitamin D and calcium based on your profile."),
+		contexty.TextMessage(contexty.RoleUser, "Any side effects?"),
+		contexty.TextMessage(contexty.RoleAssistant, "Generally well tolerated. Discuss with your doctor."),
+		contexty.TextMessage(contexty.RoleUser, "Can I take them at night?"),
+		contexty.TextMessage(contexty.RoleAssistant, "Vitamin D can be taken anytime. Magnesium may help sleep."),
+		contexty.TextMessage(contexty.RoleUser, "Thanks."),
+		contexty.TextMessage(contexty.RoleAssistant, "You're welcome. Ask if you need more."),
 	}
 }
 

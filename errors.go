@@ -34,4 +34,14 @@ var (
 	// ErrBlockTooLarge is returned by DropTailStrategy when a single message
 	// still exceeds the limit after all trailing messages were dropped.
 	ErrBlockTooLarge = errors.New("contexty: block cannot be shrunk to fit limit")
+
+	// ErrBlockNotFound is returned when a Builder block lookup by name fails.
+	ErrBlockNotFound = errors.New("contexty: block not found")
+
+	// ErrInvalidThreadConfig is returned when Thread configuration is invalid.
+	ErrInvalidThreadConfig = errors.New("contexty: invalid thread config")
+
+	// ErrHistoryVersionConflict is returned when a store write is rejected because
+	// the thread history was modified concurrently (optimistic concurrency).
+	ErrHistoryVersionConflict = errors.New("contexty: history version conflict")
 )

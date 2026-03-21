@@ -2,6 +2,20 @@ package contexty
 
 import "context"
 
+// Common chat roles. Use these instead of string literals so typos are caught at compile time.
+const (
+	RoleSystem    = "system"
+	RoleUser      = "user"
+	RoleAssistant = "assistant"
+	RoleTool      = "tool"
+)
+
+// Common ContentPart.Type values (library does not validate Type).
+const (
+	ContentPartTypeText     = "text"
+	ContentPartTypeImageURL = "image_url"
+)
+
 // ContentPart represents a single part of message content (text or image).
 // Type is not validated by the library; typical values are "text", "image_url".
 type ContentPart struct {
@@ -31,17 +45,20 @@ type FunctionCall struct {
 }
 
 // Message is the minimal unit of context: a single chat turn with role and content.
-// v2: Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
-// ToolCalls and Metadata support agents and prompt caching; no validation is performed by the library.
-// CacheControl holds provider-specific cache metadata (e.g. {"type": "ephemeral"}); not interpreted by the library.
+// Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
+// ToolCalls and Metadata support agents; no validation is performed by the library.
 type Message struct {
-	Role         string
-	Content      []ContentPart // Always slice; text-only = one part with Type "text"
-	Name         string        // Optional: function name for tool messages
-	ToolCalls    []ToolCall
-	ToolCallID   string
-	Metadata     map[string]any
-	CacheControl map[string]any // Optional: cache hint for provider; set by Builder from block.CacheControl when non-nil
+	Role       string
+	Content    []ContentPart // Always slice; text-only = one part with Type ContentPartTypeText
+	Name       string        // Optional: function name for tool messages
+	ToolCalls  []ToolCall
+	ToolCallID string
+	Metadata   map[string]any
+}
+
+// Clone returns a deep copy of the message suitable for safe reuse across builders and stores.
+func (m Message) Clone() Message {
+	return cloneMessage(m)
 }
 
 // TokenCounter counts tokens for a slice of messages.
@@ -57,7 +74,7 @@ type TokenCounter interface {
 }
 
 // EvictionStrategy defines how to shrink or trim a block to fit the remaining budget.
-// Each MemoryBlock has its own strategy (strict, drop, truncate, summarize).
+// Each MemoryBlock has its own strategy (strict, drop, drop-head, summarize).
 //
 // Apply receives originalTokens (pre-counted by Builder) for DRY; implementations must
 // return messages whose total token count <= limit. Build re-counts output and
@@ -78,13 +95,10 @@ type Summarizer interface {
 // MemoryBlock is a logical group of messages with an EvictionStrategy.
 // MaxTokens is optional: when > 0 and less than the remaining global budget, Apply receives
 // this value as the limit so the block is capped locally.
-// CacheControl: when non-nil and non-empty, Build sets the last message of this block's output
-// with this map so the provider can treat it as a cache boundary; not interpreted by the library.
 type MemoryBlock struct {
-	Strategy     EvictionStrategy
-	Messages     []Message
-	MaxTokens    int            // Optional: hard per-block token limit (0 = no limit)
-	CacheControl map[string]any // Optional: applied to last message of block output when non-empty
+	Strategy  EvictionStrategy
+	Messages  []Message
+	MaxTokens int // Optional: hard per-block token limit (0 = no limit)
 }
 
 // NamedBlock pairs a block snapshot with its registration name.
@@ -111,7 +125,7 @@ type FormatterMiddleware func(Formatter) Formatter
 func TextMessage(role, text string) Message {
 	return Message{
 		Role:    role,
-		Content: []ContentPart{{Type: "text", Text: text}},
+		Content: []ContentPart{{Type: ContentPartTypeText, Text: text}},
 	}
 }
 

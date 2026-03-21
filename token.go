@@ -53,17 +53,22 @@ func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Messag
 	if c.CharsPerToken <= 0 {
 		return nil, ErrInvalidCharsPerToken
 	}
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	nonTextWeight := c.TokensPerNonTextPart
 	if nonTextWeight <= 0 {
 		nonTextWeight = DefaultTokensPerNonTextPart
 	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var runes int
 		runes += utf8.RuneCountInString(m.Name)
 		for _, p := range m.Content {
-			if p.Type == "text" {
+			if p.Type == ContentPartTypeText {
 				runes += utf8.RuneCountInString(p.Text)
 			} else {
 				runes += nonTextWeight * c.CharsPerToken

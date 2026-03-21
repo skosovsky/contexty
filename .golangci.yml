@@ -10,11 +10,14 @@ output:
 
 formatters:
   enable:
-    - goimports
+    - gofumpt
+    - gci
   settings:
-    goimports:
-      local-prefixes:
-        - github.com/skosovsky/contexty
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/skosovsky/contexty)
 
 linters-settings:
   errcheck:
@@ -49,16 +52,13 @@ linters:
     - testifylint
     - unconvert
     - sloglint
+    - copyloopvar
 
 issues:
-  exclude-use-default: false
-  max-issues-per-linter: 50
-  max-same-issues: 3
+  exclude-use-default: true
+  # Tests: relax gosec (test doubles) and revive (naming/comments on test helpers). errcheck stays enabled.
   exclude-rules:
     - path: '(.+)_test\.go$'
       linters:
-        - errcheck
         - gosec
         - revive
-    - path: vendor/
-      text: ".*"

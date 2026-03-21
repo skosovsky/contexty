@@ -82,25 +82,19 @@ func (s *dropTailStrategy) Apply(ctx context.Context, msgs []Message, originalTo
 	return nil, ErrBlockTooLarge
 }
 
-// truncateOldestStrategy removes messages from the start until the block fits.
-// Starts with total := originalTokens; re-counts remaining slice when trimming (unavoidable for per-message overhead).
-type truncateOldestStrategy struct {
-	cfg truncateConfig
+// dropHeadStrategy removes older messages from the front until the block fits.
+type dropHeadStrategy struct {
+	cfg DropHeadConfig
 }
 
-// NewTruncateOldestStrategy returns a strategy that truncates from the oldest messages.
-// Options: KeepTurnAtomicity, MinMessages, ProtectRole.
-func NewTruncateOldestStrategy(opts ...TruncateOption) EvictionStrategy {
-	cfg := truncateConfig{}
-	for _, opt := range opts {
-		opt(&cfg)
-	}
-	return &truncateOldestStrategy{cfg: cfg}
+// NewDropHeadStrategy returns a strategy that trims older messages from the front.
+func NewDropHeadStrategy(cfg DropHeadConfig) EvictionStrategy {
+	return &dropHeadStrategy{cfg: cfg.normalized()}
 }
 
-func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
+func (s *dropHeadStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("contexty: truncate: %w", err)
+		return nil, fmt.Errorf("contexty: drop head: %w", err)
 	}
 	if len(msgs) == 0 {
 		return nil, nil
@@ -110,101 +104,132 @@ func (s *truncateOldestStrategy) Apply(ctx context.Context, msgs []Message, orig
 	}
 	weights, err := counter.CountPerMessage(ctx, msgs)
 	if err != nil {
-		return nil, fmt.Errorf("contexty: truncate: %w: %w", ErrTokenCountFailed, err)
+		return nil, fmt.Errorf("contexty: drop head: %w: %w", ErrTokenCountFailed, err)
 	}
 	if len(weights) != len(msgs) {
 		return nil, fmt.Errorf("token counter returned %d weights for %d messages: %w", len(weights), len(msgs), ErrTokenCountFailed)
 	}
-	// Binary search (suffix-based: "keep from index i") is only valid when we are free to drop
-	// any prefix by index. ProtectRole and KeepTurnAtomicity require removing the "first
-	// removable" message or atomic tool-turn, which is not the same as cutting at an arbitrary index;
-	// using binary search with those options would break their semantics, so we use the
-	// sequential path when either option is set.
-	if len(s.cfg.protectedRoles) == 0 && !s.cfg.keepTurnAtomicity {
-		// Build suffix sums once so binary search can use O(1) lookup per iteration.
-		// suffixSum[i] = token count of msgs[i:]
-		suffixSum := make([]int, len(weights)+1)
-		for i := len(weights) - 1; i >= 0; i-- {
-			suffixSum[i] = suffixSum[i+1] + weights[i]
-		}
-		bestValidIdx := len(msgs)
-		low, high := 0, len(msgs)
-		for low <= high {
-			mid := low + (high-low)/2
-			if suffixSum[mid] <= limit {
-				bestValidIdx = mid
-				high = mid - 1
-			} else {
-				low = mid + 1
-			}
-		}
-		out := msgs[bestValidIdx:]
-		if s.cfg.minMessages > 0 && len(out) < s.cfg.minMessages {
-			return nil, nil
-		}
-		return slices.Clone(out), nil
+	if s.usesFastPath() {
+		return s.applyFastPath(msgs, weights, limit), nil
 	}
-	var protected map[string]struct{}
-	if len(s.cfg.protectedRoles) > 0 {
-		protected = make(map[string]struct{}, len(s.cfg.protectedRoles))
-		for _, r := range s.cfg.protectedRoles {
-			protected[r] = struct{}{}
-		}
-	}
-	cur := slices.Clone(msgs)
-	weightsCur := slices.Clone(weights)
-	deleted := make([]bool, len(cur))
-	total := originalTokens
-	searchStart := 0
-	for total > limit {
-		i := -1
-		for j := searchStart; j < len(cur); j++ {
-			if deleted[j] {
-				continue
-			}
-			if protected != nil {
-				if _, ok := protected[cur[j].Role]; ok {
-					continue
-				}
-			}
-			i = j
-			break
-		}
-		if i == -1 {
-			break
-		}
-		endIdx := i
-		if s.cfg.keepTurnAtomicity && cur[i].Role == "assistant" && len(cur[i].ToolCalls) > 0 {
-			endIdx = s.toolTurnBlockSize(cur, i, deleted)
-		}
-		for k := i; k <= endIdx && k < len(cur); k++ {
-			if !deleted[k] {
-				deleted[k] = true
-				total -= weightsCur[k]
-			}
-		}
-		searchStart = endIdx + 1
-	}
-	out := make([]Message, 0, len(cur))
-	for idx, m := range cur {
-		if !deleted[idx] {
-			out = append(out, m)
-		}
-	}
-	if len(out) == 0 {
-		return nil, nil
-	}
-	if s.cfg.minMessages > 0 && len(out) < s.cfg.minMessages {
-		return nil, nil
-	}
-	return out, nil
+	return s.applySelectivePath(ctx, dropHeadState{
+		msgs:    slices.Clone(msgs),
+		weights: slices.Clone(weights),
+		deleted: make([]bool, len(msgs)),
+		total:   originalTokens,
+	}, limit)
 }
 
-// toolTurnBlockSize returns the last index (inclusive) of the atomic tool-turn block
+type dropHeadState struct {
+	msgs        []Message
+	weights     []int
+	deleted     []bool
+	total       int
+	searchStart int
+}
+
+func (s *dropHeadStrategy) usesFastPath() bool {
+	return len(s.cfg.ProtectedRoles) == 0 && !s.cfg.KeepTurnAtomicity
+}
+
+func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit int) []Message {
+	// Binary search (suffix-based: "keep from index i") is only valid when we are free to
+	// drop any prefix by index. ProtectedRoles and KeepTurnAtomicity require removing the
+	// first droppable message or atomic tool-turn instead of an arbitrary prefix.
+	suffixSum := make([]int, len(weights)+1)
+	for i := len(weights) - 1; i >= 0; i-- {
+		suffixSum[i] = suffixSum[i+1] + weights[i]
+	}
+	bestValidIdx := len(msgs)
+	low, high := 0, len(msgs)
+	for low <= high {
+		mid := low + (high-low)/2
+		if suffixSum[mid] <= limit {
+			bestValidIdx = mid
+			high = mid - 1
+		} else {
+			low = mid + 1
+		}
+	}
+	return s.enforceMinMessages(slices.Clone(msgs[bestValidIdx:]))
+}
+
+func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHeadState, limit int) ([]Message, error) {
+	protected := s.protectedRoleSet()
+	for state.total > limit {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("contexty: drop head: %w", err)
+		}
+		startIdx := s.findFirstDroppableIndex(state, protected)
+		if startIdx == -1 {
+			break
+		}
+		endIdx := startIdx
+		if s.cfg.KeepTurnAtomicity && state.msgs[startIdx].Role == RoleAssistant && len(state.msgs[startIdx].ToolCalls) > 0 {
+			endIdx = s.toolTurnEndIndex(state.msgs, startIdx, state.deleted)
+		}
+		for idx := startIdx; idx <= endIdx && idx < len(state.msgs); idx++ {
+			if state.deleted[idx] {
+				continue
+			}
+			state.deleted[idx] = true
+			state.total -= state.weights[idx]
+		}
+		state.searchStart = endIdx + 1
+	}
+	if state.total > limit {
+		return nil, nil
+	}
+	out := make([]Message, 0, len(state.msgs))
+	for idx, msg := range state.msgs {
+		if !state.deleted[idx] {
+			out = append(out, msg)
+		}
+	}
+	return s.enforceMinMessages(out), nil
+}
+
+func (s *dropHeadStrategy) enforceMinMessages(msgs []Message) []Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	if s.cfg.MinMessages > 0 && len(msgs) < s.cfg.MinMessages {
+		return nil
+	}
+	return msgs
+}
+
+func (s *dropHeadStrategy) protectedRoleSet() map[string]struct{} {
+	if len(s.cfg.ProtectedRoles) == 0 {
+		return nil
+	}
+	protected := make(map[string]struct{}, len(s.cfg.ProtectedRoles))
+	for _, role := range s.cfg.ProtectedRoles {
+		protected[role] = struct{}{}
+	}
+	return protected
+}
+
+func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState, protected map[string]struct{}) int {
+	for idx := state.searchStart; idx < len(state.msgs); idx++ {
+		if state.deleted[idx] {
+			continue
+		}
+		if protected != nil {
+			if _, ok := protected[state.msgs[idx].Role]; ok {
+				continue
+			}
+		}
+		return idx
+	}
+	return -1
+}
+
+// toolTurnEndIndex returns the last index (inclusive) of the atomic tool-turn block
 // starting at startIdx (assistant with ToolCalls). Uses expectedIDs for strict matching
 // when ToolCallID is set; falls back to contiguous tool messages on anomaly or empty IDs.
 // When deleted is non-nil, skips indices j with deleted[j] when scanning for the block end.
-func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int, deleted []bool) int {
+func (s *dropHeadStrategy) toolTurnEndIndex(cur []Message, startIdx int, deleted []bool) int {
 	msg := cur[startIdx]
 	expectedIDs := make(map[string]bool)
 	for _, tc := range msg.ToolCalls {
@@ -218,7 +243,7 @@ func (s *truncateOldestStrategy) toolTurnBlockSize(cur []Message, startIdx int, 
 		if deleted != nil && deleted[j] {
 			continue
 		}
-		if cur[j].Role != "tool" {
+		if cur[j].Role != RoleTool {
 			break
 		}
 		if cur[j].ToolCallID != "" {
@@ -278,6 +303,6 @@ var (
 	_ EvictionStrategy = (*strictStrategy)(nil)
 	_ EvictionStrategy = (*dropStrategy)(nil)
 	_ EvictionStrategy = (*dropTailStrategy)(nil)
-	_ EvictionStrategy = (*truncateOldestStrategy)(nil)
+	_ EvictionStrategy = (*dropHeadStrategy)(nil)
 	_ EvictionStrategy = (*summarizeStrategy)(nil)
 )

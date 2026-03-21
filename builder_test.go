@@ -82,11 +82,11 @@ func TestBuild_OrderOnlyPriority(t *testing.T) {
 	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("first", MemoryBlock{
 		Strategy: NewDropStrategy(),
-		Messages: []Message{TextMessage("system", "first")},
+		Messages: []Message{TextMessage(RoleSystem, "first")},
 	})
 	b.AddBlock("second", MemoryBlock{
 		Strategy: NewDropStrategy(),
-		Messages: []Message{TextMessage("system", "second")},
+		Messages: []Message{TextMessage(RoleSystem, "second")},
 	})
 
 	msgs, err := b.Build(context.Background())
@@ -98,7 +98,7 @@ func TestBuild_OrderOnlyPriority(t *testing.T) {
 func TestBuild_NilStrategyErrorIncludesName(t *testing.T) {
 	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("broken", MemoryBlock{
-		Messages: []Message{TextMessage("system", "x")},
+		Messages: []Message{TextMessage(RoleSystem, "x")},
 	})
 
 	_, err := b.Build(context.Background())
@@ -108,43 +108,43 @@ func TestBuild_NilStrategyErrorIncludesName(t *testing.T) {
 }
 
 func TestBuild_IsRepeatableAcrossStrategies(t *testing.T) {
-	sum := &stubSummarizer{result: TextMessage("system", "summary")}
+	sum := &stubSummarizer{result: TextMessage(RoleSystem, "summary")}
 	b := NewBuilder(100, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("keep", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "keep")},
+		Messages: []Message{TextMessage(RoleSystem, "keep")},
 	})
 	b.AddBlock("drop", MemoryBlock{
 		Strategy:  NewDropStrategy(),
 		MaxTokens: 10,
 		Messages: []Message{
-			TextMessage("system", "drop-1"),
-			TextMessage("system", "drop-2"),
+			TextMessage(RoleSystem, "drop-1"),
+			TextMessage(RoleSystem, "drop-2"),
 		},
 	})
-	b.AddBlock("truncate", MemoryBlock{
-		Strategy:  NewTruncateOldestStrategy(),
+	b.AddBlock("drop_head", MemoryBlock{
+		Strategy:  NewDropHeadStrategy(DropHeadConfig{}),
 		MaxTokens: 10,
 		Messages: []Message{
-			TextMessage("user", "old"),
-			TextMessage("assistant", "new"),
+			TextMessage(RoleUser, "old"),
+			TextMessage(RoleAssistant, "new"),
 		},
 	})
 	b.AddBlock("summary", MemoryBlock{
 		Strategy:  NewSummarizeStrategy(sum),
 		MaxTokens: 10,
 		Messages: []Message{
-			TextMessage("user", "long"),
-			TextMessage("assistant", "block"),
+			TextMessage(RoleUser, "long"),
+			TextMessage(RoleAssistant, "block"),
 		},
 	})
 	b.AddBlock("tail", MemoryBlock{
 		Strategy:  NewDropTailStrategy(),
 		MaxTokens: 20,
 		Messages: []Message{
-			TextMessage("system", "tail-1"),
-			TextMessage("system", "tail-2"),
-			TextMessage("system", "tail-3"),
+			TextMessage(RoleSystem, "tail-1"),
+			TextMessage(RoleSystem, "tail-2"),
+			TextMessage(RoleSystem, "tail-3"),
 		},
 	})
 
@@ -170,14 +170,13 @@ func TestBuild_AddBlockSnapshotsInput(t *testing.T) {
 	block := MemoryBlock{
 		Strategy: NewStrictStrategy(),
 		Messages: []Message{{
-			Role: "system",
+			Role: RoleSystem,
 			Content: []ContentPart{
-				{Type: "text", Text: "original"},
-				{Type: "image_url", ImageURL: &ImageURL{URL: "https://example.com/original.png", Detail: "low"}},
+				{Type: ContentPartTypeText, Text: "original"},
+				{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://example.com/original.png", Detail: "low"}},
 			},
 			Metadata: map[string]any{"scope": "original"},
 		}},
-		CacheControl: map[string]any{"type": "ephemeral"},
 	}
 
 	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
@@ -186,7 +185,6 @@ func TestBuild_AddBlockSnapshotsInput(t *testing.T) {
 	block.Messages[0].Content[0].Text = "mutated"
 	block.Messages[0].Content[1].ImageURL.URL = "https://example.com/mutated.png"
 	block.Messages[0].Metadata["scope"] = "mutated"
-	block.CacheControl["type"] = "changed"
 
 	msgs, err := b.Build(context.Background())
 	require.NoError(t, err)
@@ -195,7 +193,6 @@ func TestBuild_AddBlockSnapshotsInput(t *testing.T) {
 	require.NotNil(t, msgs[0].Content[1].ImageURL)
 	assert.Equal(t, "https://example.com/original.png", msgs[0].Content[1].ImageURL.URL)
 	assert.Equal(t, "original", msgs[0].Metadata["scope"])
-	assert.Equal(t, "ephemeral", msgs[0].CacheControl["type"])
 }
 
 func TestBuild_FormatterMutationDoesNotAffectFutureBuilds(t *testing.T) {
@@ -203,7 +200,7 @@ func TestBuild_FormatterMutationDoesNotAffectFutureBuilds(t *testing.T) {
 	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("snapshot", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "original")},
+		Messages: []Message{TextMessage(RoleSystem, "original")},
 	})
 	b.WithFormatter(formatter)
 
@@ -223,12 +220,12 @@ func TestBuild_FormatterOverBudget(t *testing.T) {
 	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("only", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "x")},
+		Messages: []Message{TextMessage(RoleSystem, "x")},
 	})
 	b.WithFormatter(formatterFunc(func(_ context.Context, _ []NamedBlock) ([]Message, error) {
 		return []Message{
-			TextMessage("system", "x"),
-			TextMessage("system", "y"),
+			TextMessage(RoleSystem, "x"),
+			TextMessage(RoleSystem, "y"),
 		}, nil
 	}))
 
@@ -242,14 +239,14 @@ func TestBuild_StrategyCannotExceedLocalBlockBudget(t *testing.T) {
 	b.AddBlock("limited", MemoryBlock{
 		Strategy: invalidBudgetStrategy{
 			out: []Message{
-				TextMessage("system", "first"),
-				TextMessage("system", "second"),
+				TextMessage(RoleSystem, "first"),
+				TextMessage(RoleSystem, "second"),
 			},
 		},
 		MaxTokens: 10,
 		Messages: []Message{
-			TextMessage("system", "first"),
-			TextMessage("system", "second"),
+			TextMessage(RoleSystem, "first"),
+			TextMessage(RoleSystem, "second"),
 		},
 	})
 
@@ -258,44 +255,39 @@ func TestBuild_StrategyCannotExceedLocalBlockBudget(t *testing.T) {
 	require.ErrorIs(t, err, ErrStrategyExceededBudget)
 }
 
-func TestBuild_DefaultFormatterPreservesOrderAndCacheControl(t *testing.T) {
+func TestBuild_DefaultFormatterPreservesOrder(t *testing.T) {
 	b := NewBuilder(30, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("alpha", MemoryBlock{
 		Strategy: NewStrictStrategy(),
 		Messages: []Message{
-			TextMessage("system", "alpha-1"),
-			TextMessage("system", "alpha-2"),
+			TextMessage(RoleSystem, "alpha-1"),
+			TextMessage(RoleSystem, "alpha-2"),
 		},
-		CacheControl: map[string]any{"type": "ephemeral"},
 	})
 	b.AddBlock("beta", MemoryBlock{
 		Strategy: NewStrictStrategy(),
 		Messages: []Message{
-			TextMessage("system", "beta-1"),
+			TextMessage(RoleSystem, "beta-1"),
 		},
-		CacheControl: map[string]any{"mode": "sticky"},
 	})
 
 	msgs, err := b.Build(context.Background())
 	require.NoError(t, err)
 	require.Len(t, msgs, 3)
 	assert.Equal(t, "alpha-1", msgs[0].Content[0].Text)
-	assert.Nil(t, msgs[0].CacheControl)
 	assert.Equal(t, "alpha-2", msgs[1].Content[0].Text)
-	assert.Equal(t, "ephemeral", msgs[1].CacheControl["type"])
 	assert.Equal(t, "beta-1", msgs[2].Content[0].Text)
-	assert.Equal(t, "sticky", msgs[2].CacheControl["mode"])
 }
 
 func TestBuild_CustomFormatterReceivesNamedBlocks(t *testing.T) {
 	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("first", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "a")},
+		Messages: []Message{TextMessage(RoleSystem, "a")},
 	})
 	b.AddBlock("second", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "b")},
+		Messages: []Message{TextMessage(RoleSystem, "b")},
 	})
 
 	var gotNames []string
@@ -318,7 +310,7 @@ func TestBuild_PassesContextToFormatter(t *testing.T) {
 	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
 	b.AddBlock("only", MemoryBlock{
 		Strategy: NewStrictStrategy(),
-		Messages: []Message{TextMessage("system", "x")},
+		Messages: []Message{TextMessage(RoleSystem, "x")},
 	})
 
 	var got any
@@ -330,4 +322,98 @@ func TestBuild_PassesContextToFormatter(t *testing.T) {
 	_, err := b.Build(context.WithValue(context.Background(), key, "span-123"))
 	require.NoError(t, err)
 	assert.Equal(t, "span-123", got)
+}
+
+func TestBuildDetailed_ReturnsPostEvictionBlocksAndMessages(t *testing.T) {
+	b := NewBuilder(10, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("history", MemoryBlock{
+		Strategy: NewDropHeadStrategy(DropHeadConfig{}),
+		Messages: []Message{
+			TextMessage(RoleUser, "old"),
+			TextMessage(RoleAssistant, "new"),
+		},
+	})
+
+	flat, err := b.Build(context.Background())
+	require.NoError(t, err)
+
+	detailed, err := b.BuildDetailed(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, flat, detailed.Messages)
+	require.Len(t, detailed.Blocks, 1)
+	assert.Equal(t, "history", detailed.Blocks[0].Name)
+	require.Len(t, detailed.Blocks[0].Block.Messages, 1)
+	assert.Equal(t, "new", detailed.Blocks[0].Block.Messages[0].Content[0].Text)
+}
+
+func TestBuildDetailed_FormatterReceivesDeepCopiedPostEvictionBlocks(t *testing.T) {
+	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("history", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{
+			TextMessage(RoleUser, "old"),
+			TextMessage(RoleAssistant, "new"),
+		},
+	})
+
+	var seen []NamedBlock
+	b.WithFormatter(formatterFunc(func(ctx context.Context, blocks []NamedBlock) ([]Message, error) {
+		seen = cloneNamedBlocks(blocks)
+		return DefaultFormatter{}.Format(ctx, blocks)
+	}))
+
+	detailed, err := b.BuildDetailed(context.Background())
+	require.NoError(t, err)
+
+	require.Len(t, seen, 1)
+	require.Len(t, seen[0].Block.Messages, 2)
+	assert.Equal(t, "new", seen[0].Block.Messages[1].Content[0].Text)
+
+	require.Len(t, detailed.Blocks, 1)
+	require.Len(t, detailed.Blocks[0].Block.Messages, 2)
+	assert.Equal(t, detailed.Blocks[0].Block.Messages[1].Content[0].Text, seen[0].Block.Messages[1].Content[0].Text)
+
+	require.Len(t, detailed.Messages, 2)
+	assert.Equal(t, "new", detailed.Messages[1].Content[0].Text)
+}
+
+func TestBuilderClone_DeepCopiesBlocks(t *testing.T) {
+	original := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
+	original.AddBlock("history", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{{
+			Role: RoleUser,
+			Content: []ContentPart{
+				{Type: ContentPartTypeText, Text: "original"},
+			},
+			Metadata: map[string]any{"nested": map[string]any{"value": "a"}},
+		}},
+	})
+
+	cloned := original.Clone()
+	require.NoError(t, cloned.SetBlockMessages("history", []Message{{
+		Role: RoleUser,
+		Content: []ContentPart{
+			{Type: ContentPartTypeText, Text: "changed"},
+		},
+		Metadata: map[string]any{"nested": map[string]any{"value": "b"}},
+	}}))
+
+	got, err := original.BuildDetailed(context.Background())
+	require.NoError(t, err)
+	require.Len(t, got.Blocks, 1)
+	assert.Equal(t, "original", got.Blocks[0].Block.Messages[0].Content[0].Text)
+	assert.Equal(t, "a", got.Blocks[0].Block.Messages[0].Metadata["nested"].(map[string]any)["value"])
+}
+
+func TestBuilderSetBlockMessages_UnknownBlock(t *testing.T) {
+	b := NewBuilder(20, &FixedCounter{TokensPerMessage: 10})
+	b.AddBlock("known", MemoryBlock{
+		Strategy: NewStrictStrategy(),
+		Messages: []Message{TextMessage(RoleUser, "hello")},
+	})
+
+	err := b.SetBlockMessages("missing", []Message{TextMessage(RoleUser, "x")})
+	require.Error(t, err)
+	assert.ErrorIs(t, err, ErrBlockNotFound)
 }

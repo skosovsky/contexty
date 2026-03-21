@@ -8,7 +8,7 @@ func cloneMessages(msgs []Message) []Message {
 	}
 	cloned := make([]Message, len(msgs))
 	for i, msg := range msgs {
-		cloned[i] = cloneMessage(msg)
+		cloned[i] = msg.Clone()
 	}
 	return cloned
 }
@@ -18,7 +18,6 @@ func cloneMessage(msg Message) Message {
 	cloned.Content = cloneContentParts(msg.Content)
 	cloned.ToolCalls = slices.Clone(msg.ToolCalls)
 	cloned.Metadata = cloneMap(msg.Metadata)
-	cloned.CacheControl = cloneMap(msg.CacheControl)
 	return cloned
 }
 
@@ -40,7 +39,6 @@ func cloneContentParts(parts []ContentPart) []ContentPart {
 func cloneBlock(block MemoryBlock) MemoryBlock {
 	cloned := block
 	cloned.Messages = cloneMessages(block.Messages)
-	cloned.CacheControl = cloneMap(block.CacheControl)
 	return cloned
 }
 
@@ -64,7 +62,29 @@ func cloneMap(src map[string]any) map[string]any {
 	}
 	dst := make(map[string]any, len(src))
 	for key, value := range src {
-		dst[key] = value
+		dst[key] = cloneValue(value)
 	}
 	return dst
+}
+
+func cloneValue(value any) any {
+	switch v := value.(type) {
+	case map[string]any:
+		return cloneMap(v)
+	case []any:
+		return cloneAnySlice(v)
+	default:
+		return v
+	}
+}
+
+func cloneAnySlice(values []any) []any {
+	if values == nil {
+		return nil
+	}
+	out := make([]any, len(values))
+	for i, value := range values {
+		out[i] = cloneValue(value)
+	}
+	return out
 }

@@ -1,6 +1,9 @@
 package contexty
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // FixedCounter returns a token count derived from message structure for testing.
 // Enables realistic eviction tests: removing one "heavy" message frees many tokens.
@@ -28,9 +31,14 @@ func (c *FixedCounter) Count(ctx context.Context, msgs []Message) (int, error) {
 
 // CountPerMessage returns one weight per message: TokensPerMessage + optional ContentPart/ToolCall extras.
 func (c *FixedCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("contexty: fixed counter: %w", err)
+	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("contexty: fixed counter: %w", err)
+		}
 		w := c.TokensPerMessage
 		if c.TokensPerContentPart != 0 {
 			w += len(m.Content) * c.TokensPerContentPart

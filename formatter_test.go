@@ -15,8 +15,8 @@ func TestDefaultFormatter_ConcatenatesBlocks(t *testing.T) {
 			Name: "first",
 			Block: MemoryBlock{
 				Messages: []Message{
-					TextMessage("system", "a"),
-					TextMessage("system", "b"),
+					TextMessage(RoleSystem, "a"),
+					TextMessage(RoleSystem, "b"),
 				},
 			},
 		},
@@ -24,7 +24,7 @@ func TestDefaultFormatter_ConcatenatesBlocks(t *testing.T) {
 			Name: "second",
 			Block: MemoryBlock{
 				Messages: []Message{
-					TextMessage("system", "c"),
+					TextMessage(RoleSystem, "c"),
 				},
 			},
 		},
@@ -42,7 +42,7 @@ func TestDefaultFormatter_ReturnsDetachedMessages(t *testing.T) {
 	blocks := []NamedBlock{{
 		Name: "first",
 		Block: MemoryBlock{
-			Messages: []Message{TextMessage("system", "original")},
+			Messages: []Message{TextMessage(RoleSystem, "original")},
 		},
 	}}
 
