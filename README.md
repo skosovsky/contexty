@@ -26,7 +26,7 @@ make fix
 
 `make test-all`, `make lint-all`, and `make fix-all` are aliases for `make test`, `make lint`, and `make fix`. Use a local clone with `go.work` so adapters resolve the **local** `contexty` tree (no unpublished version tags required for day-to-day work).
 
-`make bench` runs benchmarks across the workspace. `make cover` writes a single `coverage.out` at the repo root and prints `go tool cover -func`. `make fuzz` runs `go test -fuzz` per package in each module that contains `func Fuzz*` (modules without fuzz targets are skipped; Go does not support `-fuzz` with `./...` across multiple packages).
+`make bench` runs benchmarks across the workspace. `make cover` writes a single `coverage.out` at the repo root and prints `go tool cover -func`. Fuzz targets live in `*_test.go` files with `//go:build fuzz` so they are not compiled by plain `go test ./...`. `make fuzz` runs `go test -tags=fuzz -fuzz` **per package** in each module that has fuzz tests (Go does not allow `-fuzz` across multiple packages in one invocation).
 
 ## Fail-fast API (panics)
 

@@ -26,7 +26,13 @@ type loggingStrategy struct {
 	next contexty.EvictionStrategy
 }
 
-func (s loggingStrategy) Apply(ctx context.Context, msgs []contexty.Message, originalTokens int, limit int, counter contexty.TokenCounter) ([]contexty.Message, error) {
+func (s loggingStrategy) Apply(
+	ctx context.Context,
+	msgs []contexty.Message,
+	originalTokens int,
+	limit int,
+	counter contexty.TokenCounter,
+) ([]contexty.Message, error) {
 	out, err := s.next.Apply(ctx, msgs, originalTokens, limit, counter)
 	if err != nil {
 		return nil, err
@@ -39,7 +45,10 @@ func (s loggingStrategy) Apply(ctx context.Context, msgs []contexty.Message, ori
 	return out, nil
 }
 
-func applyEvictionMiddleware(strategy contexty.EvictionStrategy, middlewares ...contexty.EvictionMiddleware) contexty.EvictionStrategy {
+func applyEvictionMiddleware(
+	strategy contexty.EvictionStrategy,
+	middlewares ...contexty.EvictionMiddleware,
+) contexty.EvictionStrategy {
 	wrapped := strategy
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		wrapped = middlewares[i](wrapped)
@@ -47,7 +56,10 @@ func applyEvictionMiddleware(strategy contexty.EvictionStrategy, middlewares ...
 	return wrapped
 }
 
-func applyFormatterMiddleware(formatter contexty.Formatter, middlewares ...contexty.FormatterMiddleware) contexty.Formatter {
+func applyFormatterMiddleware(
+	formatter contexty.Formatter,
+	middlewares ...contexty.FormatterMiddleware,
+) contexty.Formatter {
 	wrapped := formatter
 	for i := len(middlewares) - 1; i >= 0; i-- {
 		wrapped = middlewares[i](wrapped)

@@ -2,6 +2,7 @@ package contexty
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -93,7 +94,7 @@ func (b *Builder) Clone() *Builder {
 // SetBlockMessages replaces the messages of a named block using a deep copy of msgs.
 func (b *Builder) SetBlockMessages(name string, msgs []Message) error {
 	if b == nil {
-		return fmt.Errorf("contexty: set block messages: nil builder")
+		return errors.New("contexty: set block messages: nil builder")
 	}
 	for i := range b.blocks {
 		if b.blocks[i].name == name {
@@ -118,6 +119,8 @@ func (b *Builder) Build(ctx context.Context) ([]Message, error) {
 
 // BuildDetailed assembles the configured blocks and returns formatter output plus
 // raw post-eviction block snapshots for orchestration.
+//
+//nolint:gocognit // Sequential block loop: eviction, budget checks, and strategy branches belong in one flow for readability.
 func (b *Builder) BuildDetailed(ctx context.Context) (BuildResult, error) {
 	if b.maxTokens <= 0 || b.counter == nil {
 		return BuildResult{}, ErrInvalidConfig

@@ -42,7 +42,12 @@ func (s *MemoryStore) Load(_ context.Context, threadID string) (contexty.History
 }
 
 // Append appends deep-copied msgs when expectedVersion matches.
-func (s *MemoryStore) Append(_ context.Context, threadID string, expectedVersion int64, msgs ...contexty.Message) error {
+func (s *MemoryStore) Append(
+	_ context.Context,
+	threadID string,
+	expectedVersion int64,
+	msgs ...contexty.Message,
+) error {
 	if len(msgs) == 0 {
 		return nil
 	}

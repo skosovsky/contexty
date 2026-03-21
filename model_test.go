@@ -16,9 +16,13 @@ func TestTextMessage(t *testing.T) {
 }
 
 func TestMultipartMessage(t *testing.T) {
-	msg := MultipartMessage("user",
+	msg := MultipartMessage(
+		"user",
 		ContentPart{Type: ContentPartTypeText, Text: "hello"},
-		ContentPart{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "high"}},
+		ContentPart{
+			Type:     ContentPartTypeImageURL,
+			ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "high"},
+		},
 	)
 	assert.Equal(t, "user", msg.Role)
 	require.Len(t, msg.Content, 2)

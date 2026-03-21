@@ -11,6 +11,11 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
+const (
+	previewMaxRunes   = 60
+	fixedTokensPerMsg = 25
+)
+
 func main() {
 	ctx := context.Background()
 	msgs, err := buildPrompt(ctx)
@@ -19,7 +24,7 @@ func main() {
 	}
 	fmt.Printf("Built %d messages\n", len(msgs))
 	for i, m := range msgs {
-		fmt.Printf("  [%d] %s: %q\n", i, m.Role, trunc(contentText(m.Content), 60))
+		fmt.Printf("  [%d] %s: %q\n", i, m.Role, trunc(contentText(m.Content), previewMaxRunes))
 	}
 }
 
@@ -34,7 +39,7 @@ func contentText(parts []contexty.ContentPart) string {
 
 func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
 	// FixedCounter so total size is predictable; total content exceeds maxTokens to trigger evictions.
-	counter := &contexty.FixedCounter{TokensPerMessage: 25}
+	counter := &contexty.FixedCounter{TokensPerMessage: fixedTokensPerMsg}
 	const maxTokens = 200
 
 	builder := contexty.NewBuilder(maxTokens, counter)
@@ -49,16 +54,19 @@ func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
 		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30.")},
 	})
 
+	const referenceBlockMaxTokens = 75
+	const conversationMinMessages = 2
+
 	builder.AddBlock("reference_material", contexty.MemoryBlock{
 		Strategy:  contexty.NewDropTailStrategy(),
-		MaxTokens: 75,
+		MaxTokens: referenceBlockMaxTokens,
 		Messages:  fetchReferenceMessages(),
 	})
 
 	builder.AddBlock("conversation", contexty.MemoryBlock{
 		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
 			KeepTurnAtomicity: true,
-			MinMessages:       2,
+			MinMessages:       conversationMinMessages,
 		}),
 		Messages: fetchConversation(),
 	})

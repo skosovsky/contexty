@@ -43,7 +43,7 @@ type MessageSerializer interface {
 // DefaultJSONSerializer marshals Message values using encoding/json.
 //
 // JSON numbers in Metadata deserialize as float64 when using map[string]any; callers
-// who need stable integer types should use json.RawMessage metadata or normalize
+// who need stable integer types should use [json.RawMessage] metadata or normalize
 // after load. See migration notes in README.
 type DefaultJSONSerializer struct{}
 

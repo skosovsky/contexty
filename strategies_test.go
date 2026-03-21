@@ -241,7 +241,11 @@ func TestDropHeadStrategy(t *testing.T) {
 		// [user, assistant(tool_calls), tool, tool, user] = 50 tokens. Limit 21: remove user (10), then assistant+tool+tool (30) as one unit -> [user] = 10.
 		block := []Message{
 			TextMessage(RoleUser, "u1"),
-			{Role: RoleAssistant, Content: []ContentPart{{Type: ContentPartTypeText, Text: "call"}}, ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}}},
+			{
+				Role:      RoleAssistant,
+				Content:   []ContentPart{{Type: ContentPartTypeText, Text: "call"}},
+				ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}},
+			},
 			TextMessage(RoleTool, "r1"),
 			TextMessage(RoleTool, "r2"),
 			TextMessage(RoleUser, "u2"),
@@ -305,7 +309,11 @@ func TestDropHeadStrategy(t *testing.T) {
 		// Tool messages without ToolCallID: whole contiguous run is one atomic block (existing test covers this).
 		block := []Message{
 			TextMessage(RoleUser, "u1"),
-			{Role: RoleAssistant, Content: []ContentPart{{Type: ContentPartTypeText, Text: "x"}}, ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}}},
+			{
+				Role:      RoleAssistant,
+				Content:   []ContentPart{{Type: ContentPartTypeText, Text: "x"}},
+				ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}},
+			},
 			TextMessage(RoleTool, "r1"),
 			TextMessage(RoleUser, "u2"),
 		}
@@ -404,7 +412,11 @@ func TestDropHeadStrategy(t *testing.T) {
 	t.Run("protected + KeepTurnAtomicity drops block when protected remainder still exceeds limit", func(t *testing.T) {
 		block := []Message{
 			TextMessage("developer", "dev"),
-			{Role: RoleAssistant, Content: []ContentPart{{Type: ContentPartTypeText, Text: "call"}}, ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}}},
+			{
+				Role:      RoleAssistant,
+				Content:   []ContentPart{{Type: ContentPartTypeText, Text: "call"}},
+				ToolCalls: []ToolCall{{ID: "id1", Function: FunctionCall{Name: "f", Arguments: "{}"}}},
+			},
 			TextMessage(RoleTool, "r1"),
 		}
 		s := NewDropHeadStrategy(DropHeadConfig{
@@ -427,20 +439,23 @@ func TestDropHeadStrategy(t *testing.T) {
 		assert.Nil(t, got)
 	})
 
-	t.Run("protected + MinMessages drops block when remaining protected messages are below minimum", func(t *testing.T) {
-		block := []Message{
-			TextMessage("developer", "dev"),
-			TextMessage(RoleUser, "1"),
-			TextMessage(RoleAssistant, "2"),
-		}
-		s := NewDropHeadStrategy(DropHeadConfig{
-			MinMessages:    2,
-			ProtectedRoles: []string{"developer"},
-		})
-		got, err := s.Apply(context.Background(), block, 30, 10, counter)
-		require.NoError(t, err)
-		assert.Nil(t, got)
-	})
+	t.Run(
+		"protected + MinMessages drops block when remaining protected messages are below minimum",
+		func(t *testing.T) {
+			block := []Message{
+				TextMessage("developer", "dev"),
+				TextMessage(RoleUser, "1"),
+				TextMessage(RoleAssistant, "2"),
+			}
+			s := NewDropHeadStrategy(DropHeadConfig{
+				MinMessages:    2,
+				ProtectedRoles: []string{"developer"},
+			})
+			got, err := s.Apply(context.Background(), block, 30, 10, counter)
+			require.NoError(t, err)
+			assert.Nil(t, got)
+		},
+	)
 }
 
 func TestDropHeadStrategy_BinarySearch(t *testing.T) {
@@ -506,14 +521,16 @@ type failWhenCountingCounter struct {
 }
 
 func (f *failWhenCountingCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	if len(msgs) == 1 && msgs[0].Role == RoleSystem && len(msgs[0].Content) == 1 && msgs[0].Content[0].Text == "summary" {
+	if len(msgs) == 1 && msgs[0].Role == RoleSystem && len(msgs[0].Content) == 1 &&
+		msgs[0].Content[0].Text == "summary" {
 		return 0, errors.New("count failed")
 	}
 	return f.inner.Count(ctx, msgs)
 }
 
 func (f *failWhenCountingCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
-	if len(msgs) == 1 && msgs[0].Role == RoleSystem && len(msgs[0].Content) == 1 && msgs[0].Content[0].Text == "summary" {
+	if len(msgs) == 1 && msgs[0].Role == RoleSystem && len(msgs[0].Content) == 1 &&
+		msgs[0].Content[0].Text == "summary" {
 		return nil, errors.New("count failed")
 	}
 	return f.inner.CountPerMessage(ctx, msgs)

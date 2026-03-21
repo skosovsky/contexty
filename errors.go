@@ -3,7 +3,7 @@ package contexty
 import "errors"
 
 // Sentinel errors for typical contexty failure modes.
-// Use errors.Is to check for these in calling code.
+// Use [errors.Is] to check for these in calling code.
 var (
 	// ErrBudgetExceeded is returned by StrictStrategy when a block does not fit
 	// within the remaining token budget.

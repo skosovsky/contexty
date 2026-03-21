@@ -115,30 +115,10 @@ func TestCharFallbackCounter_Count_withEstimateTool(t *testing.T) {
 	assert.Equal(t, 22, gotNoEst, "rune-based fallback (2 tokens) + ToolCallOverhead(20) = 22")
 }
 
-func FuzzCharFallbackCounter(f *testing.F) {
-	f.Add("hello world", 4)
-	f.Add("", 1)
-	f.Add("привет", 4)
-	f.Fuzz(func(t *testing.T, text string, charsPerToken int) {
-		if charsPerToken <= 0 {
-			t.Skip()
-		}
-		c := &CharFallbackCounter{CharsPerToken: charsPerToken}
-		msgs := []Message{TextMessage(RoleUser, text)}
-		n, err := c.Count(context.Background(), msgs)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n < 0 {
-			t.Fatalf("negative token count: %d", n)
-		}
-	})
-}
-
 func BenchmarkCharFallbackCounter(b *testing.B) {
 	c := &CharFallbackCounter{CharsPerToken: 4}
 	msgs := []Message{TextMessage(RoleUser, "The quick brown fox jumps over the lazy dog. ")}
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_, _ = c.Count(context.Background(), msgs)
 	}
 }

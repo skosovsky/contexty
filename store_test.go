@@ -40,9 +40,13 @@ func TestDefaultJSONSerializer_RoundTrip(t *testing.T) {
 }
 
 func TestDefaultJSONSerializer_UsesStandardEncodingJSON(t *testing.T) {
-	msg := MultipartMessage(RoleUser,
+	msg := MultipartMessage(
+		RoleUser,
 		ContentPart{Type: ContentPartTypeText, Text: "hello"},
-		ContentPart{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "high"}},
+		ContentPart{
+			Type:     ContentPartTypeImageURL,
+			ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "high"},
+		},
 	)
 
 	data, err := json.Marshal(msg)

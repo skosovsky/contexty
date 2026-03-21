@@ -40,7 +40,7 @@ func New(pool *pgxpool.Pool, opts ...Option) *Store {
 // Load returns all stored messages for threadID ordered by insertion ID and the current version.
 func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnapshot, error) {
 	if s.pool == nil {
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/postgres: nil pool")
+		return contexty.HistorySnapshot{}, errors.New("contexty/postgres: nil pool")
 	}
 
 	var version int64
@@ -87,7 +87,7 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 		return nil
 	}
 	if s.pool == nil {
-		return fmt.Errorf("contexty/postgres: nil pool")
+		return errors.New("contexty/postgres: nil pool")
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -111,7 +111,7 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 // Save replaces the full stored history when expectedVersion matches.
 func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64, msgs []contexty.Message) error {
 	if s.pool == nil {
-		return fmt.Errorf("contexty/postgres: nil pool")
+		return errors.New("contexty/postgres: nil pool")
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -140,7 +140,7 @@ func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64
 // Clear removes all stored history when expectedVersion matches.
 func (s *Store) Clear(ctx context.Context, threadID string, expectedVersion int64) error {
 	if s.pool == nil {
-		return fmt.Errorf("contexty/postgres: nil pool")
+		return errors.New("contexty/postgres: nil pool")
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -182,7 +182,14 @@ type queryExecutor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-func execAppend(ctx context.Context, serializer contexty.MessageSerializer, query string, exec queryExecutor, threadID string, msgs []contexty.Message) error {
+func execAppend(
+	ctx context.Context,
+	serializer contexty.MessageSerializer,
+	query string,
+	exec queryExecutor,
+	threadID string,
+	msgs []contexty.Message,
+) error {
 	payloads := make([]string, len(msgs))
 	for i, msg := range msgs {
 		payload, err := serializer.Marshal(msg)

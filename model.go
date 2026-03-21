@@ -19,7 +19,7 @@ const (
 // ContentPart represents a single part of message content (text or image).
 // Type is not validated by the library; typical values are "text", "image_url".
 type ContentPart struct {
-	Type     string    // "text", "image_url", or provider-specific
+	Type     string    `json:"Type"` // "text", "image_url", or provider-specific
 	Text     string    `json:"text,omitempty"`
 	ImageURL *ImageURL `json:"image_url,omitempty"`
 }
@@ -48,12 +48,12 @@ type FunctionCall struct {
 // Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
 // ToolCalls and Metadata support agents; no validation is performed by the library.
 type Message struct {
-	Role       string
-	Content    []ContentPart // Always slice; text-only = one part with Type ContentPartTypeText
-	Name       string        // Optional: function name for tool messages
-	ToolCalls  []ToolCall
-	ToolCallID string
-	Metadata   map[string]any
+	Role       string         `json:"Role"`
+	Content    []ContentPart  `json:"Content"` // Always slice; text-only = one part with Type ContentPartTypeText
+	Name       string         `json:"Name"`    // Optional: function name for tool messages
+	ToolCalls  []ToolCall     `json:"ToolCalls"`
+	ToolCallID string         `json:"ToolCallID"`
+	Metadata   map[string]any `json:"Metadata"`
 }
 
 // Clone returns a deep copy of the message suitable for safe reuse across builders and stores.

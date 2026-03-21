@@ -50,6 +50,9 @@ func TestMessagesEqual_ImageURL(t *testing.T) {
 	m2 := Message{Role: RoleUser, Content: []ContentPart{{Type: ContentPartTypeImageURL, ImageURL: u2}}}
 	assert.True(t, messagesEqual(m1, m2))
 
-	m3 := Message{Role: RoleUser, Content: []ContentPart{{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://y"}}}}
+	m3 := Message{
+		Role:    RoleUser,
+		Content: []ContentPart{{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://y"}}},
+	}
 	assert.False(t, messagesEqual(m1, m3))
 }

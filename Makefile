@@ -1,49 +1,48 @@
-.PHONY: test lint fix tidy bench fuzz cover
+GO      := go
+MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \;)
 
-# Import path patterns for every module in go.work. A bare ./... from the repo root only matches the main module.
-MODULE_PKGS := $(shell go list -m -f '{{.Path}}/...')
-
-
-test:
-	@go test -race -count=1 $(MODULE_PKGS)
-
+.PHONY: lint fix test bench fuzz cover
 
 lint:
-	@go list -m -f '{{.Dir}}' | while IFS= read -r dir; do \
-		echo "$$dir"; \
+	@for dir in $(MODULES); do \
+		echo "golangci-lint - $$dir"; \
 		(cd "$$dir" && golangci-lint run ./...) || exit 1; \
 	done
 
-
 fix:
-	@go fix $(MODULE_PKGS)
-	@go list -m -f '{{.Dir}}' | while IFS= read -r dir; do \
-		(cd "$$dir" && go mod tidy) || exit 1; \
-	done
-	@go work sync
-	@go list -m -f '{{.Dir}}' | while IFS= read -r dir; do \
-		(cd "$$dir" && golangci-lint fmt ./... && golangci-lint run --fix ./...) || exit 1; \
+	@if [ -f "go.work" ]; then $(GO) work sync; fi
+	@for dir in $(MODULES); do \
+		echo "fix & tidy - $$dir"; \
+		(cd "$$dir" && $(GO) fix ./... && $(GO) mod tidy) || exit 1; \
+		(cd "$$dir" && golangci-lint run --fix ./...) || exit 1; \
 	done
 
+test:
+	@for dir in $(MODULES); do \
+		echo "test - $$dir"; \
+		(cd "$$dir" && $(GO) test -v -race ./...) || exit 1; \
+	done
 
 bench:
-	@go test -bench=. -benchmem $(MODULE_PKGS)
-
-cover:
-	@go test -coverprofile=coverage.out -covermode=atomic $(MODULE_PKGS)
-	@go tool cover -func=coverage.out
+	@for dir in $(MODULES); do \
+		echo "bench - $$dir"; \
+		(cd "$$dir" && $(GO) test -bench=. -run=^$$ ./...) || exit 1; \
+	done
 
 fuzz:
-	@go list -m -f '{{.Dir}}' | while IFS= read -r dir; do \
-		if ! grep -r --include='*_test.go' -l 'func Fuzz' "$$dir" >/dev/null 2>&1; then \
-			continue; \
-		fi; \
-		echo "$$dir"; \
-		( cd "$$dir" && \
-			for pkg in $$(go list ./...); do \
-				if go test -list . "$$pkg" 2>/dev/null | grep -q '^Fuzz'; then \
-					echo "    $$pkg"; \
-					go test -fuzz=. -fuzztime=30s "$$pkg" || exit 1; \
+	@for dir in $(MODULES); do \
+		echo "fuzz - $$dir"; \
+		(cd "$$dir" && \
+			for pkg in $$($(GO) list -tags=fuzz ./...); do \
+				if $(GO) test -tags=fuzz -list . "$$pkg" 2>/dev/null | grep -q '^Fuzz'; then \
+					$(GO) test -tags=fuzz -fuzz=. -fuzztime=30s "$$pkg" || exit 1; \
 				fi; \
-			done ) || exit 1; \
+			done \
+		) || exit 1; \
+	done
+
+cover:
+	@for dir in $(MODULES); do \
+		echo "cover - $$dir"; \
+		(cd "$$dir" && $(GO) test -coverprofile=coverage.out ./... && $(GO) tool cover -func=coverage.out) || exit 1; \
 	done

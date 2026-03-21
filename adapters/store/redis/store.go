@@ -82,7 +82,7 @@ func (s *Store) listKey(threadID string) string {
 // Load returns all stored messages for threadID in append order and the current version.
 func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnapshot, error) {
 	if s.client == nil {
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/redis: nil client")
+		return contexty.HistorySnapshot{}, errors.New("contexty/redis: nil client")
 	}
 
 	vstr, err := s.client.Get(ctx, s.verKey(threadID)).Result()
@@ -123,7 +123,7 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 		return nil
 	}
 	if s.client == nil {
-		return fmt.Errorf("contexty/redis: nil client")
+		return errors.New("contexty/redis: nil client")
 	}
 
 	payloads, err := s.serializeMessages(msgs)
@@ -147,7 +147,7 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 // Save replaces the full stored history when expectedVersion matches.
 func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64, msgs []contexty.Message) error {
 	if s.client == nil {
-		return fmt.Errorf("contexty/redis: nil client")
+		return errors.New("contexty/redis: nil client")
 	}
 
 	var args []any
@@ -172,9 +172,14 @@ func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64
 // Clear removes all stored history when expectedVersion matches.
 func (s *Store) Clear(ctx context.Context, threadID string, expectedVersion int64) error {
 	if s.client == nil {
-		return fmt.Errorf("contexty/redis: nil client")
+		return errors.New("contexty/redis: nil client")
 	}
-	if err := s.evalConflict(ctx, luaClear, []string{s.verKey(threadID), s.listKey(threadID)}, expectedVersion); err != nil {
+	if err := s.evalConflict(
+		ctx,
+		luaClear,
+		[]string{s.verKey(threadID), s.listKey(threadID)},
+		expectedVersion,
+	); err != nil {
 		return err
 	}
 	s.maybeExpire(ctx, threadID)

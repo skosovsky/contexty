@@ -173,7 +173,10 @@ func TestBuild_AddBlockSnapshotsInput(t *testing.T) {
 			Role: RoleSystem,
 			Content: []ContentPart{
 				{Type: ContentPartTypeText, Text: "original"},
-				{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://example.com/original.png", Detail: "low"}},
+				{
+					Type:     ContentPartTypeImageURL,
+					ImageURL: &ImageURL{URL: "https://example.com/original.png", Detail: "low"},
+				},
 			},
 			Metadata: map[string]any{"scope": "original"},
 		}},

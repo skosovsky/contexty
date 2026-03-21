@@ -136,7 +136,10 @@ func TestStoreIntegration(t *testing.T) {
 		withTTL := New(client, WithTTL(24*time.Hour))
 		s0, err := withTTL.Load(ctx, "thread-ttl")
 		require.NoError(t, err)
-		require.NoError(t, withTTL.Append(ctx, "thread-ttl", s0.Version, contexty.TextMessage(contexty.RoleUser, "ttl")))
+		require.NoError(
+			t,
+			withTTL.Append(ctx, "thread-ttl", s0.Version, contexty.TextMessage(contexty.RoleUser, "ttl")),
+		)
 		ttlList, err := client.TTL(ctx, defaultKeyPrefix+"thread-ttl").Result()
 		require.NoError(t, err)
 		assert.Greater(t, ttlList, time.Duration(0))
@@ -147,7 +150,10 @@ func TestStoreIntegration(t *testing.T) {
 		withoutTTL := New(client)
 		s1, err := withoutTTL.Load(ctx, "thread-no-ttl")
 		require.NoError(t, err)
-		require.NoError(t, withoutTTL.Append(ctx, "thread-no-ttl", s1.Version, contexty.TextMessage(contexty.RoleUser, "no ttl")))
+		require.NoError(
+			t,
+			withoutTTL.Append(ctx, "thread-no-ttl", s1.Version, contexty.TextMessage(contexty.RoleUser, "no ttl")),
+		)
 		ttl, err := client.TTL(ctx, defaultKeyPrefix+"thread-no-ttl").Result()
 		require.NoError(t, err)
 		assert.Equal(t, time.Duration(-1), ttl)

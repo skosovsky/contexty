@@ -67,6 +67,7 @@ func stringAnyMapsEqual(a, b map[string]any) bool {
 	return true
 }
 
+//nolint:gocognit // Type switch over JSON-like any values; splitting would scatter the comparison matrix.
 func anyValuesEqual(a, b any) bool {
 	if a == nil && b == nil {
 		return true

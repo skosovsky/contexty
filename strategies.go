@@ -16,7 +16,13 @@ func NewStrictStrategy() EvictionStrategy {
 	return &strictStrategy{}
 }
 
-func (s *strictStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, _ TokenCounter) ([]Message, error) {
+func (s *strictStrategy) Apply(
+	ctx context.Context,
+	msgs []Message,
+	originalTokens int,
+	limit int,
+	_ TokenCounter,
+) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: strict: %w", err)
 	}
@@ -36,7 +42,13 @@ func NewDropStrategy() EvictionStrategy {
 	return &dropStrategy{}
 }
 
-func (s *dropStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, _ TokenCounter) ([]Message, error) {
+func (s *dropStrategy) Apply(
+	ctx context.Context,
+	msgs []Message,
+	originalTokens int,
+	limit int,
+	_ TokenCounter,
+) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop: %w", err)
 	}
@@ -54,7 +66,13 @@ func NewDropTailStrategy() EvictionStrategy {
 	return &dropTailStrategy{}
 }
 
-func (s *dropTailStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
+func (s *dropTailStrategy) Apply(
+	ctx context.Context,
+	msgs []Message,
+	originalTokens int,
+	limit int,
+	counter TokenCounter,
+) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop tail: %w", err)
 	}
@@ -92,7 +110,13 @@ func NewDropHeadStrategy(cfg DropHeadConfig) EvictionStrategy {
 	return &dropHeadStrategy{cfg: cfg.normalized()}
 }
 
-func (s *dropHeadStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
+func (s *dropHeadStrategy) Apply(
+	ctx context.Context,
+	msgs []Message,
+	originalTokens int,
+	limit int,
+	counter TokenCounter,
+) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop head: %w", err)
 	}
@@ -107,7 +131,12 @@ func (s *dropHeadStrategy) Apply(ctx context.Context, msgs []Message, originalTo
 		return nil, fmt.Errorf("contexty: drop head: %w: %w", ErrTokenCountFailed, err)
 	}
 	if len(weights) != len(msgs) {
-		return nil, fmt.Errorf("token counter returned %d weights for %d messages: %w", len(weights), len(msgs), ErrTokenCountFailed)
+		return nil, fmt.Errorf(
+			"token counter returned %d weights for %d messages: %w",
+			len(weights),
+			len(msgs),
+			ErrTokenCountFailed,
+		)
 	}
 	if s.usesFastPath() {
 		return s.applyFastPath(msgs, weights, limit), nil
@@ -165,7 +194,8 @@ func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHea
 			break
 		}
 		endIdx := startIdx
-		if s.cfg.KeepTurnAtomicity && state.msgs[startIdx].Role == RoleAssistant && len(state.msgs[startIdx].ToolCalls) > 0 {
+		if s.cfg.KeepTurnAtomicity && state.msgs[startIdx].Role == RoleAssistant &&
+			len(state.msgs[startIdx].ToolCalls) > 0 {
 			endIdx = s.toolTurnEndIndex(state.msgs, startIdx, state.deleted)
 		}
 		for idx := startIdx; idx <= endIdx && idx < len(state.msgs); idx++ {
@@ -277,7 +307,13 @@ func NewSummarizeStrategy(summarizer Summarizer) EvictionStrategy {
 	return &summarizeStrategy{summarizer: summarizer}
 }
 
-func (s *summarizeStrategy) Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error) {
+func (s *summarizeStrategy) Apply(
+	ctx context.Context,
+	msgs []Message,
+	originalTokens int,
+	limit int,
+	counter TokenCounter,
+) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: summarize: %w", err)
 	}

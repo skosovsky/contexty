@@ -49,6 +49,8 @@ func (c *CharFallbackCounter) Count(ctx context.Context, msgs []Message) (int, e
 
 // CountPerMessage returns one token weight per message in the same order as msgs.
 // Used by eviction strategies for O(1) truncation without re-counting in a loop.
+//
+//nolint:gocognit // Per-message path combines content parts, tool calls, and optional tool estimator in one place.
 func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
 	if c.CharsPerToken <= 0 {
 		return nil, ErrInvalidCharsPerToken

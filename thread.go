@@ -45,8 +45,8 @@ func (t *Thread) BuildContext(ctx context.Context, base *Builder, newMsgs []Mess
 		candidateHistory = append(candidateHistory, cloneMessages(newMsgs)...)
 
 		builder := base.Clone()
-		if err := builder.SetBlockMessages(t.historyBlock, candidateHistory); err != nil {
-			return nil, fmt.Errorf("contexty: thread set history block: %w", err)
+		if setErr := builder.SetBlockMessages(t.historyBlock, candidateHistory); setErr != nil {
+			return nil, fmt.Errorf("contexty: thread set history block: %w", setErr)
 		}
 
 		result, err := builder.BuildDetailed(ctx)
