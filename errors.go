@@ -43,5 +43,15 @@ var (
 
 	// ErrHistoryVersionConflict is returned when a store write is rejected because
 	// the thread history was modified concurrently (optimistic concurrency).
+	// Do not retry the same write without a fresh Load: merge against the returned
+	// Version, then call Append/Save/Clear again. This is not a transient outage and
+	// must not be conflated with [ErrUnavailable] or with context cancellation.
 	ErrHistoryVersionConflict = errors.New("contexty: history version conflict")
+
+	// ErrUnavailable indicates a transient storage failure (network I/O, client-side
+	// deadline via [context.DeadlineExceeded], dial/read timeouts, closed pools, etc.).
+	// Callers may retry with backoff when policy allows; use [errors.Is] to detect it.
+	// [context.Canceled] is usually not retried (the request was cancelled).
+	// Storage adapters wrap underlying errors so ErrUnavailable remains visible in the chain.
+	ErrUnavailable = errors.New("contexty: storage unavailable")
 )

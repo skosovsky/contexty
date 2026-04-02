@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/jackc/pgx/v5 v5.8.0
-	github.com/skosovsky/contexty v0.3.5
+	github.com/skosovsky/contexty v0.0.0
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.41.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.41.0
@@ -70,3 +70,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/skosovsky/contexty => ../../../

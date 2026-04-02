@@ -97,12 +97,12 @@ func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnap
 	case errors.Is(err, goredis.Nil):
 		version = 0
 	default:
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/redis: load version: %w", err)
+		return contexty.HistorySnapshot{}, classifyRedisErr("load version", err)
 	}
 
 	values, err := s.client.LRange(ctx, s.listKey(threadID), 0, -1).Result()
 	if err != nil {
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/redis: load: %w", err)
+		return contexty.HistorySnapshot{}, classifyRedisErr("load range", err)
 	}
 	if len(values) == 0 {
 		return contexty.HistorySnapshot{Messages: []contexty.Message{}, Version: version}, nil
@@ -192,7 +192,7 @@ func (s *Store) evalConflict(ctx context.Context, script string, keys []string, 
 		if isRedisConflict(err) {
 			return contexty.ErrHistoryVersionConflict
 		}
-		return err
+		return classifyRedisErr("eval", err)
 	}
 	_ = res
 	return nil

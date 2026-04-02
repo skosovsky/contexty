@@ -226,6 +226,11 @@ linters:
       # Default: false
       forbid-mutex: true
 
+    gomoddirectives:
+      # Adapter submodules use `replace github.com/skosovsky/contexty => ../../../` for local dev with go.work.
+      # Default: false
+      replace-local: true
+
     errcheck:
       # Report about not checking of errors in type assertions: `a := b.(MyStruct)`.
       # Such cases aren't reported by default.

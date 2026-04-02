@@ -49,13 +49,13 @@ func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnap
 		if errors.Is(err, pgx.ErrNoRows) {
 			version = 0
 		} else {
-			return contexty.HistorySnapshot{}, fmt.Errorf("contexty/postgres: load version: %w", err)
+			return contexty.HistorySnapshot{}, classifyPostgresErr("load version", err)
 		}
 	}
 
 	rows, err := s.pool.Query(ctx, s.queries.load, pgx.NamedArgs{"thread_id": threadID})
 	if err != nil {
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/postgres: load query: %w", err)
+		return contexty.HistorySnapshot{}, classifyPostgresErr("load query", err)
 	}
 	defer rows.Close()
 
@@ -63,7 +63,7 @@ func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnap
 	for rows.Next() {
 		var payload []byte
 		if err := rows.Scan(&payload); err != nil {
-			return contexty.HistorySnapshot{}, fmt.Errorf("contexty/postgres: load scan: %w", err)
+			return contexty.HistorySnapshot{}, classifyPostgresErr("load scan", err)
 		}
 
 		var msg contexty.Message
@@ -73,7 +73,7 @@ func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnap
 		msgs = append(msgs, msg)
 	}
 	if err := rows.Err(); err != nil {
-		return contexty.HistorySnapshot{}, fmt.Errorf("contexty/postgres: load rows: %w", err)
+		return contexty.HistorySnapshot{}, classifyPostgresErr("load rows", err)
 	}
 	if len(msgs) == 0 {
 		return contexty.HistorySnapshot{Messages: []contexty.Message{}, Version: version}, nil
@@ -92,7 +92,7 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("contexty/postgres: begin tx: %w", err)
+		return classifyPostgresErr("begin tx", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -100,10 +100,10 @@ func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int
 		return err
 	}
 	if err := execAppend(ctx, s.serializer, s.queries.append, tx, threadID, msgs); err != nil {
-		return fmt.Errorf("contexty/postgres: append: %w", err)
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("contexty/postgres: commit append: %w", err)
+		return classifyPostgresErr("commit append", err)
 	}
 	return nil
 }
@@ -116,23 +116,23 @@ func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("contexty/postgres: begin tx: %w", err)
+		return classifyPostgresErr("begin tx", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := bumpOrConflict(ctx, tx, s.queries, threadID, expectedVersion); err != nil {
 		return err
 	}
-	if err := execClear(ctx, s.queries.clear, tx, threadID); err != nil {
-		return fmt.Errorf("contexty/postgres: clear before save: %w", err)
+	if err := execClear(ctx, s.queries.clear, tx, threadID, "clear before save"); err != nil {
+		return err
 	}
 	if len(msgs) > 0 {
 		if err := execAppend(ctx, s.serializer, s.queries.append, tx, threadID, msgs); err != nil {
-			return fmt.Errorf("contexty/postgres: append during save: %w", err)
+			return err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("contexty/postgres: commit save: %w", err)
+		return classifyPostgresErr("commit save", err)
 	}
 	return nil
 }
@@ -145,32 +145,32 @@ func (s *Store) Clear(ctx context.Context, threadID string, expectedVersion int6
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("contexty/postgres: begin tx: %w", err)
+		return classifyPostgresErr("begin tx", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := bumpOrConflict(ctx, tx, s.queries, threadID, expectedVersion); err != nil {
 		return err
 	}
-	if err := execClear(ctx, s.queries.clear, tx, threadID); err != nil {
-		return fmt.Errorf("contexty/postgres: clear: %w", err)
+	if err := execClear(ctx, s.queries.clear, tx, threadID, "clear"); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("contexty/postgres: commit clear: %w", err)
+		return classifyPostgresErr("commit clear", err)
 	}
 	return nil
 }
 
 func bumpOrConflict(ctx context.Context, tx pgx.Tx, q renderedQueries, threadID string, expectedVersion int64) error {
 	if _, err := tx.Exec(ctx, q.ensureMeta, pgx.NamedArgs{"thread_id": threadID}); err != nil {
-		return fmt.Errorf("contexty/postgres: ensure meta: %w", err)
+		return classifyPostgresErr("ensure meta", err)
 	}
 	ct, err := tx.Exec(ctx, q.bumpVersion, pgx.NamedArgs{
 		"thread_id":        threadID,
 		"expected_version": expectedVersion,
 	})
 	if err != nil {
-		return fmt.Errorf("contexty/postgres: bump version: %w", err)
+		return classifyPostgresErr("bump version", err)
 	}
 	if ct.RowsAffected() == 0 {
 		return contexty.ErrHistoryVersionConflict
@@ -194,7 +194,7 @@ func execAppend(
 	for i, msg := range msgs {
 		payload, err := serializer.Marshal(msg)
 		if err != nil {
-			return fmt.Errorf("marshal message %d: %w", i, err)
+			return fmt.Errorf("contexty/postgres: marshal message %d: %w", i, err)
 		}
 		payloads[i] = string(payload)
 	}
@@ -202,14 +202,14 @@ func execAppend(
 		"thread_id": threadID,
 		"payloads":  payloads,
 	}); err != nil {
-		return err
+		return classifyPostgresErr("append", err)
 	}
 	return nil
 }
 
-func execClear(ctx context.Context, query string, exec queryExecutor, threadID string) error {
+func execClear(ctx context.Context, query string, exec queryExecutor, threadID string, op string) error {
 	if _, err := exec.Exec(ctx, query, pgx.NamedArgs{"thread_id": threadID}); err != nil {
-		return err
+		return classifyPostgresErr(op, err)
 	}
 	return nil
 }

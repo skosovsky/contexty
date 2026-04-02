@@ -179,6 +179,47 @@ Storage adapters live in nested modules:
 
 For releases, bump adapter `require github.com/skosovsky/contexty` versions and run `go mod tidy` / `go work sync` as needed so published tags match what consumers resolve.
 
+*(Some specs refer to a generic “store” and “version conflict”; in this module the contracts are named [`HistoryStore`](https://pkg.go.dev/github.com/skosovsky/contexty#HistoryStore) and [`ErrHistoryVersionConflict`](https://pkg.go.dev/github.com/skosovsky/contexty#ErrHistoryVersionConflict).)*
+
+## Storage resilience and execution policies
+
+- **Caller-controlled timeouts:** the library respects `ctx` and does not impose its own storage deadlines.
+- **Clean break:** retries, circuit breakers, and bulkheads live outside the core package—typically as a decorator around `HistoryStore`, a pool wrapper, or app-level policy (no resilience types in the root module).
+- **Postgres vs generic SQL docs:** resilience write-ups sometimes show wrapping `*sql.DB`; this project’s Postgres adapter uses **pgx** with a `*pgxpool.Pool` (or the connections behind it). Apply timeouts, retries, or pool-level policies around that pool or around a custom `HistoryStore` implementation—the same separation of concerns as with `database/sql`.
+- **Transient errors:** PostgreSQL and Redis adapters classify common network and deadline failures so `errors.Is(err, contexty.ErrUnavailable)` is often enough without importing driver-specific types.
+
+| Error                       | Retry? |
+| --------------------------- | ------ |
+| `ErrUnavailable`            | Yes (with backoff and limits), when your policy allows |
+| `ErrHistoryVersionConflict` | No—`Load` first, then reconcile version and retry the write |
+| `ErrInvalidThreadConfig`    | No (fix configuration) |
+| `context.Canceled`          | Usually no |
+
+Decorator sketch (execute is your retry/backoff policy):
+
+```go
+type resilientStore struct {
+	base    contexty.HistoryStore
+	execute func(ctx context.Context, op func(context.Context) error) error
+}
+
+func (s *resilientStore) Load(ctx context.Context, threadID string) (contexty.HistorySnapshot, error) {
+	var snap contexty.HistorySnapshot
+	err := s.execute(ctx, func(ctx context.Context) error {
+		var e error
+		snap, e = s.base.Load(ctx, threadID)
+		return e
+	})
+	return snap, err
+}
+
+// Wrap Append, Save, and Clear the same way: s.execute(ctx, func(ctx context.Context) error {
+//   return s.base.Append(ctx, threadID, v, msgs...)
+// })
+```
+
+Runnable demo: [`examples/resilient_store`](examples/resilient_store) (stdlib-only retry on `ErrUnavailable` over [`testutil.MemoryStore`](https://pkg.go.dev/github.com/skosovsky/contexty/testutil#MemoryStore)).
+
 ## Strategies
 
 | Strategy                           | Behavior                                                                                                                |
@@ -212,7 +253,8 @@ Use `errors.Is(err, contexty.Err...)`:
 - `ErrInvalidCharsPerToken`: `CharFallbackCounter` received an invalid ratio.
 - `ErrBlockNotFound`: `SetBlockMessages` could not find the named block.
 - `ErrInvalidThreadConfig`: `Thread` received a nil store, nil builder, or empty identifiers.
-- `ErrHistoryVersionConflict`: `Append` / `Save` / `Clear` saw a newer `version` than `expectedVersion` (retry after `Load`).
+- `ErrHistoryVersionConflict`: `Append` / `Save` / `Clear` saw a newer `version` than `expectedVersion` (reload and reconcile before retrying the write).
+- `ErrUnavailable`: transient storage failure from adapters or wrappers; optional retry with backoff (see **Storage resilience** above).
 
 ## Testing Helpers
 
@@ -228,7 +270,7 @@ counter := &contexty.FixedCounter{
 
 ## Example Program
 
-See [`examples/full_assembly`](examples/full_assembly) for a complete runnable example that shows strict, drop-head, and drop-tail behavior under one shared token budget.
+See [`examples/full_assembly`](examples/full_assembly) for a complete runnable example that shows strict, drop-head, and drop-tail behavior under one shared token budget. For retry-on-unavailable over an in-memory store, run `go run ./examples/resilient_store`.
 
 ## License
 
