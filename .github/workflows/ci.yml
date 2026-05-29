@@ -54,3 +54,48 @@ jobs:
       - name: Run tests
         working-directory: ${{ matrix.module }}
         run: go test -v -race ./...
+
+  dod:
+    name: DoD acceptance
+    needs: [prepare-matrix, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Run DoD acceptance tests
+        run: go test -race -run='TestDoD_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans' ./...
+
+  bench:
+    name: Benchmarks
+    needs: [prepare-matrix, test, dod]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: [ "." ]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Run benchmarks with alloc guardrails
+        run: go test -bench=. -benchmem -run='^TestBenchGuardrails_' ./...
+
+  integration:
+    name: Adapter integration
+    needs: [prepare-matrix, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          cache: true
+          go-version-file: go.mod
+      - name: Run postgres and redis adapter integration tests
+        env:
+          CI: "true"
+        run: go test -race -timeout 10m ./adapters/store/postgres/... ./adapters/store/redis/...

@@ -30,9 +30,9 @@ func TestClassifyRedisErr(t *testing.T) {
 
 	t.Run("history conflict unchanged", func(t *testing.T) {
 		t.Parallel()
-		err := classifyRedisErr("op", contexty.ErrHistoryVersionConflict)
-		require.ErrorIs(t, err, contexty.ErrHistoryVersionConflict)
-		assert.Equal(t, contexty.ErrHistoryVersionConflict, err)
+		err := classifyRedisErr("op", contexty.ErrConversationVersionConflict)
+		require.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
+		assert.Equal(t, contexty.ErrConversationVersionConflict, err)
 	})
 
 	t.Run("context canceled unchanged", func(t *testing.T) {

@@ -1,6 +1,5 @@
-// Full-assembly example: builds named blocks in registration order and runs Build
-// within a token budget. Total content exceeds the limit so that multiple
-// strategies are visible. Run with: go run .
+// Full-assembly example: Engine + ConversationStore + budget pipeline + Compile.
+// Run with: go run .
 package main
 
 import (
@@ -12,86 +11,57 @@ import (
 )
 
 const (
-	previewMaxRunes   = 60
-	fixedTokensPerMsg = 25
+	fixedTokensPerMsg  = 25
+	exampleTokenLimit  = 200
+	conversationMinMsg = 2
 )
 
 func main() {
 	ctx := context.Background()
-	msgs, err := buildPrompt(ctx)
+	payload, err := buildPrompt(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("Built %d messages\n", len(msgs))
+	msgs := payload.FlattenMessages()
+	fmt.Printf("Compiled %d messages\n", len(msgs))
 	for i, m := range msgs {
-		fmt.Printf("  [%d] %s: %q\n", i, m.Role, trunc(contentText(m.Content), previewMaxRunes))
+		fmt.Printf("  [%d] %s: %q\n", i, m.Role, m.TextContent())
 	}
 }
 
-func contentText(parts []contexty.ContentPart) string {
-	for _, p := range parts {
-		if p.Type == contexty.ContentPartTypeText {
-			return p.Text
-		}
-	}
-	return ""
-}
-
-func buildPrompt(ctx context.Context) ([]contexty.Message, error) {
-	// FixedCounter so total size is predictable; total content exceeds maxTokens to trigger evictions.
-	counter := &contexty.FixedCounter{TokensPerMessage: fixedTokensPerMsg}
-	const maxTokens = 200
-
-	builder := contexty.NewBuilder(maxTokens, counter)
-
-	builder.AddBlock("instructions", contexty.MemoryBlock{
-		Strategy: contexty.NewStrictStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage("system", "You are a medical assistant.")},
+func buildPrompt(ctx context.Context) (contexty.AbstractPayload, error) {
+	store := contexty.NewMemoryConversationStore()
+	s0, _ := store.Load(ctx, "demo")
+	_ = store.UpdateSegment(ctx, "demo", s0.Version(), contexty.SegmentSystem, []contexty.Message{
+		contexty.TextMessage(contexty.RoleSystem, "You are a medical assistant."),
 	})
-
-	builder.AddBlock("profile", contexty.MemoryBlock{
-		Strategy: contexty.NewDropStrategy(),
-		Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30.")},
+	_ = store.UpdateSegment(ctx, "demo", 1, contexty.SegmentMemory, []contexty.Message{
+		contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30."),
 	})
+	_ = store.UpdateSegment(ctx, "demo", 2, contexty.SegmentHistory, fetchConversation())
 
-	const referenceBlockMaxTokens = 75
-	const conversationMinMessages = 2
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{ //nolint:exhaustruct // optional Summarizer/TruncateStrategy omitted
+			TokenLimit: exampleTokenLimit,
+			DropHead:   contexty.DropHeadConfig{MinMessages: conversationMinMsg},
+		}, &contexty.FixedEstimator{TokensPerMessage: fixedTokensPerMsg})
 
-	builder.AddBlock("reference_material", contexty.MemoryBlock{
-		Strategy:  contexty.NewDropTailStrategy(),
-		MaxTokens: referenceBlockMaxTokens,
-		Messages:  fetchReferenceMessages(),
-	})
-
-	builder.AddBlock("conversation", contexty.MemoryBlock{
-		Strategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
-			KeepTurnAtomicity: true,
-			MinMessages:       conversationMinMessages,
+	engine := contexty.NewEngine(
+		contexty.WithConversationID("demo"),
+		contexty.WithStore(store),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+		contexty.WithDeferredBlocks(contexty.DeferredBlock{
+			Name:    "session_hint",
+			Segment: contexty.SegmentSystem,
+			Resolve: func(context.Context) ([]contexty.Message, error) {
+				return []contexty.Message{
+					contexty.TextMessage(contexty.RoleSystem, "Session locale: en-US"),
+				}, nil
+			},
 		}),
-		Messages: fetchConversation(),
-	})
-
-	finalMessages, err := builder.Build(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	used, err := counter.Count(ctx, finalMessages)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("built %d messages, used %d/%d tokens", len(finalMessages), used, maxTokens)
-
-	return finalMessages, nil
-}
-
-func fetchReferenceMessages() []contexty.Message {
-	return []contexty.Message{
-		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Article about vitamin D and calcium."),
-		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Summary on magnesium and sleep."),
-		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Guidelines for daily intake."),
-		contexty.TextMessage(contexty.RoleSystem, "Retrieved: Drug interactions with supplements."),
-	}
+	)
+	return engine.Compile(ctx)
 }
 
 func fetchConversation() []contexty.Message {
@@ -100,17 +70,7 @@ func fetchConversation() []contexty.Message {
 		contexty.TextMessage(contexty.RoleAssistant, "Consider vitamin D and calcium based on your profile."),
 		contexty.TextMessage(contexty.RoleUser, "Any side effects?"),
 		contexty.TextMessage(contexty.RoleAssistant, "Generally well tolerated. Discuss with your doctor."),
-		contexty.TextMessage(contexty.RoleUser, "Can I take them at night?"),
-		contexty.TextMessage(contexty.RoleAssistant, "Vitamin D can be taken anytime. Magnesium may help sleep."),
 		contexty.TextMessage(contexty.RoleUser, "Thanks."),
-		contexty.TextMessage(contexty.RoleAssistant, "You're welcome. Ask if you need more."),
+		contexty.TextMessage(contexty.RoleAssistant, "You're welcome."),
 	}
-}
-
-func trunc(s string, maxLen int) string {
-	r := []rune(s)
-	if len(r) <= maxLen {
-		return s
-	}
-	return string(r[:maxLen]) + "..."
 }

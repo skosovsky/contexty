@@ -2,54 +2,73 @@ package contexty
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
-// FixedCounter returns a token count derived from message structure for testing.
-// Enables realistic eviction tests: removing one "heavy" message frees many tokens.
-type FixedCounter struct {
-	// TokensPerMessage is the base weight per message (always applied).
-	TokensPerMessage int
-	// TokensPerContentPart is added for each ContentPart in a message (0 = not used).
+// FixedEstimator returns deterministic token counts for tests.
+type FixedEstimator struct {
+	TokensPerMessage     int
 	TokensPerContentPart int
-	// TokensPerToolCall is added for each ToolCall in a message (0 = not used).
-	TokensPerToolCall int
+	TokensPerToolCall    int
 }
 
-// Count returns the sum over msgs of (base + len(Content)*TokensPerContentPart + len(ToolCalls)*TokensPerToolCall).
-func (c *FixedCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	weights, err := c.CountPerMessage(ctx, msgs)
+// Estimate returns total token weight.
+func (c *FixedEstimator) Estimate(ctx context.Context, msgs []Message) (int, error) {
+	weights, err := c.EstimatePerMessage(ctx, msgs)
 	if err != nil {
 		return 0, err
 	}
-	var total int
+	total := 0
 	for _, w := range weights {
 		total += w
 	}
 	return total, nil
 }
 
-// CountPerMessage returns one weight per message: TokensPerMessage + optional ContentPart/ToolCall extras.
-func (c *FixedCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+// EstimatePerMessage returns per-message weights.
+func (c *FixedEstimator) EstimatePerMessage(ctx context.Context, msgs []Message) ([]int, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("contexty: fixed counter: %w", err)
+		return nil, fmt.Errorf("contexty: fixed estimator: %w", err)
 	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
 		if err := ctx.Err(); err != nil {
-			return nil, fmt.Errorf("contexty: fixed counter: %w", err)
+			return nil, fmt.Errorf("contexty: fixed estimator: %w", err)
 		}
 		w := c.TokensPerMessage
 		if c.TokensPerContentPart != 0 {
-			w += len(m.Content) * c.TokensPerContentPart
+			w += len(m.Parts) * c.TokensPerContentPart
 		}
 		if c.TokensPerToolCall != 0 {
-			w += len(m.ToolCalls) * c.TokensPerToolCall
+			w += len(m.ToolCallParts()) * c.TokensPerToolCall
 		}
 		out[i] = w
 	}
 	return out, nil
 }
 
-// Compile-time interface check for testing helper.
-var _ TokenCounter = (*FixedCounter)(nil)
+var _ TokenEstimator = (*FixedEstimator)(nil)
+
+// FailingEstimator always returns Err from Estimate calls (tests).
+type FailingEstimator struct {
+	Err error
+}
+
+// Estimate returns the configured error.
+func (f *FailingEstimator) Estimate(context.Context, []Message) (int, error) {
+	if f.Err == nil {
+		return 0, errors.New("estimate failed")
+	}
+	return 0, f.Err
+}
+
+// EstimatePerMessage returns the configured error.
+func (f *FailingEstimator) EstimatePerMessage(context.Context, []Message) ([]int, error) {
+	if f.Err == nil {
+		return nil, errors.New("estimate failed")
+	}
+	return nil, f.Err
+}
+
+var _ TokenEstimator = (*FailingEstimator)(nil)

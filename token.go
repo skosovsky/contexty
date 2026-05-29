@@ -5,38 +5,25 @@ import (
 	"unicode/utf8"
 )
 
-// DefaultTokensPerNonTextPart is the fallback token count for content parts
-// that are not Type "text" (e.g. image_url). No validation or network checks.
+// DefaultTokensPerNonTextPart is the fallback token count for non-text parts.
 const DefaultTokensPerNonTextPart = 85
 
-// ToolCallOverhead is the pessimistic token overhead added per tool call (structure, IDs, etc.).
+// ToolCallOverhead is pessimistic token overhead per tool call part.
 const ToolCallOverhead = 20
 
-// ToolCallEstimator returns the token weight of a single tool call.
-// When non-nil in CharFallbackCounter, it is used for ToolCalls instead of rune-based fallback.
-type ToolCallEstimator func(call ToolCall) int
+// ToolCallPartEstimator returns token weight for a ToolCallPart.
+type ToolCallPartEstimator func(call ToolCallPart) int
 
-// CharFallbackCounter approximates token count by dividing character count
-// by a configurable ratio. It does not use a real tokenizer (BPE/tiktoken).
-// Suitable for prototyping and environments where exact counting is not critical.
-// For production, inject a model-specific TokenCounter (e.g. tiktoken).
-type CharFallbackCounter struct {
-	// CharsPerToken is the character-to-token ratio (e.g. 4 for English).
-	// Must be positive.
-	CharsPerToken int
-	// TokensPerNonTextPart is the weight for content parts with Type != "text"
-	// (e.g. image_url). Zero means use DefaultTokensPerNonTextPart.
+// CharFallbackEstimator approximates token count by character ratio.
+type CharFallbackEstimator struct {
+	CharsPerToken        int
 	TokensPerNonTextPart int
-	// EstimateTool is optional; when set, used for each ToolCall instead of rune-based fallback.
-	EstimateTool ToolCallEstimator
+	EstimateTool         ToolCallPartEstimator
 }
 
-// Count returns the estimated token count for all messages.
-// Text from ContentPart (Type "text") is measured in runes; non-text parts use a constant weight.
-// ToolCalls: if EstimateTool is set, its result is summed; otherwise runes of Arguments+Name are used, plus ToolCallOverhead per call.
-// Returns ErrInvalidCharsPerToken if CharsPerToken <= 0.
-func (c *CharFallbackCounter) Count(ctx context.Context, msgs []Message) (int, error) {
-	weights, err := c.CountPerMessage(ctx, msgs)
+// Estimate returns estimated token count for all messages.
+func (c *CharFallbackEstimator) Estimate(ctx context.Context, msgs []Message) (int, error) {
+	weights, err := c.EstimatePerMessage(ctx, msgs)
 	if err != nil {
 		return 0, err
 	}
@@ -47,11 +34,8 @@ func (c *CharFallbackCounter) Count(ctx context.Context, msgs []Message) (int, e
 	return sum, nil
 }
 
-// CountPerMessage returns one token weight per message in the same order as msgs.
-// Used by eviction strategies for O(1) truncation without re-counting in a loop.
-//
-//nolint:gocognit // Per-message path combines content parts, tool calls, and optional tool estimator in one place.
-func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+// EstimatePerMessage returns one token weight per message.
+func (c *CharFallbackEstimator) EstimatePerMessage(ctx context.Context, msgs []Message) ([]int, error) {
 	if c.CharsPerToken <= 0 {
 		return nil, ErrInvalidCharsPerToken
 	}
@@ -68,24 +52,22 @@ func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Messag
 			return nil, err
 		}
 		var runes int
-		runes += utf8.RuneCountInString(m.Name)
-		for _, p := range m.Content {
-			if p.Type == ContentPartTypeText {
-				runes += utf8.RuneCountInString(p.Text)
-			} else {
-				runes += nonTextWeight * c.CharsPerToken
-			}
-		}
 		var toolTokens int
-		if len(m.ToolCalls) > 0 && c.EstimateTool != nil {
-			for _, tc := range m.ToolCalls {
-				toolTokens += c.EstimateTool(tc) + ToolCallOverhead
-			}
-		} else {
-			for _, tc := range m.ToolCalls {
-				runes += utf8.RuneCountInString(tc.Function.Arguments)
-				runes += utf8.RuneCountInString(tc.Function.Name)
-				toolTokens += ToolCallOverhead
+		for _, p := range m.Parts {
+			switch v := p.(type) {
+			case TextPart:
+				runes += utf8.RuneCountInString(v.Text)
+			case ImagePart:
+				runes += nonTextWeight * c.CharsPerToken
+			case ToolCallPart:
+				if c.EstimateTool != nil {
+					toolTokens += c.EstimateTool(v) + ToolCallOverhead
+				} else {
+					runes += utf8.RuneCountInString(v.Arguments) + utf8.RuneCountInString(v.Name)
+					toolTokens += ToolCallOverhead
+				}
+			case ToolResultPart:
+				runes += utf8.RuneCountInString(v.Content)
 			}
 		}
 		tokensFromRunes := 0
@@ -97,5 +79,4 @@ func (c *CharFallbackCounter) CountPerMessage(ctx context.Context, msgs []Messag
 	return out, nil
 }
 
-// Compile-time interface check.
-var _ TokenCounter = (*CharFallbackCounter)(nil)
+var _ TokenEstimator = (*CharFallbackEstimator)(nil)

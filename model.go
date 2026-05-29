@@ -1,138 +1,174 @@
 package contexty
 
-import "context"
-
-// Common chat roles. Use these instead of string literals so typos are caught at compile time.
-const (
-	RoleSystem    = "system"
-	RoleUser      = "user"
-	RoleAssistant = "assistant"
-	RoleTool      = "tool"
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 )
 
-// Common ContentPart.Type values (library does not validate Type).
+// Role identifies the speaker of a message.
+type Role string
+
 const (
-	ContentPartTypeText     = "text"
-	ContentPartTypeImageURL = "image_url"
+	RoleSystem    Role = "system"
+	RoleUser      Role = "user"
+	RoleAssistant Role = "assistant"
+	RoleTool      Role = "tool"
 )
 
-// ContentPart represents a single part of message content (text or image).
-// Type is not validated by the library; typical values are "text", "image_url".
-type ContentPart struct {
-	Type     string    `json:"Type"` // "text", "image_url", or provider-specific
-	Text     string    `json:"text,omitempty"`
-	ImageURL *ImageURL `json:"image_url,omitempty"`
-}
-
-// ImageURL holds URL and optional detail level for image content.
-// No URL validation or network checks are performed by the library.
-type ImageURL struct {
-	URL    string `json:"url"`
-	Detail string `json:"detail,omitempty"` // e.g. "low", "high"
-}
-
-// ToolCall represents a tool/function call in agent messages.
-type ToolCall struct {
-	ID       string       `json:"id"`
-	Type     string       `json:"type"` // typically "function"
-	Function FunctionCall `json:"function"`
-}
-
-// FunctionCall holds function name and arguments (JSON string; not validated by the library).
-type FunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-// Message is the minimal unit of context: a single chat turn with role and content.
-// Content is always []ContentPart; use TextMessage/MultipartMessage helpers.
-// ToolCalls and Metadata support agents; no validation is performed by the library.
+// Message is a semantic AST node — no transport prefixes in text fields.
 type Message struct {
-	Role       string         `json:"Role"`
-	Content    []ContentPart  `json:"Content"` // Always slice; text-only = one part with Type ContentPartTypeText
-	Name       string         `json:"Name"`    // Optional: function name for tool messages
-	ToolCalls  []ToolCall     `json:"ToolCalls"`
-	ToolCallID string         `json:"ToolCallID"`
-	Metadata   map[string]any `json:"Metadata"`
+	Role        Role          `json:"role"`
+	Parts       []ContentPart `json:"parts"`
+	Annotations Annotations   `json:"annotations"`
+	Provenance  Provenance    `json:"-"`
 }
 
-// Clone returns a deep copy of the message suitable for safe reuse across builders and stores.
+// Clone returns a deep copy of the message.
 func (m Message) Clone() Message {
-	return cloneMessage(m)
-}
-
-// TokenCounter counts tokens for a slice of messages.
-// The library does not implement real tokenization; the caller injects an implementation.
-// Count must account for message structure (role, content parts, tool calls) and any
-// per-message overhead; no validation of content types or URLs is performed by the library.
-// CountPerMessage returns one weight per message (same order as msgs); used for O(1) eviction loops.
-// The context is passed from Build and may be used for cancellation or timeouts
-// (e.g. when counting involves a network call to a tokenization service).
-type TokenCounter interface {
-	Count(ctx context.Context, msgs []Message) (int, error)
-	CountPerMessage(ctx context.Context, msgs []Message) ([]int, error)
-}
-
-// EvictionStrategy defines how to shrink or trim a block to fit the remaining budget.
-// Each MemoryBlock has its own strategy (strict, drop, drop-head, summarize).
-//
-// Apply receives originalTokens (pre-counted by Builder) for DRY; implementations must
-// return messages whose total token count <= limit. Build re-counts output and
-// returns ErrStrategyExceededBudget if the contract is violated.
-type EvictionStrategy interface {
-	// Apply returns a subset of msgs that fits within limit tokens, or an error.
-	// originalTokens is the token count of msgs (from counter.Count(ctx, msgs)); use it to avoid re-counting.
-	// Returned messages must have total token count <= limit; Build enforces this.
-	Apply(ctx context.Context, msgs []Message, originalTokens int, limit int, counter TokenCounter) ([]Message, error)
-}
-
-// Summarizer compresses a slice of messages into a single summary message.
-// Typically implemented via a cheap/fast LLM call; used by SummarizeStrategy.
-type Summarizer interface {
-	Summarize(ctx context.Context, msgs []Message) (Message, error)
-}
-
-// MemoryBlock is a logical group of messages with an EvictionStrategy.
-// MaxTokens is optional: when > 0 and less than the remaining global budget, Apply receives
-// this value as the limit so the block is capped locally.
-type MemoryBlock struct {
-	Strategy  EvictionStrategy
-	Messages  []Message
-	MaxTokens int // Optional: hard per-block token limit (0 = no limit)
-}
-
-// NamedBlock pairs a block snapshot with its registration name.
-// Names are preserved in registration order and are available to formatters.
-type NamedBlock struct {
-	Name  string
-	Block MemoryBlock
-}
-
-// Formatter turns post-eviction block snapshots into a final message slice.
-// Build passes the caller's context to support cancellation, tracing, and
-// request-scoped formatter behavior.
-type Formatter interface {
-	Format(ctx context.Context, blocks []NamedBlock) ([]Message, error)
-}
-
-// EvictionMiddleware wraps an EvictionStrategy.
-type EvictionMiddleware func(EvictionStrategy) EvictionStrategy
-
-// FormatterMiddleware wraps a Formatter.
-type FormatterMiddleware func(Formatter) Formatter
-
-// TextMessage creates a simple text-only message (single ContentPart with Type "text").
-func TextMessage(role, text string) Message {
-	return Message{
-		Role:    role,
-		Content: []ContentPart{{Type: ContentPartTypeText, Text: text}},
+	cloned := Message{
+		Role:        m.Role,
+		Annotations: m.Annotations.Clone(),
 	}
+	if len(m.Parts) > 0 {
+		cloned.Parts = make([]ContentPart, len(m.Parts))
+		for i, p := range m.Parts {
+			cloned.Parts[i] = p.clonePart()
+		}
+	}
+	if m.Provenance != nil {
+		cloned.Provenance = m.Provenance.cloneProvenance()
+	}
+	return cloned
 }
 
-// MultipartMessage creates a message with multiple content parts (text, images, etc.).
-func MultipartMessage(role string, parts ...ContentPart) Message {
-	return Message{
-		Role:    role,
-		Content: parts,
+// TextContent concatenates TextPart bodies for convenience.
+func (m Message) TextContent() string {
+	var out strings.Builder
+	for _, p := range m.Parts {
+		if t, ok := p.(TextPart); ok {
+			out.WriteString(t.Text)
+		}
 	}
+	return out.String()
+}
+
+// HasToolCalls reports whether the message contains ToolCallPart nodes.
+func (m Message) HasToolCalls() bool {
+	for _, p := range m.Parts {
+		if _, ok := p.(ToolCallPart); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// ToolCallParts returns all tool call parts in order.
+func (m Message) ToolCallParts() []ToolCallPart {
+	var out []ToolCallPart
+	for _, p := range m.Parts {
+		if tc, ok := p.(ToolCallPart); ok {
+			out = append(out, tc)
+		}
+	}
+	return out
+}
+
+// ToolResultParts returns all tool result parts in order.
+func (m Message) ToolResultParts() []ToolResultPart {
+	var out []ToolResultPart
+	for _, p := range m.Parts {
+		if tr, ok := p.(ToolResultPart); ok {
+			out = append(out, tr)
+		}
+	}
+	return out
+}
+
+// messageWire is the JSON transport envelope for Message.
+type messageWire struct {
+	Role        Role            `json:"role"`
+	Parts       json.RawMessage `json:"parts"`
+	Annotations Annotations     `json:"annotations"`
+	Provenance  json.RawMessage `json:"provenance,omitempty"`
+}
+
+// MarshalMessageJSON serializes a message using the polymorphic codec.
+func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
+	partsJSON, err := MarshalParts(m.Parts)
+	if err != nil {
+		return nil, err
+	}
+	provJSON, err := EncodeProvenance(m.Provenance)
+	if err != nil {
+		return nil, err
+	}
+	wire := messageWire{
+		Role:        m.Role,
+		Parts:       partsJSON,
+		Annotations: m.Annotations,
+		Provenance:  provJSON,
+	}
+	return json.Marshal(wire)
+}
+
+// UnmarshalMessageJSON deserializes a message using the polymorphic codec.
+func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error) {
+	var wire messageWire
+	if err := json.Unmarshal(data, &wire); err != nil {
+		return Message{}, fmt.Errorf("contexty: unmarshal message: %w", err)
+	}
+	parts, err := UnmarshalParts(wire.Parts)
+	if err != nil {
+		return Message{}, err
+	}
+	var prov Provenance
+	if len(wire.Provenance) > 0 && string(wire.Provenance) != "null" {
+		if reg == nil {
+			return Message{}, errors.New("contexty: unmarshal message: provenance present but registry is nil")
+		}
+		prov, err = reg.Decode(wire.Provenance)
+		if errors.Is(err, errProvenanceNil) {
+			prov = nil
+		} else if err != nil {
+			return Message{}, err
+		}
+	}
+	return Message{
+		Role:        wire.Role,
+		Parts:       parts,
+		Annotations: wire.Annotations,
+		Provenance:  prov,
+	}, nil
+}
+
+// MarshalMessages serializes a slice of messages.
+func MarshalMessages(msgs []Message, reg *ProvenanceRegistry) ([]byte, error) {
+	wires := make([]json.RawMessage, len(msgs))
+	for i, m := range msgs {
+		b, err := MarshalMessageJSON(m, reg)
+		if err != nil {
+			return nil, err
+		}
+		wires[i] = b
+	}
+	return json.Marshal(wires)
+}
+
+// UnmarshalMessages deserializes a slice of messages.
+func UnmarshalMessages(data []byte, reg *ProvenanceRegistry) ([]Message, error) {
+	var wires []json.RawMessage
+	if err := json.Unmarshal(data, &wires); err != nil {
+		return nil, fmt.Errorf("contexty: unmarshal messages: %w", err)
+	}
+	out := make([]Message, len(wires))
+	for i, w := range wires {
+		m, err := UnmarshalMessageJSON(w, reg)
+		if err != nil {
+			return nil, fmt.Errorf("contexty: unmarshal messages index %d: %w", i, err)
+		}
+		out[i] = m
+	}
+	return out, nil
 }

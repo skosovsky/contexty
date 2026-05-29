@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/skosovsky/contexty"
 )
 
@@ -15,7 +17,7 @@ func classifyPostgresErr(op string, err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, contexty.ErrHistoryVersionConflict) {
+	if errors.Is(err, contexty.ErrConversationVersionConflict) {
 		return err
 	}
 	if errors.Is(err, context.Canceled) {
@@ -37,4 +39,9 @@ func classifyPostgresErr(op string, err error) error {
 
 func wrapPostgresUnavailable(op string, cause error) error {
 	return fmt.Errorf("contexty/postgres: %s: %w", op, errors.Join(cause, contexty.ErrUnavailable))
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

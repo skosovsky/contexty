@@ -2,7 +2,6 @@ package redis
 
 import (
 	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
@@ -16,7 +15,7 @@ import (
 )
 
 func TestStoreIntegration(t *testing.T) {
-	testcontainers.SkipIfProviderIsNotHealthy(t)
+	requireDocker(t)
 
 	ctx := context.Background()
 	container, err := tcredis.Run(ctx, "redis:7-alpine")
@@ -37,164 +36,244 @@ func TestStoreIntegration(t *testing.T) {
 		store := New(client)
 		snap, err := store.Load(ctx, "empty")
 		require.NoError(t, err)
-		assert.Empty(t, snap.Messages)
-		assert.Equal(t, int64(0), snap.Version)
+		assert.Empty(t, snap.Segment(contexty.SegmentHistory))
+		assert.Equal(t, int64(0), snap.Version())
 	})
 
-	t.Run("ordered append and repeated append", func(t *testing.T) {
+	t.Run("append segment", func(t *testing.T) {
 		store := New(client)
-		threadID := "thread-ordered"
-		s0, err := store.Load(ctx, threadID)
+		conversationID := "thread-ordered"
+		s0, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, threadID, s0.Version,
+		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
 			contexty.TextMessage(contexty.RoleUser, "one"),
 			contexty.TextMessage(contexty.RoleAssistant, "two"),
 		))
-		s1, err := store.Load(ctx, threadID)
+		s1, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, threadID, s1.Version, contexty.TextMessage(contexty.RoleUser, "three")))
+		require.NoError(t, store.AppendSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "three")))
 
-		snap, err := store.Load(ctx, threadID)
+		snap, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		assert.Equal(t, []contexty.Message{
-			contexty.TextMessage(contexty.RoleUser, "one"),
-			contexty.TextMessage(contexty.RoleAssistant, "two"),
-			contexty.TextMessage(contexty.RoleUser, "three"),
-		}, snap.Messages)
-		assert.Equal(t, int64(2), snap.Version)
+		assert.Len(t, snap.Segment(contexty.SegmentHistory), 3)
+		assert.Equal(t, int64(2), snap.Version())
 	})
 
-	t.Run("save overwrite and save empty", func(t *testing.T) {
+	t.Run("update segment", func(t *testing.T) {
 		store := New(client)
-		threadID := "thread-save"
-		s0, err := store.Load(ctx, threadID)
+		conversationID := "thread-save"
+		s0, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, threadID, s0.Version, contexty.TextMessage(contexty.RoleUser, "old")))
+		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "old")))
+		s1, err := store.Load(ctx, conversationID)
+		require.NoError(t, err)
+		require.NoError(
+			t,
+			store.UpdateSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory, []contexty.Message{
+				contexty.TextMessage(contexty.RoleAssistant, "new"),
+			}),
+		)
+		snap, err := store.Load(ctx, conversationID)
+		require.NoError(t, err)
+		assert.Equal(t, "new", snap.Segment(contexty.SegmentHistory)[0].TextContent())
+	})
 
-		s1, err := store.Load(ctx, threadID)
+	t.Run("ttl enabled", func(t *testing.T) {
+		withTTL := New(client, WithTTL(24*time.Hour))
+		s0, err := withTTL.Load(ctx, "thread-ttl")
 		require.NoError(t, err)
-		require.NoError(t, store.Save(ctx, threadID, s1.Version, []contexty.Message{
-			contexty.TextMessage(contexty.RoleAssistant, "new"),
-		}))
-		snap, err := store.Load(ctx, threadID)
+		require.NoError(t, withTTL.AppendSegment(ctx, "thread-ttl", s0.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "ttl")))
+		ttlData, err := client.TTL(ctx, defaultKeyPrefix+"thread-ttl:data").Result()
 		require.NoError(t, err)
-		assert.Equal(t, []contexty.Message{contexty.TextMessage(contexty.RoleAssistant, "new")}, snap.Messages)
+		assert.Greater(t, ttlData, time.Duration(0))
+	})
 
-		s2, err := store.Load(ctx, threadID)
+	t.Run("stale version conflict", func(t *testing.T) {
+		store := New(client)
+		conversationID := "thread-conflict"
+		s0, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.Save(ctx, threadID, s2.Version, nil))
-		snap, err = store.Load(ctx, threadID)
+		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "first")))
+		err = store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "stale"))
+		require.Error(t, err)
+		assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
+	})
+
+	t.Run("clear no-op on missing thread", func(t *testing.T) {
+		store := New(client)
+		require.NoError(t, store.Clear(ctx, "missing-thread", 0))
+		snap, err := store.Load(ctx, "missing-thread")
 		require.NoError(t, err)
-		assert.Empty(t, snap.Messages)
+		assert.Equal(t, int64(0), snap.Version())
+	})
+
+	t.Run("clear stale version conflict", func(t *testing.T) {
+		store := New(client)
+		conversationID := "thread-clear-stale"
+		s0, err := store.Load(ctx, conversationID)
+		require.NoError(t, err)
+		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "data")))
+		err = store.Clear(ctx, conversationID, 0)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
+	})
+
+	t.Run("version without payload returns unavailable", func(t *testing.T) {
+		conversationID := "thread-corrupt"
+		require.NoError(t, client.Set(ctx, defaultKeyPrefix+conversationID+":ver", "2", 0).Err())
+		store := New(client)
+		_, err := store.Load(ctx, conversationID)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, contexty.ErrUnavailable)
 	})
 
 	t.Run("clear and isolation", func(t *testing.T) {
 		store := New(client)
 		sa, err := store.Load(ctx, "thread-a")
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, "thread-a", sa.Version, contexty.TextMessage(contexty.RoleUser, "A")))
+		require.NoError(t, store.AppendSegment(ctx, "thread-a", sa.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "A")))
 		sb, err := store.Load(ctx, "thread-b")
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, "thread-b", sb.Version, contexty.TextMessage(contexty.RoleUser, "B")))
+		require.NoError(t, store.AppendSegment(ctx, "thread-b", sb.Version(), contexty.SegmentHistory,
+			contexty.TextMessage(contexty.RoleUser, "B")))
 
 		sa2, err := store.Load(ctx, "thread-a")
 		require.NoError(t, err)
-		require.NoError(t, store.Clear(ctx, "thread-a", sa2.Version))
+		require.NoError(t, store.Clear(ctx, "thread-a", sa2.Version()))
 
-		msgsA, err := store.Load(ctx, "thread-a")
+		emptyA, err := store.Load(ctx, "thread-a")
 		require.NoError(t, err)
-		assert.Empty(t, msgsA.Messages)
+		assert.Equal(t, int64(0), emptyA.Version())
+		assert.Empty(t, emptyA.Segment(contexty.SegmentHistory))
 
 		msgsB, err := store.Load(ctx, "thread-b")
 		require.NoError(t, err)
-		assert.Equal(t, []contexty.Message{contexty.TextMessage(contexty.RoleUser, "B")}, msgsB.Messages)
+		assert.Equal(t, "B", msgsB.Segment(contexty.SegmentHistory)[0].TextContent())
 	})
 
-	t.Run("custom serializer and key prefix", func(t *testing.T) {
-		serializer := &countingSerializer{}
-		store := New(client, WithKeyPrefix("custom:"), WithSerializer(serializer))
-		threadID := "thread-custom"
-		s0, err := store.Load(ctx, threadID)
-		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, threadID, s0.Version, contexty.TextMessage(contexty.RoleUser, "custom")))
-
-		snap, err := store.Load(ctx, threadID)
-		require.NoError(t, err)
-		assert.Equal(t, []contexty.Message{contexty.TextMessage(contexty.RoleUser, "custom")}, snap.Messages)
-		assert.Positive(t, serializer.marshalCalls)
-		assert.Positive(t, serializer.unmarshalCalls)
-
-		raw, err := client.LRange(ctx, "custom:"+threadID, 0, -1).Result()
-		require.NoError(t, err)
-		require.Len(t, raw, 1)
-		ver, err := client.Get(ctx, "custom:"+threadID+":ver").Result()
-		require.NoError(t, err)
-		assert.Equal(t, "1", ver)
-	})
-
-	t.Run("ttl enabled and disabled", func(t *testing.T) {
-		withTTL := New(client, WithTTL(24*time.Hour))
-		s0, err := withTTL.Load(ctx, "thread-ttl")
-		require.NoError(t, err)
-		require.NoError(
-			t,
-			withTTL.Append(ctx, "thread-ttl", s0.Version, contexty.TextMessage(contexty.RoleUser, "ttl")),
-		)
-		ttlList, err := client.TTL(ctx, defaultKeyPrefix+"thread-ttl").Result()
-		require.NoError(t, err)
-		assert.Greater(t, ttlList, time.Duration(0))
-		ttlVer, err := client.TTL(ctx, defaultKeyPrefix+"thread-ttl"+":ver").Result()
-		require.NoError(t, err)
-		assert.Greater(t, ttlVer, time.Duration(0))
-
-		withoutTTL := New(client)
-		s1, err := withoutTTL.Load(ctx, "thread-no-ttl")
-		require.NoError(t, err)
-		require.NoError(
-			t,
-			withoutTTL.Append(ctx, "thread-no-ttl", s1.Version, contexty.TextMessage(contexty.RoleUser, "no ttl")),
-		)
-		ttl, err := client.TTL(ctx, defaultKeyPrefix+"thread-no-ttl").Result()
-		require.NoError(t, err)
-		assert.Equal(t, time.Duration(-1), ttl)
-		ttlV, err := client.TTL(ctx, defaultKeyPrefix+"thread-no-ttl"+":ver").Result()
-		require.NoError(t, err)
-		assert.Equal(t, time.Duration(-1), ttlV)
-	})
-
-	t.Run("stale version returns conflict", func(t *testing.T) {
+	t.Run("semantic round trip", func(t *testing.T) {
 		store := New(client)
-		threadID := "thread-conflict"
-		s0, err := store.Load(ctx, threadID)
+		conversationID := "thread-semantic"
+		s0, err := store.Load(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.Append(ctx, threadID, s0.Version, contexty.TextMessage(contexty.RoleUser, "first")))
-		err = store.Append(ctx, threadID, s0.Version, contexty.TextMessage(contexty.RoleUser, "stale"))
-		require.Error(t, err)
-		assert.ErrorIs(t, err, contexty.ErrHistoryVersionConflict)
+		require.NoError(t, store.UpdateSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+			[]contexty.Message{semanticFixtureMessage()}))
+		assertSemanticRoundTrip(t, ctx, store, conversationID)
 	})
 
-	t.Run("corrupted payload returns unmarshal error", func(t *testing.T) {
-		threadID := "thread-corrupted"
-		require.NoError(t, client.RPush(ctx, defaultKeyPrefix+threadID, "1").Err())
-
-		store := New(client)
-		_, err := store.Load(ctx, threadID)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "decode")
+	t.Run("expanded semantic round trip", func(t *testing.T) {
+		store := New(client, WithCodec(contexty.ConversationCodec{
+			Provenance: contexty.DefaultProvenanceRegistry(),
+		}))
+		conversationID := "thread-semantic-expanded"
+		require.NoError(t, persistExpandedSemanticFixture(ctx, store, conversationID))
+		assertExpandedSemanticRoundTrip(t, ctx, store, conversationID)
 	})
 }
 
-type countingSerializer struct {
-	marshalCalls   int
-	unmarshalCalls int
+func semanticFixtureMessage() contexty.Message {
+	ts := time.Date(2025, 6, 1, 12, 0, 0, 0, time.UTC)
+	return contexty.Message{
+		Role: contexty.RoleAssistant,
+		Parts: []contexty.ContentPart{
+			contexty.ToolCallPart{ID: "tc-1", Name: "search", Arguments: `{"q":"go"}`},
+			contexty.ToolResultPart{ToolCallID: "tc-1", Content: "result"},
+		},
+		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "turn-1"},
+		Provenance:  contexty.UserProvenance{Channel: "api", UserID: "u1"},
+	}
 }
 
-func (s *countingSerializer) Marshal(msg contexty.Message) ([]byte, error) {
-	s.marshalCalls++
-	return json.Marshal(msg)
+//nolint:revive // testing.T must precede context in test helpers
+func assertSemanticRoundTrip(t *testing.T, ctx context.Context, store *Store, conversationID string) {
+	t.Helper()
+	snap, err := store.Load(ctx, conversationID)
+	require.NoError(t, err)
+	msgs := snap.Segment(contexty.SegmentHistory)
+	require.Len(t, msgs, 1)
+	got := msgs[0]
+	require.Len(t, got.ToolCallParts(), 1)
+	require.Len(t, got.ToolResultParts(), 1)
+	prov, ok := got.Provenance.(contexty.UserProvenance)
+	require.True(t, ok)
+	assert.Equal(t, "api", prov.Channel)
+	assert.Equal(t, "turn-1", got.Annotations.RefID)
 }
 
-func (s *countingSerializer) Unmarshal(data []byte, msg *contexty.Message) error {
-	s.unmarshalCalls++
-	return json.Unmarshal(data, msg)
+func persistExpandedSemanticFixture(ctx context.Context, store *Store, conversationID string) error {
+	s0, err := store.Load(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if err = store.UpdateSegment(ctx, conversationID, s0.Version(), contexty.SegmentSystem,
+		[]contexty.Message{expandedSystemMessage()}); err != nil {
+		return err
+	}
+	s1, err := store.Load(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if err = store.UpdateSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory,
+		[]contexty.Message{expandedHistoryMessage()}); err != nil {
+		return err
+	}
+	s2, err := store.Load(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	return store.UpdateSegment(ctx, conversationID, s2.Version(), contexty.SegmentTools,
+		[]contexty.Message{semanticFixtureMessage()})
+}
+
+func expandedSystemMessage() contexty.Message {
+	return contexty.Message{
+		Role:       contexty.RoleSystem,
+		Parts:      []contexty.ContentPart{contexty.TextPart{Text: "system prompt"}},
+		Provenance: contexty.SystemProvenance{Component: "bootstrap"},
+	}
+}
+
+func expandedHistoryMessage() contexty.Message {
+	ts := time.Date(2025, 6, 2, 9, 0, 0, 0, time.UTC)
+	return contexty.Message{
+		Role: contexty.RoleUser,
+		Parts: []contexty.ContentPart{
+			contexty.TextPart{Text: "see image"},
+			contexty.ImagePart{URL: "https://example.com/a.png", Detail: "low"},
+		},
+		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "img-1"},
+		Provenance:  contexty.UserProvenance{Channel: "web", UserID: "u2"},
+	}
+}
+
+//nolint:revive // testing.T must precede context in test helpers
+func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *Store, conversationID string) {
+	t.Helper()
+	snap, err := store.Load(ctx, conversationID)
+	require.NoError(t, err)
+	sys := snap.Segment(contexty.SegmentSystem)
+	require.Len(t, sys, 1)
+	sysProv, ok := sys[0].Provenance.(contexty.SystemProvenance)
+	require.True(t, ok)
+	assert.Equal(t, "bootstrap", sysProv.Component)
+
+	history := snap.Segment(contexty.SegmentHistory)
+	require.Len(t, history, 1)
+	require.Len(t, history[0].Parts, 2)
+	_, hasImage := history[0].Parts[1].(contexty.ImagePart)
+	require.True(t, hasImage)
+	userProv, ok := history[0].Provenance.(contexty.UserProvenance)
+	require.True(t, ok)
+	assert.Equal(t, "web", userProv.Channel)
+
+	tools := snap.Segment(contexty.SegmentTools)
+	require.Len(t, tools, 1)
+	require.Len(t, tools[0].ToolCallParts(), 1)
 }

@@ -17,7 +17,7 @@ func classifyRedisErr(op string, err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, contexty.ErrHistoryVersionConflict) {
+	if errors.Is(err, contexty.ErrConversationVersionConflict) {
 		return err
 	}
 	if errors.Is(err, context.Canceled) {

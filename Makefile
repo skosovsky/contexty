@@ -1,7 +1,7 @@
 GO      := go
 MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \;)
 
-.PHONY: lint fix test bench bench-hotpath fuzz cover release-patch release-break
+.PHONY: lint fix test test-dod validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
 
 lint:
 	@for dir in $(MODULES); do \
@@ -23,11 +23,21 @@ test:
 		(cd "$$dir" && $(GO) test -v -race ./...) || exit 1; \
 	done
 
+test-dod:
+	@echo "test-dod - root"
+	@$(GO) test -v -race -run='TestDoD_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans' ./...
+
+validate: lint test-dod bench-guardrails test
+
 bench:
 	@for dir in $(MODULES); do \
 		echo "bench - $$dir"; \
-		(cd "$$dir" && $(GO) test -bench=. -run=^$$ ./...) || exit 1; \
+		(cd "$$dir" && $(GO) test -bench=. -benchmem -run=^$$ ./...) || exit 1; \
 	done
+
+bench-guardrails:
+	@echo "bench-guardrails - root"
+	@$(GO) test -bench=. -benchmem -run='^TestBenchGuardrails_' ./...
 
 fuzz:
 	@for dir in $(MODULES); do \

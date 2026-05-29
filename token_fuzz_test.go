@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func FuzzCharFallbackCounter(f *testing.F) {
+func FuzzCharFallbackEstimator(f *testing.F) {
 	f.Add("hello world", 4)
 	f.Add("", 1)
 	f.Add("привет", 4)
@@ -15,9 +15,9 @@ func FuzzCharFallbackCounter(f *testing.F) {
 		if charsPerToken <= 0 {
 			t.Skip()
 		}
-		c := &CharFallbackCounter{CharsPerToken: charsPerToken}
+		c := &CharFallbackEstimator{CharsPerToken: charsPerToken}
 		msgs := []Message{TextMessage(RoleUser, text)}
-		n, err := c.Count(context.Background(), msgs)
+		n, err := c.Estimate(context.Background(), msgs)
 		if err != nil {
 			t.Fatal(err)
 		}

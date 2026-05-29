@@ -1,58 +1,42 @@
-package contexty
+package contexty_test
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/skosovsky/contexty"
 )
 
-func TestDefaultJSONSerializer_RoundTrip(t *testing.T) {
-	serializer := DefaultJSONSerializer{}
-	msg := Message{
-		Role: RoleAssistant,
-		Content: []ContentPart{
-			{Type: ContentPartTypeText, Text: "summary"},
-			{Type: ContentPartTypeImageURL, ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "low"}},
+func TestJSONSerializer_RoundTrip(t *testing.T) {
+	serializer := contexty.DefaultJSONSerializer()
+	msg := contexty.Message{
+		Role: contexty.RoleAssistant,
+		Parts: []contexty.ContentPart{
+			contexty.TextPart{Text: "summary"},
+			contexty.ImagePart{URL: "https://example.com/image.png", Detail: "low"},
+			contexty.ToolCallPart{ID: "tc1", Name: "fn", Arguments: `{"a":1}`},
 		},
-		Name:       "weather",
-		ToolCallID: "tool-1",
-		ToolCalls: []ToolCall{{
-			ID:   "call-1",
-			Type: "function",
-			Function: FunctionCall{
-				Name:      "lookup",
-				Arguments: `{"city":"ho chi minh city"}`,
-			},
-		}},
-		Metadata: map[string]any{
-			"tags": []any{"travel", map[string]any{"locale": "vi-VN"}},
-		},
+		Annotations: contexty.Annotations{RefID: "ref-1"},
+		Provenance:  contexty.SystemProvenance{Component: "test"},
 	}
-
 	data, err := serializer.Marshal(msg)
 	require.NoError(t, err)
-
-	var roundTripped Message
-	require.NoError(t, serializer.Unmarshal(data, &roundTripped))
-	assert.Equal(t, msg, roundTripped)
+	var out contexty.Message
+	require.NoError(t, serializer.Unmarshal(data, &out))
+	assert.True(t, contexty.MessageEqual(msg, out))
 }
 
-func TestDefaultJSONSerializer_UsesStandardEncodingJSON(t *testing.T) {
-	msg := MultipartMessage(
-		RoleUser,
-		ContentPart{Type: ContentPartTypeText, Text: "hello"},
-		ContentPart{
-			Type:     ContentPartTypeImageURL,
-			ImageURL: &ImageURL{URL: "https://example.com/image.png", Detail: "high"},
-		},
-	)
-
-	data, err := json.Marshal(msg)
+func TestConversationCodec_RoundTrip(t *testing.T) {
+	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+	snap := contexty.EmptySnapshot().WithVersion(3).WithSegment(contexty.SegmentHistory, []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "hi"),
+	})
+	data, err := codec.Encode(snap)
 	require.NoError(t, err)
-
-	var roundTripped Message
-	require.NoError(t, json.Unmarshal(data, &roundTripped))
-	assert.Equal(t, msg, roundTripped)
+	out, err := codec.Decode(data)
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), out.Version())
+	assert.Equal(t, "hi", out.Segment(contexty.SegmentHistory)[0].TextContent())
 }

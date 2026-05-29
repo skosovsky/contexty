@@ -1,6 +1,8 @@
 coverage.out
 *.test
 *.exe
+/full_assembly
+/resilient_store
 .DS_Store
 vendor/
 .cursor/

@@ -276,9 +276,9 @@ linters:
         - ^golang.org/x/tools/go/analysis.Analyzer$
         - ^google.golang.org/protobuf/.+Options$
         - ^gopkg.in/yaml.v3.Node$
-        # contexty: partial literals are intentional (Builder, helpers, test doubles, stores).
-        - ^github\.com/skosovsky/contexty\.(Builder|Message|ContentPart|MemoryBlock|FixedCounter|DropHeadConfig|dropHeadState)$
-        - ^github\.com/skosovsky/contexty/testutil\.(MemoryStore|threadState)$
+        # contexty: partial literals are intentional (Engine, helpers, test doubles, stores).
+        - ^github\.com/skosovsky/contexty\.(Engine|Message|ContentPart|FixedEstimator|DropHeadConfig|dropHeadState|ConversationSnapshot)$
+        - ^github\.com/skosovsky/contexty/testutil\.MemoryConversationStore$
         - ^github\.com/skosovsky/contexty/adapters/store/postgres\.Store$
         - ^github\.com/skosovsky/contexty/adapters/store/redis\.Store$
       # Allows empty structures in return statements.

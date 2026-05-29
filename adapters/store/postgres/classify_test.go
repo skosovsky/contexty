@@ -7,6 +7,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -29,9 +30,9 @@ func TestClassifyPostgresErr(t *testing.T) {
 
 	t.Run("history conflict unchanged", func(t *testing.T) {
 		t.Parallel()
-		err := classifyPostgresErr("op", contexty.ErrHistoryVersionConflict)
-		require.ErrorIs(t, err, contexty.ErrHistoryVersionConflict)
-		assert.Equal(t, contexty.ErrHistoryVersionConflict, err)
+		err := classifyPostgresErr("op", contexty.ErrConversationVersionConflict)
+		require.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
+		assert.Equal(t, contexty.ErrConversationVersionConflict, err)
 	})
 
 	t.Run("context canceled unchanged", func(t *testing.T) {
@@ -74,4 +75,10 @@ func TestClassifyPostgresErr(t *testing.T) {
 		require.ErrorIs(t, err, cause)
 		assert.NotErrorIs(t, err, contexty.ErrUnavailable)
 	})
+}
+
+func TestIsUniqueViolation(t *testing.T) {
+	t.Parallel()
+	assert.False(t, isUniqueViolation(errors.New("other")))
+	assert.True(t, isUniqueViolation(&pgconn.PgError{Code: "23505"}))
 }

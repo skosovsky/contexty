@@ -1,5 +1,5 @@
-// Resilient store example: stdlib-only retries on [contexty.ErrUnavailable] around a
-// [testutil.MemoryStore]. Run from repo root: go run ./examples/resilient_store
+// Resilient store example: stdlib-only retries on [contexty.ErrUnavailable] around
+// [testutil.MemoryConversationStore]. Run: go run ./examples/resilient_store
 package main
 
 import (
@@ -18,13 +18,13 @@ const (
 	exampleSimulatedFails   = 2
 )
 
-type resilientHistoryStore struct {
-	base     contexty.HistoryStore
+type resilientConversationStore struct {
+	base     contexty.ConversationStore
 	attempts int
 	failLeft int
 }
 
-func (s *resilientHistoryStore) withRetry(ctx context.Context, op func(context.Context) error) error {
+func (s *resilientConversationStore) withRetry(ctx context.Context, op func(context.Context) error) error {
 	backoff := exampleInitialBackoffMs * time.Millisecond
 	var last error
 	for attempt := 0; attempt <= exampleMaxRetries; attempt++ {
@@ -48,39 +48,28 @@ func (s *resilientHistoryStore) withRetry(ctx context.Context, op func(context.C
 	return last
 }
 
-func (s *resilientHistoryStore) Load(ctx context.Context, threadID string) (contexty.HistorySnapshot, error) {
-	var snap contexty.HistorySnapshot
+func (s *resilientConversationStore) Load(
+	ctx context.Context,
+	conversationID string,
+) (contexty.ConversationSnapshot, error) {
+	var snap contexty.ConversationSnapshot
 	err := s.withRetry(ctx, func(ctx context.Context) error {
 		if s.failLeft > 0 {
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
 		var e error
-		snap, e = s.base.Load(ctx, threadID)
+		snap, e = s.base.Load(ctx, conversationID)
 		return e
 	})
 	return snap, err
 }
 
-func (s *resilientHistoryStore) Append(
+func (s *resilientConversationStore) UpdateSegment(
 	ctx context.Context,
-	threadID string,
+	conversationID string,
 	expectedVersion int64,
-	msgs ...contexty.Message,
-) error {
-	return s.withRetry(ctx, func(ctx context.Context) error {
-		if s.failLeft > 0 {
-			s.failLeft--
-			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
-		}
-		return s.base.Append(ctx, threadID, expectedVersion, msgs...)
-	})
-}
-
-func (s *resilientHistoryStore) Save(
-	ctx context.Context,
-	threadID string,
-	expectedVersion int64,
+	name contexty.SegmentName,
 	msgs []contexty.Message,
 ) error {
 	return s.withRetry(ctx, func(ctx context.Context) error {
@@ -88,24 +77,40 @@ func (s *resilientHistoryStore) Save(
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
-		return s.base.Save(ctx, threadID, expectedVersion, msgs)
+		return s.base.UpdateSegment(ctx, conversationID, expectedVersion, name, msgs)
 	})
 }
 
-func (s *resilientHistoryStore) Clear(ctx context.Context, threadID string, expectedVersion int64) error {
+func (s *resilientConversationStore) AppendSegment(
+	ctx context.Context,
+	conversationID string,
+	expectedVersion int64,
+	name contexty.SegmentName,
+	msgs ...contexty.Message,
+) error {
 	return s.withRetry(ctx, func(ctx context.Context) error {
 		if s.failLeft > 0 {
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
-		return s.base.Clear(ctx, threadID, expectedVersion)
+		return s.base.AppendSegment(ctx, conversationID, expectedVersion, name, msgs...)
+	})
+}
+
+func (s *resilientConversationStore) Clear(ctx context.Context, conversationID string, expectedVersion int64) error {
+	return s.withRetry(ctx, func(ctx context.Context) error {
+		if s.failLeft > 0 {
+			s.failLeft--
+			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
+		}
+		return s.base.Clear(ctx, conversationID, expectedVersion)
 	})
 }
 
 func main() {
 	ctx := context.Background()
-	base := testutil.NewMemoryStore()
-	store := &resilientHistoryStore{
+	base := testutil.NewMemoryConversationStore()
+	store := &resilientConversationStore{
 		base:     base,
 		attempts: 0,
 		failLeft: exampleSimulatedFails,
@@ -115,12 +120,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Load after %d attempts (%d simulated ErrUnavailable): version=%d msgs=%d\n",
-		store.attempts, exampleSimulatedFails, snap0.Version, len(snap0.Messages))
+	fmt.Printf("Load after %d attempts (%d simulated ErrUnavailable): version=%d\n",
+		store.attempts, exampleSimulatedFails, snap0.Version())
 
 	store.attempts = 0
 	store.failLeft = 0
-	err = store.Append(ctx, "demo", snap0.Version, contexty.TextMessage(contexty.RoleUser, "hello"))
+	err = store.AppendSegment(ctx, "demo", snap0.Version(), contexty.SegmentHistory,
+		contexty.TextMessage(contexty.RoleUser, "hello"))
 	if err != nil {
 		panic(err)
 	}
@@ -128,5 +134,6 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Append ok; reload version=%d content=%q\n", snap1.Version, snap1.Messages[0].Content[0].Text)
+	fmt.Printf("Append ok; reload version=%d content=%q\n",
+		snap1.Version(), snap1.Segment(contexty.SegmentHistory)[0].TextContent())
 }

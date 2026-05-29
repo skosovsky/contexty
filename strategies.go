@@ -21,7 +21,7 @@ func (s *strictStrategy) Apply(
 	msgs []Message,
 	originalTokens int,
 	limit int,
-	_ TokenCounter,
+	_ TokenEstimator,
 ) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: strict: %w", err)
@@ -47,7 +47,7 @@ func (s *dropStrategy) Apply(
 	msgs []Message,
 	originalTokens int,
 	limit int,
-	_ TokenCounter,
+	_ TokenEstimator,
 ) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop: %w", err)
@@ -59,6 +59,7 @@ func (s *dropStrategy) Apply(
 }
 
 // dropTailStrategy removes messages from the end until the block fits.
+// Tool-turn blocks are dropped atomically from the tail.
 type dropTailStrategy struct{}
 
 // NewDropTailStrategy returns a strategy that removes trailing messages one by one until the block fits.
@@ -71,7 +72,7 @@ func (s *dropTailStrategy) Apply(
 	msgs []Message,
 	originalTokens int,
 	limit int,
-	counter TokenCounter,
+	estimator TokenEstimator,
 ) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop tail: %w", err)
@@ -85,8 +86,8 @@ func (s *dropTailStrategy) Apply(
 
 	out := slices.Clone(msgs)
 	for len(out) > 1 {
-		out = out[:len(out)-1]
-		tokens, err := counter.Count(ctx, out)
+		out = dropTailAtomicUnit(out)
+		tokens, err := estimator.Estimate(ctx, out)
 		if err != nil {
 			return nil, fmt.Errorf("contexty: drop tail: %w: %w", ErrTokenCountFailed, err)
 		}
@@ -100,12 +101,32 @@ func (s *dropTailStrategy) Apply(
 	return nil, ErrBlockTooLarge
 }
 
+// dropTailAtomicUnit removes one trailing message or an entire tool-turn block from the end.
+func dropTailAtomicUnit(msgs []Message) []Message {
+	if len(msgs) == 0 {
+		return msgs
+	}
+	last := len(msgs) - 1
+	if msgs[last].Role != RoleTool {
+		return msgs[:last]
+	}
+	start := last
+	for start > 0 && msgs[start-1].Role == RoleTool {
+		start--
+	}
+	if start > 0 && msgs[start-1].Role == RoleAssistant && msgs[start-1].HasToolCalls() {
+		return msgs[:start-1]
+	}
+	return msgs[:last]
+}
+
 // dropHeadStrategy removes older messages from the front until the block fits.
 type dropHeadStrategy struct {
 	cfg DropHeadConfig
 }
 
 // NewDropHeadStrategy returns a strategy that trims older messages from the front.
+// Empty config enables tool-turn atomicity by default.
 func NewDropHeadStrategy(cfg DropHeadConfig) EvictionStrategy {
 	return &dropHeadStrategy{cfg: cfg.normalized()}
 }
@@ -115,7 +136,7 @@ func (s *dropHeadStrategy) Apply(
 	msgs []Message,
 	originalTokens int,
 	limit int,
-	counter TokenCounter,
+	counter TokenEstimator,
 ) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop head: %w", err)
@@ -126,7 +147,7 @@ func (s *dropHeadStrategy) Apply(
 	if originalTokens <= limit {
 		return msgs, nil
 	}
-	weights, err := counter.CountPerMessage(ctx, msgs)
+	weights, err := counter.EstimatePerMessage(ctx, msgs)
 	if err != nil {
 		return nil, fmt.Errorf("contexty: drop head: %w: %w", ErrTokenCountFailed, err)
 	}
@@ -158,7 +179,7 @@ type dropHeadState struct {
 }
 
 func (s *dropHeadStrategy) usesFastPath() bool {
-	return len(s.cfg.ProtectedRoles) == 0 && !s.cfg.KeepTurnAtomicity
+	return len(s.cfg.ProtectedRoles) == 0 && !s.cfg.keepTurnAtomicity()
 }
 
 func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit int) []Message {
@@ -194,8 +215,8 @@ func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHea
 			break
 		}
 		endIdx := startIdx
-		if s.cfg.KeepTurnAtomicity && state.msgs[startIdx].Role == RoleAssistant &&
-			len(state.msgs[startIdx].ToolCalls) > 0 {
+		if s.cfg.keepTurnAtomicity() && state.msgs[startIdx].Role == RoleAssistant &&
+			state.msgs[startIdx].HasToolCalls() {
 			endIdx = s.toolTurnEndIndex(state.msgs, startIdx, state.deleted)
 		}
 		for idx := startIdx; idx <= endIdx && idx < len(state.msgs); idx++ {
@@ -246,7 +267,7 @@ func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState, protecte
 			continue
 		}
 		if protected != nil {
-			if _, ok := protected[state.msgs[idx].Role]; ok {
+			if _, ok := protected[string(state.msgs[idx].Role)]; ok {
 				continue
 			}
 		}
@@ -255,19 +276,19 @@ func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState, protecte
 	return -1
 }
 
-// toolTurnEndIndex returns the last index (inclusive) of the atomic tool-turn block
-// starting at startIdx (assistant with ToolCalls). Uses expectedIDs for strict matching
-// when ToolCallID is set; falls back to contiguous tool messages on anomaly or empty IDs.
-// When deleted is non-nil, skips indices j with deleted[j] when scanning for the block end.
+// toolTurnEndIndex returns the last index (inclusive) of the atomic tool-turn block.
+//
+//nolint:gocognit // matches tool call IDs to contiguous tool result messages.
 func (s *dropHeadStrategy) toolTurnEndIndex(cur []Message, startIdx int, deleted []bool) int {
 	msg := cur[startIdx]
+	calls := msg.ToolCallParts()
 	expectedIDs := make(map[string]bool)
-	for _, tc := range msg.ToolCalls {
+	for _, tc := range calls {
 		if tc.ID != "" {
 			expectedIDs[tc.ID] = true
 		}
 	}
-	expectedCount := len(msg.ToolCalls)
+	expectedCount := len(calls)
 	endIdx := startIdx
 	for j := startIdx + 1; j < len(cur); j++ {
 		if deleted != nil && deleted[j] {
@@ -276,11 +297,18 @@ func (s *dropHeadStrategy) toolTurnEndIndex(cur []Message, startIdx int, deleted
 		if cur[j].Role != RoleTool {
 			break
 		}
-		if cur[j].ToolCallID != "" {
-			if !expectedIDs[cur[j].ToolCallID] {
-				break
+		matched := false
+		for _, tr := range cur[j].ToolResultParts() {
+			if tr.ToolCallID != "" {
+				if !expectedIDs[tr.ToolCallID] {
+					break
+				}
+				delete(expectedIDs, tr.ToolCallID)
+				matched = true
 			}
-			delete(expectedIDs, cur[j].ToolCallID)
+		}
+		if !matched && len(cur[j].ToolResultParts()) > 0 {
+			break
 		}
 		endIdx = j
 		expectedCount--
@@ -291,54 +319,10 @@ func (s *dropHeadStrategy) toolTurnEndIndex(cur []Message, startIdx int, deleted
 	return endIdx
 }
 
-// summarizeStrategy compresses the block via a Summarizer when it does not fit.
-// DRY: uses originalTokens for initial check; re-counts only the summary result.
-type summarizeStrategy struct {
-	summarizer Summarizer
-}
-
-// NewSummarizeStrategy returns a strategy that calls the given Summarizer when the block exceeds the limit.
-// If the summary still does not fit, the block is dropped (empty result).
-// Panics if summarizer is nil (programmer error at init time).
-func NewSummarizeStrategy(summarizer Summarizer) EvictionStrategy {
-	if summarizer == nil {
-		panic("contexty: NewSummarizeStrategy called with nil Summarizer")
-	}
-	return &summarizeStrategy{summarizer: summarizer}
-}
-
-func (s *summarizeStrategy) Apply(
-	ctx context.Context,
-	msgs []Message,
-	originalTokens int,
-	limit int,
-	counter TokenCounter,
-) ([]Message, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("contexty: summarize: %w", err)
-	}
-	if originalTokens <= limit {
-		return msgs, nil
-	}
-	summary, err := s.summarizer.Summarize(ctx, msgs)
-	if err != nil {
-		return nil, fmt.Errorf("contexty: summarize: %w", err)
-	}
-	summaryTokens, err := counter.Count(ctx, []Message{summary})
-	if err != nil {
-		return nil, fmt.Errorf("contexty: summarize: %w: %w", ErrTokenCountFailed, err)
-	}
-	if summaryTokens > limit {
-		return nil, nil
-	}
-	return []Message{summary}, nil
-}
-
 // Compile-time checks.
 var (
 	_ EvictionStrategy = (*strictStrategy)(nil)
 	_ EvictionStrategy = (*dropStrategy)(nil)
 	_ EvictionStrategy = (*dropTailStrategy)(nil)
 	_ EvictionStrategy = (*dropHeadStrategy)(nil)
-	_ EvictionStrategy = (*summarizeStrategy)(nil)
 )

@@ -13,57 +13,46 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
-const defaultKeyPrefix = "contexty:thread:"
+const defaultKeyPrefix = "contexty:conv:"
 
-// Lua: bump version if matches expected, then RPUSH payloads (ARGV[2..]).
-const luaAppend = `
+// Lua: set conversation blob if version matches, then bump.
+const luaMutate = `
 local expected = tonumber(ARGV[1])
 local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
 if cur ~= expected then return redis.error_reply('CONFLICT') end
-for i = 2, #ARGV do
-	redis.call('RPUSH', KEYS[2], ARGV[i])
-end
+redis.call('SET', KEYS[2], ARGV[2])
 redis.call('INCR', KEYS[1])
 return 1
 `
 
-// Lua: bump version if matches, replace list contents.
-const luaSave = `
-local expected = tonumber(ARGV[1])
-local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
-if cur ~= expected then return redis.error_reply('CONFLICT') end
-redis.call('DEL', KEYS[2])
-for i = 2, #ARGV do
-	redis.call('RPUSH', KEYS[2], ARGV[i])
-end
-redis.call('INCR', KEYS[1])
-return 1
-`
-
-// Lua: bump version if matches, delete list.
+// Lua: clear conversation when version matches; no-op when thread absent and expected=0.
 const luaClear = `
 local expected = tonumber(ARGV[1])
 local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
 if cur ~= expected then return redis.error_reply('CONFLICT') end
+local hasData = redis.call('EXISTS', KEYS[2])
+if expected == 0 and hasData == 0 then
+  return 1
+end
 redis.call('DEL', KEYS[2])
-redis.call('INCR', KEYS[1])
+redis.call('DEL', KEYS[1])
 return 1
 `
 
-// Store persists thread history in Redis lists with a separate version key per thread.
+// Store persists conversation snapshots in Redis.
 type Store struct {
-	client     goredis.UniversalClient
-	serializer contexty.MessageSerializer
-	keyPrefix  string
-	ttl        time.Duration
+	client    goredis.UniversalClient
+	codec     contexty.ConversationCodec
+	keyPrefix string
+	ttl       time.Duration
 }
 
-// New returns a Redis-backed Store.
+// New returns a Redis-backed ConversationStore.
 func New(client goredis.UniversalClient, opts ...Option) *Store {
 	store := &Store{
-		client:     client,
-		serializer: contexty.DefaultJSONSerializer{},
-		keyPrefix:  defaultKeyPrefix,
+		client:    client,
+		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+		keyPrefix: defaultKeyPrefix,
 	}
 	for _, opt := range opts {
 		opt(store)
@@ -71,118 +60,150 @@ func New(client goredis.UniversalClient, opts ...Option) *Store {
 	return store
 }
 
-func (s *Store) verKey(threadID string) string {
-	return s.keyPrefix + threadID + ":ver"
+func (s *Store) verKey(conversationID string) string {
+	return s.keyPrefix + conversationID + ":ver"
 }
 
-func (s *Store) listKey(threadID string) string {
-	return s.keyPrefix + threadID
+func (s *Store) dataKey(conversationID string) string {
+	return s.keyPrefix + conversationID + ":data"
 }
 
-// Load returns all stored messages for threadID in append order and the current version.
-func (s *Store) Load(ctx context.Context, threadID string) (contexty.HistorySnapshot, error) {
+// Load returns the stored conversation snapshot.
+func (s *Store) Load(ctx context.Context, conversationID string) (contexty.ConversationSnapshot, error) {
 	if s.client == nil {
-		return contexty.HistorySnapshot{}, errors.New("contexty/redis: nil client")
+		return contexty.ConversationSnapshot{}, errors.New("contexty/redis: nil client")
 	}
-
-	vstr, err := s.client.Get(ctx, s.verKey(threadID)).Result()
-	var version int64
+	vstr, err := s.client.Get(ctx, s.verKey(conversationID)).Result()
 	switch {
 	case err == nil:
 		v, parseErr := strconv.ParseInt(vstr, 10, 64)
 		if parseErr != nil {
-			return contexty.HistorySnapshot{}, fmt.Errorf("contexty/redis: parse version: %w", parseErr)
+			return contexty.ConversationSnapshot{}, fmt.Errorf("contexty/redis: parse version: %w", parseErr)
 		}
-		version = v
+		if v == 0 {
+			return contexty.EmptySnapshot(), nil
+		}
+		return s.loadSnapshot(ctx, conversationID, v)
 	case errors.Is(err, goredis.Nil):
-		version = 0
+		return contexty.EmptySnapshot(), nil
 	default:
-		return contexty.HistorySnapshot{}, classifyRedisErr("load version", err)
+		return contexty.ConversationSnapshot{}, classifyRedisErr("load version", err)
 	}
-
-	values, err := s.client.LRange(ctx, s.listKey(threadID), 0, -1).Result()
-	if err != nil {
-		return contexty.HistorySnapshot{}, classifyRedisErr("load range", err)
-	}
-	if len(values) == 0 {
-		return contexty.HistorySnapshot{Messages: []contexty.Message{}, Version: version}, nil
-	}
-
-	msgs := make([]contexty.Message, len(values))
-	for i, value := range values {
-		if err := s.serializer.Unmarshal([]byte(value), &msgs[i]); err != nil {
-			return contexty.HistorySnapshot{}, fmt.Errorf("contexty/redis: load decode: %w", err)
-		}
-	}
-	return contexty.HistorySnapshot{Messages: msgs, Version: version}, nil
 }
 
-// Append appends messages when expectedVersion matches.
-func (s *Store) Append(ctx context.Context, threadID string, expectedVersion int64, msgs ...contexty.Message) error {
+func (s *Store) loadSnapshot(
+	ctx context.Context,
+	conversationID string,
+	version int64,
+) (contexty.ConversationSnapshot, error) {
+	raw, err := s.client.Get(ctx, s.dataKey(conversationID)).Result()
+	if errors.Is(err, goredis.Nil) {
+		if version > 0 {
+			return contexty.ConversationSnapshot{}, fmt.Errorf(
+				"contexty/redis: version %d without payload for thread %q: %w",
+				version,
+				conversationID,
+				contexty.ErrUnavailable,
+			)
+		}
+		return contexty.EmptySnapshot(), nil
+	}
+	if err != nil {
+		return contexty.ConversationSnapshot{}, classifyRedisErr("load data", err)
+	}
+	snap, err := s.codec.Decode([]byte(raw))
+	if err != nil {
+		return contexty.ConversationSnapshot{}, fmt.Errorf("contexty/redis: decode: %w", err)
+	}
+	return snap.WithVersion(version), nil
+}
+
+// UpdateSegment replaces a segment when expectedVersion matches.
+func (s *Store) UpdateSegment(
+	ctx context.Context,
+	conversationID string,
+	expectedVersion int64,
+	name contexty.SegmentName,
+	msgs []contexty.Message,
+) error {
+	return s.mutate(ctx, conversationID, expectedVersion,
+		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
+			return snap.WithSegment(name, msgs)
+		})
+}
+
+// AppendSegment appends messages to a segment.
+func (s *Store) AppendSegment(
+	ctx context.Context,
+	conversationID string,
+	expectedVersion int64,
+	name contexty.SegmentName,
+	msgs ...contexty.Message,
+) error {
 	if len(msgs) == 0 {
 		return nil
 	}
-	if s.client == nil {
-		return errors.New("contexty/redis: nil client")
-	}
-
-	payloads, err := s.serializeMessages(msgs)
-	if err != nil {
-		return fmt.Errorf("contexty/redis: append: %w", err)
-	}
-
-	args := make([]any, 0, 1+len(payloads))
-	args = append(args, expectedVersion)
-	for _, p := range payloads {
-		args = append(args, p)
-	}
-
-	if err := s.evalConflict(ctx, luaAppend, []string{s.verKey(threadID), s.listKey(threadID)}, args...); err != nil {
-		return err
-	}
-	s.maybeExpire(ctx, threadID)
-	return nil
+	return s.mutate(ctx, conversationID, expectedVersion,
+		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
+			existing := snap.Segment(name)
+			combined := make([]contexty.Message, len(existing)+len(msgs))
+			copy(combined, existing)
+			for i, m := range msgs {
+				combined[len(existing)+i] = m
+			}
+			return snap.WithSegment(name, combined)
+		})
 }
 
-// Save replaces the full stored history when expectedVersion matches.
-func (s *Store) Save(ctx context.Context, threadID string, expectedVersion int64, msgs []contexty.Message) error {
-	if s.client == nil {
-		return errors.New("contexty/redis: nil client")
-	}
-
-	var args []any
-	args = append(args, expectedVersion)
-	if len(msgs) > 0 {
-		payloads, err := s.serializeMessages(msgs)
-		if err != nil {
-			return fmt.Errorf("contexty/redis: save: %w", err)
-		}
-		for _, p := range payloads {
-			args = append(args, p)
-		}
-	}
-
-	if err := s.evalConflict(ctx, luaSave, []string{s.verKey(threadID), s.listKey(threadID)}, args...); err != nil {
-		return err
-	}
-	s.maybeExpire(ctx, threadID)
-	return nil
-}
-
-// Clear removes all stored history when expectedVersion matches.
-func (s *Store) Clear(ctx context.Context, threadID string, expectedVersion int64) error {
+// Clear removes stored conversation data.
+func (s *Store) Clear(ctx context.Context, conversationID string, expectedVersion int64) error {
 	if s.client == nil {
 		return errors.New("contexty/redis: nil client")
 	}
 	if err := s.evalConflict(
 		ctx,
 		luaClear,
-		[]string{s.verKey(threadID), s.listKey(threadID)},
+		[]string{s.verKey(conversationID), s.dataKey(conversationID)},
 		expectedVersion,
 	); err != nil {
 		return err
 	}
-	s.maybeExpire(ctx, threadID)
+	s.maybeExpire(ctx, conversationID)
+	return nil
+}
+
+func (s *Store) mutate(
+	ctx context.Context,
+	conversationID string,
+	expectedVersion int64,
+	update func(contexty.ConversationSnapshot) contexty.ConversationSnapshot,
+) error {
+	if s.client == nil {
+		return errors.New("contexty/redis: nil client")
+	}
+	cur, err := s.Load(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if cur.Version() != expectedVersion {
+		return contexty.ErrConversationVersionConflict
+	}
+	next := update(cur)
+	next = next.WithVersion(expectedVersion + 1)
+	encoded, err := s.codec.Encode(next)
+	if err != nil {
+		return fmt.Errorf("contexty/redis: encode: %w", err)
+	}
+	if err := s.evalConflict(
+		ctx,
+		luaMutate,
+		[]string{s.verKey(conversationID), s.dataKey(conversationID)},
+		expectedVersion,
+		string(encoded),
+	); err != nil {
+		return err
+	}
+	s.maybeExpire(ctx, conversationID)
 	return nil
 }
 
@@ -190,7 +211,7 @@ func (s *Store) evalConflict(ctx context.Context, script string, keys []string, 
 	res, err := s.client.Eval(ctx, script, keys, args...).Result()
 	if err != nil {
 		if isRedisConflict(err) {
-			return contexty.ErrHistoryVersionConflict
+			return contexty.ErrConversationVersionConflict
 		}
 		return classifyRedisErr("eval", err)
 	}
@@ -202,31 +223,20 @@ func isRedisConflict(err error) bool {
 	if err == nil {
 		return false
 	}
+	// go-redis surfaces redis.error_reply('CONFLICT') as "ERR CONFLICT".
 	msg := err.Error()
-	return strings.Contains(msg, "CONFLICT")
+	return msg == "CONFLICT" || strings.HasSuffix(msg, " CONFLICT")
 }
 
-func (s *Store) maybeExpire(ctx context.Context, threadID string) {
+func (s *Store) maybeExpire(ctx context.Context, conversationID string) {
 	if s.ttl <= 0 {
 		return
 	}
-	vk, lk := s.verKey(threadID), s.listKey(threadID)
+	vk, dk := s.verKey(conversationID), s.dataKey(conversationID)
 	pipe := s.client.TxPipeline()
 	pipe.Expire(ctx, vk, s.ttl)
-	pipe.Expire(ctx, lk, s.ttl)
+	pipe.Expire(ctx, dk, s.ttl)
 	_, _ = pipe.Exec(ctx)
 }
 
-func (s *Store) serializeMessages(msgs []contexty.Message) ([]string, error) {
-	payloads := make([]string, len(msgs))
-	for i, msg := range msgs {
-		payload, err := s.serializer.Marshal(msg)
-		if err != nil {
-			return nil, fmt.Errorf("marshal message %d: %w", i, err)
-		}
-		payloads[i] = string(payload)
-	}
-	return payloads, nil
-}
-
-var _ contexty.HistoryStore = (*Store)(nil)
+var _ contexty.ConversationStore = (*Store)(nil)

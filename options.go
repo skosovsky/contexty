@@ -4,17 +4,24 @@ import "slices"
 
 // DropHeadConfig configures how DropHeadStrategy trims older messages.
 type DropHeadConfig struct {
-	KeepTurnAtomicity bool
+	// KeepTurnAtomicity enables atomic removal of assistant tool-call turns.
+	// Nil means true (default).
+	KeepTurnAtomicity *bool
 	MinMessages       int
 	ProtectedRoles    []string
+}
+
+func (cfg DropHeadConfig) keepTurnAtomicity() bool {
+	if cfg.KeepTurnAtomicity == nil {
+		return true
+	}
+	return *cfg.KeepTurnAtomicity
 }
 
 func (cfg DropHeadConfig) normalized() DropHeadConfig {
 	normalized := DropHeadConfig{
 		KeepTurnAtomicity: cfg.KeepTurnAtomicity,
-	}
-	if cfg.MinMessages > 0 {
-		normalized.MinMessages = cfg.MinMessages
+		MinMessages:       cfg.MinMessages,
 	}
 	if len(cfg.ProtectedRoles) == 0 {
 		return normalized
@@ -27,4 +34,9 @@ func (cfg DropHeadConfig) normalized() DropHeadConfig {
 		normalized.ProtectedRoles = append(normalized.ProtectedRoles, role)
 	}
 	return normalized
+}
+
+// BoolPtr returns a pointer to b (helper for optional config fields).
+func BoolPtr(b bool) *bool {
+	return new(b)
 }
