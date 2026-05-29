@@ -302,3 +302,29 @@ func TestObserver_EngineOnlyObserverGetsCompileEventOnly(t *testing.T) {
 	require.Empty(t, rec.Evictions)
 	require.Empty(t, rec.Summaries)
 }
+
+func TestObserver_SharedAdapterForEngineAndBudget(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "a"),
+		contexty.TextMessage(contexty.RoleUser, "b"),
+		contexty.TextMessage(contexty.RoleUser, "c"),
+	}
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		&contexty.FixedEstimator{TokensPerMessage: 10},
+		contexty.WithBudgetObserver(rec),
+	)
+	engine := contexty.NewEngine(
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithObserver(rec),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, payload.History)
+	require.Len(t, rec.Tokens, 1)
+	require.NotEmpty(t, rec.Evictions)
+	require.Len(t, rec.Compilations, 1)
+}

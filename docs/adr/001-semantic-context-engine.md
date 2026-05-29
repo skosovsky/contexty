@@ -18,7 +18,8 @@ The library is the **final semantic container** for dialogue:
 - Non-mutating `Render(ViewType)` projections
 - Unified budgeting pipeline (summarize + truncate, tool-pair atomicity)
 - `Compile()` → `AbstractPayload` with deferred blocks and overlay
-- Compile order: load → deferred → hooks → budget → payload
+- `CompileSnapshot()` — stateless compile from in-memory `ConversationSnapshot` (no `Store` / `conversationID`)
+- Compile order: load → deferred → hooks → budget → payload (budget last for **token accuracy**: hooks and deferred blocks change text length)
 - Polymorphic JSON codec with `ProvenanceRegistry` for provenance (wire contract v1: `kind` / `type_id`)
 - Structural sharing (copy-on-write) for snapshots/hooks/render
 - `ConversationStore` methods use `conversationID` parameter name (DB column may remain `thread_id`)
@@ -43,6 +44,13 @@ The library is the **final semantic container** for dialogue:
 ## Deprecation policy
 
 String heuristics (`strings.HasPrefix`, `strings.Contains`) on history for business logic are **forbidden** in application code integrating with `contexty`. Core package enforces this via `TestArchitecture_NoStringHeuristicsForSemantics` (AST inspection, allowlist for PII redaction in `transform.go`).
+
+## Task12: Architecture guardrails and stateless compile
+
+- `CompileSnapshot(ctx, snap)` compiles without `Store` / `conversationID`; pipeline steps match `Compile()` after load; `OnPipelineCompiled` fires on both entry points
+- `TestArchitecture_NoForbiddenExternalImports` — AST import scan; no kosmify/metry/langfuse/OpenTelemetry in core
+- `TestArchitecture_NoBase64InCore` — no Base64 encoding heuristics in semantic core
+- Shared `Observer` may be wired via both `WithObserver` and `WithBudgetObserver` on the same instance
 
 ## Task11: Observe API
 

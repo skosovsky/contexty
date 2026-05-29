@@ -10,6 +10,21 @@ flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier)
 
 `Render` never mutates the input snapshot. It does **not** apply transform hooks or budgeting — use `Engine.Compile()` when you need redaction or truncation before sending to an LLM.
 
+## Stateless compilation
+
+Compile an in-memory snapshot without `Store` or `conversationID`:
+
+```go
+snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+engine := contexty.NewEngine(
+    contexty.WithTransformHooks(contexty.NewRedactionHook()),
+    contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+)
+payload, _ := engine.CompileSnapshot(ctx, snap)
+```
+
+`CompileSnapshot` runs the same pipeline as `Compile()` after load: deferred blocks → transform hooks → budget → payload. Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves identically.
+
 ## Deferred blocks
 
 ```go
@@ -27,9 +42,11 @@ engine := contexty.NewEngine(
 payload, _ := engine.Compile(ctx)
 ```
 
-Deferred content resolves only at `Compile()` and is not persisted unless written to the store separately.
+Deferred content resolves at compile time (`Compile()` or `CompileSnapshot()`) and is not persisted unless written to the store separately.
 
-`Compile()` order: load snapshot → resolve deferred blocks → transform hooks (redaction) → budget → payload. Deferred content is therefore redacted by hooks. Use `contexty.CompileOverlayFromContext(ctx)` inside `Resolve` to read overlay vars from `Engine.WithOverlay`.
+Compile order after load (or direct snapshot): load snapshot (`Compile()` only) → resolve deferred blocks → transform hooks (redaction) → budget → payload. Deferred content is therefore redacted by hooks. Use `contexty.CompileOverlayFromContext(ctx)` inside `Resolve` to read overlay vars from `Engine.WithOverlay`.
+
+**Token accuracy:** Budget runs after deferred resolution and hooks because both steps change message text and length; token estimates and truncation must reflect the final content sent to the LLM.
 
 ## Overlay
 
@@ -101,7 +118,7 @@ Events:
 | `OnTokensEstimated`   | After initial token estimate for a budget block (`blockID` = segment name)                                                  |
 | `OnNodeEvicted`       | Strategy truncation, block drop, or orphan tool-pair repair (`nodeID` = `Annotations.RefID` or deterministic hash fallback) |
 | `OnContextSummarized` | After summarizer runs (`compressionRatio` = tokens before / tokens after)                                                   |
-| `OnPipelineCompiled`  | Successful `Compile()` with total payload cost and duration                                                                 |
+| `OnPipelineCompiled`  | Successful `Compile()` or `CompileSnapshot()` with total payload cost and duration                                          |
 
 Use `contexty.NoopObserver` when telemetry is disabled.
 
@@ -109,10 +126,15 @@ Use `contexty.NoopObserver` when telemetry is disabled.
 
 - `WithObserver` on `Engine` receives `OnPipelineCompiled` only (not budget events).
 - `WithBudgetObserver` on `BudgetPipeline` receives budget events (`OnTokensEstimated`, `OnNodeEvicted`, `OnContextSummarized`). If only `WithObserver` is set, budget callbacks are not emitted.
+- The same `Observer` instance may be passed to both `WithObserver` and `WithBudgetObserver` to receive all events on one adapter.
 - Direct `BudgetPipeline.Apply(...)` works with `WithBudgetObserver` without extra context wiring.
 - Observer is passive: telemetry estimate failures do not fail `Compile()`; `OnPipelineCompiled` is simply skipped.
 
-Architecture test `TestArchitecture_NoStringHeuristicsForSemantics` enforces no `strings.HasPrefix`/`Contains` heuristics in semantic core code.
+Architecture guardrails (AST tests in `architecture_test.go`):
+
+- `TestArchitecture_NoStringHeuristicsForSemantics` — no `strings.HasPrefix`/`Contains`/`HasSuffix` heuristics in semantic core
+- `TestArchitecture_NoForbiddenExternalImports` — core must not import kosmify, metry, langfuse, OpenTelemetry, or other third-party packages (stdlib + `github.com/skosovsky/contexty/*` only; testify allowed in tests)
+- `TestArchitecture_NoBase64InCore` — no `encoding/base64` in production core sources
 
 ## Storage adapter contract tests
 

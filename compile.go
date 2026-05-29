@@ -105,7 +105,24 @@ func (e *Engine) Compile(ctx context.Context) (AbstractPayload, error) {
 	if err != nil {
 		return AbstractPayload{}, err
 	}
-	snap, err = e.applyDeferredBlocks(ctx, snap)
+	return e.compileFromSnapshot(ctx, snap, start)
+}
+
+// CompileSnapshot compiles an in-memory snapshot without loading from Store or conversationID.
+// Deferred blocks, transform hooks, budgeting, and observer telemetry run identically to Compile().
+func (e *Engine) CompileSnapshot(ctx context.Context, snap ConversationSnapshot) (AbstractPayload, error) {
+	if err := ctx.Err(); err != nil {
+		return AbstractPayload{}, fmt.Errorf("contexty: compile snapshot: %w", err)
+	}
+	return e.compileFromSnapshot(ctx, snap, time.Now())
+}
+
+func (e *Engine) compileFromSnapshot(
+	ctx context.Context,
+	snap ConversationSnapshot,
+	start time.Time,
+) (AbstractPayload, error) {
+	snap, err := e.applyDeferredBlocks(ctx, snap)
 	if err != nil {
 		return AbstractPayload{}, err
 	}

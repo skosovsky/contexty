@@ -1,0 +1,154 @@
+package contexty_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/skosovsky/contexty"
+)
+
+func TestStatelessCompile(t *testing.T) {
+	ctx := context.Background()
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "hello"),
+		contexty.TextMessage(contexty.RoleUser, "world"),
+	}
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+	engine := contexty.NewEngine(
+		contexty.WithBudgetPipeline(
+			contexty.SegmentHistory,
+			contexty.NewBudgetPipeline(
+				contexty.BudgetConfig{TokenLimit: 1000},
+				&contexty.FixedEstimator{TokensPerMessage: 10},
+			),
+		),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.Len(t, payload.History, 2)
+}
+
+func TestStatelessCompile_RedactionAndBudget(t *testing.T) {
+	ctx := context.Background()
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "contact me at user@example.com"),
+		contexty.TextMessage(contexty.RoleUser, "more"),
+		contexty.TextMessage(contexty.RoleUser, "tail"),
+	})
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		&contexty.FixedEstimator{TokensPerMessage: 10},
+	)
+	engine := contexty.NewEngine(
+		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, payload.History)
+	assert.NotContains(t, payload.History[0].TextContent(), "user@example.com")
+}
+
+func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "a"),
+		contexty.TextMessage(contexty.RoleUser, "b"),
+		contexty.TextMessage(contexty.RoleUser, "c"),
+	}
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		&contexty.FixedEstimator{TokensPerMessage: 10},
+		contexty.WithBudgetObserver(rec),
+	)
+	engine := contexty.NewEngine(
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithObserver(rec),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.NotEmpty(t, payload.History)
+	require.Len(t, rec.Tokens, 1)
+	require.NotEmpty(t, rec.Evictions)
+	require.Len(t, rec.Compilations, 1)
+}
+
+func TestStatelessCompile_DeferredBlocks(t *testing.T) {
+	ctx := context.Background()
+	snap := contexty.EmptySnapshot()
+	engine := contexty.NewEngine(
+		contexty.WithDeferredBlocks(contexty.DeferredBlock{
+			Name:    "hint",
+			Segment: contexty.SegmentSystem,
+			Resolve: func(context.Context) ([]contexty.Message, error) {
+				return []contexty.Message{
+					contexty.TextMessage(contexty.RoleSystem, "dynamic"),
+				}, nil
+			},
+		}),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.Len(t, payload.System, 1)
+	assert.Equal(t, "dynamic", payload.System[0].TextContent())
+}
+
+func TestStatelessCompile_IgnoresStoreAndConversationID(t *testing.T) {
+	ctx := context.Background()
+	const convID = "stored-conv"
+	store := contexty.NewMemoryConversationStore()
+	s0, err := store.Load(ctx, convID)
+	require.NoError(t, err)
+	storeMsgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "from-store"),
+	}
+	require.NoError(t, store.UpdateSegment(ctx, convID, s0.Version(), contexty.SegmentHistory, storeMsgs))
+
+	snapMsgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "from-snapshot"),
+	}
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, snapMsgs)
+	engine := contexty.NewEngine(
+		contexty.WithStore(store),
+		contexty.WithConversationID(convID),
+	)
+	payload, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.Len(t, payload.History, 1)
+	assert.Equal(t, "from-snapshot", payload.History[0].TextContent())
+}
+
+func TestStatelessCompile_ContextPropagation(t *testing.T) {
+	ctx := context.WithValue(context.Background(), traceContextKey{}, "trace-stateless")
+	rec := &contexty.RecordingObserver{}
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "a"),
+		contexty.TextMessage(contexty.RoleUser, "b"),
+		contexty.TextMessage(contexty.RoleUser, "c"),
+	}
+	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		&contexty.FixedEstimator{TokensPerMessage: 10},
+		contexty.WithBudgetObserver(rec),
+	)
+	engine := contexty.NewEngine(
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithObserver(rec),
+	)
+	_, err := engine.CompileSnapshot(ctx, snap)
+	require.NoError(t, err)
+	require.Len(t, rec.Tokens, 1)
+	assert.Equal(t, "trace-stateless", rec.Tokens[0].Ctx.Value(traceContextKey{}))
+	require.NotEmpty(t, rec.Evictions)
+	for _, e := range rec.Evictions {
+		assert.Equal(t, "trace-stateless", e.Ctx.Value(traceContextKey{}))
+	}
+	require.Len(t, rec.Compilations, 1)
+	assert.Equal(t, "trace-stateless", rec.Compilations[0].Ctx.Value(traceContextKey{}))
+}
