@@ -397,3 +397,89 @@ func TestDoD_CompileDeterminism(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p1, p2)
 }
+
+func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	store := contexty.NewMemoryConversationStore()
+	s0, err := store.Load(ctx, "evict-obs")
+	require.NoError(t, err)
+	msgs := []contexty.Message{
+		{
+			Role:        contexty.RoleUser,
+			Parts:       []contexty.ContentPart{contexty.TextPart{Text: "old"}},
+			Annotations: contexty.Annotations{RefID: "u-old"},
+		},
+		{
+			Role:        contexty.RoleUser,
+			Parts:       []contexty.ContentPart{contexty.TextPart{Text: "new"}},
+			Annotations: contexty.Annotations{RefID: "u-new"},
+		},
+	}
+	require.NoError(t, store.UpdateSegment(ctx, "evict-obs", s0.Version(), contexty.SegmentHistory, msgs))
+
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		&contexty.FixedEstimator{TokensPerMessage: 10},
+		contexty.WithBudgetObserver(rec),
+	)
+	engine := contexty.NewEngine(
+		contexty.WithConversationID("evict-obs"),
+		contexty.WithStore(store),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+	)
+	_, err = engine.Compile(ctx)
+	require.NoError(t, err)
+	require.NotEmpty(t, rec.Evictions)
+	nodeIDs := rec.EvictionNodeIDs()
+	assert.Contains(t, nodeIDs, "u-old")
+	for _, id := range nodeIDs {
+		assert.NotEmpty(t, id)
+	}
+}
+
+func TestDoD_ObserverCompileTelemetry(t *testing.T) {
+	ctx := context.WithValue(context.Background(), traceContextKey{}, "dod-trace")
+	rec := &contexty.RecordingObserver{}
+	store := contexty.NewMemoryConversationStore()
+	s0, err := store.Load(ctx, "compile-obs")
+	require.NoError(t, err)
+	history := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")}
+	require.NoError(t, store.UpdateSegment(ctx, "compile-obs", s0.Version(), contexty.SegmentHistory, history))
+	engine := contexty.NewEngine(
+		contexty.WithConversationID("compile-obs"),
+		contexty.WithStore(store),
+		contexty.WithObserver(rec),
+	)
+	_, err = engine.Compile(ctx)
+	require.NoError(t, err)
+	require.Len(t, rec.Compilations, 1)
+	assert.Equal(t, "dod-trace", rec.Compilations[0].Ctx.Value(traceContextKey{}))
+	assert.Positive(t, rec.Compilations[0].TotalCost)
+}
+
+func TestDoD_ObserverDoesNotBreakCompile(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	store := contexty.NewMemoryConversationStore()
+	s0, err := store.Load(ctx, "obs-passive")
+	require.NoError(t, err)
+	history := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "stable")}
+	require.NoError(t, store.UpdateSegment(ctx, "obs-passive", s0.Version(), contexty.SegmentHistory, history))
+	est := &callCountEstimator{}
+	pipe := contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{TokenLimit: 1000},
+		est,
+		contexty.WithBudgetObserver(rec),
+	)
+	engine := contexty.NewEngine(
+		contexty.WithConversationID("obs-passive"),
+		contexty.WithStore(store),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithObserver(rec),
+	)
+	payload, err := engine.Compile(ctx)
+	require.NoError(t, err)
+	require.Len(t, payload.History, 1)
+	require.Empty(t, rec.Compilations)
+}

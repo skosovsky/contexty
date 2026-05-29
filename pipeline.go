@@ -23,18 +23,24 @@ type BudgetConfig struct {
 type BudgetPipeline struct {
 	cfg       BudgetConfig
 	estimator TokenEstimator
+	observer  Observer
 }
 
 // NewBudgetPipeline returns a pipeline with the given config and estimator.
-func NewBudgetPipeline(cfg BudgetConfig, estimator TokenEstimator) *BudgetPipeline {
+func NewBudgetPipeline(cfg BudgetConfig, estimator TokenEstimator, opts ...BudgetPipelineOption) *BudgetPipeline {
 	if estimator == nil {
 		estimator = CharTokenEstimator{}
 	}
-	return &BudgetPipeline{cfg: cfg, estimator: estimator}
+	p := &BudgetPipeline{cfg: cfg, estimator: estimator, observer: nil}
+	for _, opt := range opts {
+		opt(p)
+	}
+	return p
 }
 
 // Apply runs summarize (if configured) then truncate until within limit.
 func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, error) {
+	ctx = ensureBudgetObservation(ctx, p.observer)
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: budget: %w", err)
 	}
@@ -46,10 +52,18 @@ func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, 
 	if err != nil {
 		return nil, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, err)
 	}
+	if obs := observerFrom(ctx); obs != nil {
+		blockID := budgetBlockIDFrom(ctx)
+		if blockID == "" {
+			blockID = "budget"
+		}
+		obs.OnTokensEstimated(ctx, blockID, tokens)
+	}
 	if tokens <= p.cfg.TokenLimit {
 		return cur, nil
 	}
 	if p.cfg.Summarizer != nil {
+		originalTokens := tokens
 		summary, sumErr := p.cfg.Summarizer.Summarize(ctx, cur)
 		if sumErr != nil {
 			return nil, fmt.Errorf("contexty: budget summarize: %w", sumErr)
@@ -58,6 +72,7 @@ func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, 
 		if estErr != nil {
 			return nil, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, estErr)
 		}
+		emitContextSummarized(ctx, originalTokens, sumTokens)
 		if sumTokens <= p.cfg.TokenLimit {
 			return []Message{summary}, nil
 		}
@@ -73,9 +88,19 @@ func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, 
 		return nil, truncErr
 	}
 	if out != nil {
+		beforeRepair := out
 		out = enforceToolPairAtomicity(out)
+		reportEvictions(ctx, beforeRepair, out, EvictionReasonOrphanRepair)
 	}
 	return out, nil
+}
+
+func emitContextSummarized(ctx context.Context, beforeTokens, afterTokens int) {
+	obs := observerFrom(ctx)
+	if obs == nil || afterTokens <= 0 {
+		return
+	}
+	obs.OnContextSummarized(ctx, float64(beforeTokens)/float64(afterTokens))
 }
 
 // enforceToolPairAtomicity drops orphan tool results or assistant calls without results.

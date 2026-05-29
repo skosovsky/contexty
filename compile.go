@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"time"
 )
 
 // DeferredBlock resolves content lazily at compile time into a target segment.
@@ -34,6 +35,7 @@ type Engine struct {
 	conversationID string
 	overlay        Overlay
 	budgetSeg      SegmentName
+	observer       Observer
 }
 
 // EngineOption configures the compile engine.
@@ -77,6 +79,7 @@ func NewEngine(opts ...EngineOption) *Engine {
 		conversationID: "",
 		overlay:        make(Overlay),
 		budgetSeg:      SegmentHistory,
+		observer:       nil,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -97,6 +100,7 @@ func (e *Engine) Compile(ctx context.Context) (AbstractPayload, error) {
 	if err := ctx.Err(); err != nil {
 		return AbstractPayload{}, fmt.Errorf("contexty: compile: %w", err)
 	}
+	start := time.Now()
 	snap, err := e.loadSnapshot(ctx)
 	if err != nil {
 		return AbstractPayload{}, err
@@ -113,7 +117,32 @@ func (e *Engine) Compile(ctx context.Context) (AbstractPayload, error) {
 	if err != nil {
 		return AbstractPayload{}, err
 	}
-	return e.payloadFromSnapshot(snap), nil
+	payload := e.payloadFromSnapshot(snap)
+	if obs := e.resolveCompileObserver(); obs != nil {
+		if total, estErr := e.estimatePayloadTokens(ctx, payload); estErr == nil {
+			obs.OnPipelineCompiled(ctx, total, time.Since(start))
+		}
+	}
+	return payload, nil
+}
+
+func (e *Engine) resolveCompileObserver() Observer {
+	return e.observer
+}
+
+func (e *Engine) resolveBudgetObserver() Observer {
+	if e.budget == nil {
+		return nil
+	}
+	return e.budget.observer
+}
+
+func (e *Engine) estimatePayloadTokens(ctx context.Context, payload AbstractPayload) (int, error) {
+	estimator := TokenEstimator(CharTokenEstimator{})
+	if e.budget != nil && e.budget.estimator != nil {
+		estimator = e.budget.estimator
+	}
+	return estimator.Estimate(ctx, payload.FlattenMessages())
 }
 
 func (e *Engine) loadSnapshot(ctx context.Context) (ConversationSnapshot, error) {
@@ -168,6 +197,7 @@ func (e *Engine) applyBudgetSegment(ctx context.Context, snap ConversationSnapsh
 		seg = SegmentHistory
 	}
 	msgs := snap.Segment(seg)
+	ctx = withBudgetObservation(ctx, e.resolveBudgetObserver(), string(seg))
 	trimmed, err := e.budget.Apply(ctx, msgs)
 	if err != nil {
 		return ConversationSnapshot{}, err

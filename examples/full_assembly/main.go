@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/skosovsky/contexty"
 )
@@ -50,6 +51,7 @@ func buildPrompt(ctx context.Context) (contexty.AbstractPayload, error) {
 		contexty.WithConversationID("demo"),
 		contexty.WithStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithObserver(compileObserver{}),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "session_hint",
@@ -62,6 +64,24 @@ func buildPrompt(ctx context.Context) (contexty.AbstractPayload, error) {
 		}),
 	)
 	return engine.Compile(ctx)
+}
+
+type compileObserver struct{}
+
+func (compileObserver) OnTokensEstimated(_ context.Context, blockID string, count int) {
+	log.Printf("tokens estimated: block=%s count=%d", blockID, count)
+}
+
+func (compileObserver) OnNodeEvicted(_ context.Context, nodeID string, reason contexty.EvictionReason) {
+	log.Printf("node evicted: id=%s reason=%s", nodeID, reason)
+}
+
+func (compileObserver) OnContextSummarized(_ context.Context, ratio float64) {
+	log.Printf("context summarized: ratio=%.2f", ratio)
+}
+
+func (compileObserver) OnPipelineCompiled(_ context.Context, totalCost int, duration time.Duration) {
+	log.Printf("pipeline compiled: cost=%d duration=%s", totalCost, duration)
 }
 
 func fetchConversation() []contexty.Message {

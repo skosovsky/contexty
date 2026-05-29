@@ -145,3 +145,53 @@ func TestBudgetPipeline_RepairsStrategyOrphans(t *testing.T) {
 		}
 	}
 }
+
+func TestDropHeadStrategy_FastPathEmitsObserverEvictions(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	ctx = contexty.WithBudgetObservationForTest(ctx, rec, "history")
+
+	optOut := false
+	strategy := contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
+		KeepTurnAtomicity: &optOut,
+		MinMessages:       1,
+	})
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "old"),
+		contexty.TextMessage(contexty.RoleUser, "mid"),
+		contexty.TextMessage(contexty.RoleUser, "new"),
+	}
+	out, err := strategy.Apply(ctx, msgs, 30, 10, &contexty.FixedEstimator{TokensPerMessage: 10})
+	require.NoError(t, err)
+	require.Len(t, out, 1)
+	require.Len(t, rec.Evictions, 2)
+	for _, e := range rec.Evictions {
+		assert.Equal(t, contexty.EvictionReasonTruncate, e.Reason)
+	}
+}
+
+func TestDropHeadStrategy_SelectivePathEmitsObserverEvictions(t *testing.T) {
+	ctx := context.Background()
+	rec := &contexty.RecordingObserver{}
+	ctx = contexty.WithBudgetObservationForTest(ctx, rec, "history")
+
+	strategy := contexty.NewDropHeadStrategy(contexty.DropHeadConfig{MinMessages: 1})
+	msgs := []contexty.Message{
+		contexty.TextMessage(contexty.RoleUser, "old"),
+		{
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "c1", Name: "fn", Arguments: "{}"},
+			},
+		},
+		{
+			Role:  contexty.RoleTool,
+			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "c1", Content: "r"}},
+		},
+		contexty.TextMessage(contexty.RoleUser, "new"),
+	}
+	out, err := strategy.Apply(ctx, msgs, 40, 15, &contexty.FixedEstimator{TokensPerMessage: 10})
+	require.NoError(t, err)
+	require.NotEmpty(t, out)
+	require.GreaterOrEqual(t, len(rec.Evictions), 2)
+}

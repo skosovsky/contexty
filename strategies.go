@@ -53,6 +53,7 @@ func (s *dropStrategy) Apply(
 		return nil, fmt.Errorf("contexty: drop: %w", err)
 	}
 	if originalTokens > limit {
+		reportEvictions(ctx, msgs, nil, EvictionReasonBudget)
 		return nil, nil
 	}
 	return msgs, nil
@@ -92,12 +93,14 @@ func (s *dropTailStrategy) Apply(
 			return nil, fmt.Errorf("contexty: drop tail: %w: %w", ErrTokenCountFailed, err)
 		}
 		if tokens <= limit {
+			reportEvictions(ctx, msgs, out, EvictionReasonTruncate)
 			return out, nil
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("contexty: drop tail: %w", err)
 		}
 	}
+	reportEvictions(ctx, msgs, nil, EvictionReasonTruncate)
 	return nil, ErrBlockTooLarge
 }
 
@@ -160,14 +163,21 @@ func (s *dropHeadStrategy) Apply(
 		)
 	}
 	if s.usesFastPath() {
-		return s.applyFastPath(msgs, weights, limit), nil
+		out := s.applyFastPath(msgs, weights, limit)
+		reportEvictions(ctx, msgs, out, EvictionReasonTruncate)
+		return out, nil
 	}
-	return s.applySelectivePath(ctx, dropHeadState{
+	out, err := s.applySelectivePath(ctx, dropHeadState{
 		msgs:    slices.Clone(msgs),
 		weights: slices.Clone(weights),
 		deleted: make([]bool, len(msgs)),
 		total:   originalTokens,
 	}, limit)
+	if err != nil {
+		return nil, err
+	}
+	reportEvictions(ctx, msgs, out, EvictionReasonTruncate)
+	return out, nil
 }
 
 type dropHeadState struct {

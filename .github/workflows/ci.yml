@@ -66,7 +66,7 @@ jobs:
           cache: true
           go-version-file: go.mod
       - name: Run DoD acceptance tests
-        run: go test -race -run='TestDoD_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans' ./...
+        run: go test -race -run='TestDoD_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans|TestObserver_|TestArchitecture_' ./...
 
   bench:
     name: Benchmarks

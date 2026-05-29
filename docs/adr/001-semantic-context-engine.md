@@ -42,4 +42,15 @@ The library is the **final semantic container** for dialogue:
 
 ## Deprecation policy
 
-String heuristics (`strings.HasPrefix`, `strings.Contains`) on history for business logic are **forbidden** in application code integrating with `contexty`.
+String heuristics (`strings.HasPrefix`, `strings.Contains`) on history for business logic are **forbidden** in application code integrating with `contexty`. Core package enforces this via `TestArchitecture_NoStringHeuristicsForSemantics` (AST inspection, allowlist for PII redaction in `transform.go`).
+
+## Task11: Observe API
+
+- `Observer` interface with `context.Context` as first argument on all callbacks
+- `WithObserver` on `Engine` (`OnPipelineCompiled` only)
+- `WithBudgetObserver` on `BudgetPipeline` (budget telemetry)
+- When both are configured, compile and budget events route to their respective observers
+- `OnNodeEvicted` emitted for truncation, budget drop, and orphan repair paths
+- Deterministic `nodeID`: `Annotations.RefID` or `{blockID}:index_{n}:{fingerprint}`
+- Observer is passive: telemetry estimate failures do not fail `Compile()`
+- No external telemetry dependencies in core

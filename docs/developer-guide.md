@@ -73,6 +73,47 @@ Tool-call turns are truncated atomically by default (`KeepTurnAtomicity` default
 
 **Canonical tool-turn layout** for atomic truncation: `RoleAssistant` with `ToolCallPart`(s), then `RoleTool` message(s) with matching `ToolResultPart.ToolCallID`. Use `ToolTurnUsesCanonicalLayout` to validate. In-message call+result in a single `Message` is valid for JSON transport but is not the canonical multi-message turn block.
 
+## Observer (telemetry)
+
+The library does not import OpenTelemetry or other metrics SDKs. Pass your own `contexty.Observer` to receive compile-time events with the same `context.Context` as `Compile()` / `Apply()` (trace correlation).
+
+```go
+type metricsObserver struct{}
+
+func (metricsObserver) OnTokensEstimated(ctx context.Context, blockID string, count int) {}
+func (metricsObserver) OnNodeEvicted(ctx context.Context, nodeID string, reason contexty.EvictionReason) {}
+func (metricsObserver) OnContextSummarized(ctx context.Context, compressionRatio float64) {}
+func (metricsObserver) OnPipelineCompiled(ctx context.Context, totalCost int, duration time.Duration) {}
+
+engine := contexty.NewEngine(
+    contexty.WithObserver(metricsObserver{}),
+    contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+)
+
+// Or attach observer only to budget events:
+pipe := contexty.NewBudgetPipeline(cfg, estimator, contexty.WithBudgetObserver(metricsObserver{}))
+```
+
+Events:
+
+| Callback              | When                                                                                                                        |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `OnTokensEstimated`   | After initial token estimate for a budget block (`blockID` = segment name)                                                  |
+| `OnNodeEvicted`       | Strategy truncation, block drop, or orphan tool-pair repair (`nodeID` = `Annotations.RefID` or deterministic hash fallback) |
+| `OnContextSummarized` | After summarizer runs (`compressionRatio` = tokens before / tokens after)                                                   |
+| `OnPipelineCompiled`  | Successful `Compile()` with total payload cost and duration                                                                 |
+
+Use `contexty.NoopObserver` when telemetry is disabled.
+
+**Observer semantics:**
+
+- `WithObserver` on `Engine` receives `OnPipelineCompiled` only (not budget events).
+- `WithBudgetObserver` on `BudgetPipeline` receives budget events (`OnTokensEstimated`, `OnNodeEvicted`, `OnContextSummarized`). If only `WithObserver` is set, budget callbacks are not emitted.
+- Direct `BudgetPipeline.Apply(...)` works with `WithBudgetObserver` without extra context wiring.
+- Observer is passive: telemetry estimate failures do not fail `Compile()`; `OnPipelineCompiled` is simply skipped.
+
+Architecture test `TestArchitecture_NoStringHeuristicsForSemantics` enforces no `strings.HasPrefix`/`Contains` heuristics in semantic core code.
+
 ## Storage adapter contract tests
 
 Postgres and Redis adapters share a minimum integration contract (testcontainers):
