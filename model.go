@@ -19,17 +19,21 @@ const (
 
 // Message is a semantic AST node — no transport prefixes in text fields.
 type Message struct {
+	ID          string        `json:"id,omitempty"`
 	Role        Role          `json:"role"`
 	Parts       []ContentPart `json:"parts"`
 	Annotations Annotations   `json:"annotations"`
+	Attributes  Attributes    `json:"attributes,omitempty"`
 	Provenance  Provenance    `json:"-"`
 }
 
 // Clone returns a deep copy of the message.
 func (m Message) Clone() Message {
 	cloned := Message{
+		ID:          m.ID,
 		Role:        m.Role,
 		Annotations: m.Annotations.Clone(),
+		Attributes:  m.Attributes.Clone(),
 	}
 	if len(m.Parts) > 0 {
 		cloned.Parts = make([]ContentPart, len(m.Parts))
@@ -88,9 +92,11 @@ func (m Message) ToolResultParts() []ToolResultPart {
 
 // messageWire is the JSON transport envelope for Message.
 type messageWire struct {
+	ID          string          `json:"id,omitempty"`
 	Role        Role            `json:"role"`
 	Parts       json.RawMessage `json:"parts"`
 	Annotations Annotations     `json:"annotations"`
+	Attributes  Attributes      `json:"attributes,omitempty"`
 	Provenance  json.RawMessage `json:"provenance,omitempty"`
 }
 
@@ -105,9 +111,11 @@ func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
 		return nil, err
 	}
 	wire := messageWire{
+		ID:          m.ID,
 		Role:        m.Role,
 		Parts:       partsJSON,
 		Annotations: m.Annotations,
+		Attributes:  m.Attributes,
 		Provenance:  provJSON,
 	}
 	return json.Marshal(wire)
@@ -136,9 +144,11 @@ func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error)
 		}
 	}
 	return Message{
+		ID:          wire.ID,
 		Role:        wire.Role,
 		Parts:       parts,
 		Annotations: wire.Annotations,
+		Attributes:  wire.Attributes,
 		Provenance:  prov,
 	}, nil
 }

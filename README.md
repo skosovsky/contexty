@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/skosovsky/contexty)](https://goreportcard.com/report/github.com/skosovsky/contexty)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`contexty` is a **semantic context engine** for LLM applications: typed message AST, segment-based `ConversationStore`, non-mutating views, unified budgeting, and `Compile()` → `AbstractPayload`.
+`contexty` is a **semantic context engine** for LLM applications: typed message AST, segment-based `ConversationStore`, non-mutating views, unified budgeting, and `Compile()` → `CompileResult` (payload + transformations by `Message.ID`).
 
 ## Installation
 
@@ -37,11 +37,13 @@ engine := contexty.NewEngine(
     )),
 )
 
-payload, err := engine.Compile(ctx)
-_ = payload.FlattenMessages()
+	result, err := engine.Compile(ctx, contexty.CompileRequest{
+		Pending: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "Current turn")},
+	})
+	_ = result.Payload.FlattenMessages()
 ```
 
-See [Developer Guide](docs/developer-guide.md) and [ADR-001](docs/adr/001-semantic-context-engine.md).
+See [Developer Guide](docs/developer-guide.md), [ADR-001](docs/adr/001-semantic-context-engine.md), and [ADR-002](docs/adr/002-clear-break-compile-contract.md).
 
 ## Views (non-mutating render)
 

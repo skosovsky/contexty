@@ -243,12 +243,14 @@ func expandedSystemMessage() contexty.Message {
 func expandedHistoryMessage() contexty.Message {
 	ts := time.Date(2025, 6, 2, 9, 0, 0, 0, time.UTC)
 	return contexty.Message{
+		ID:   "msg-expanded-hist",
 		Role: contexty.RoleUser,
 		Parts: []contexty.ContentPart{
 			contexty.TextPart{Text: "see image"},
 			contexty.ImagePart{URL: "https://example.com/a.png", Detail: "low"},
 		},
 		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "img-1"},
+		Attributes:  contexty.Attributes{"tier": "premium", "count": float64(2)},
 		Provenance:  contexty.UserProvenance{Channel: "web", UserID: "u2"},
 	}
 }
@@ -266,6 +268,9 @@ func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *S
 
 	history := snap.Segment(contexty.SegmentHistory)
 	require.Len(t, history, 1)
+	assert.Equal(t, "msg-expanded-hist", history[0].ID)
+	assert.Equal(t, "premium", history[0].Attributes["tier"])
+	assert.InEpsilon(t, float64(2), history[0].Attributes["count"], 0)
 	require.Len(t, history[0].Parts, 2)
 	_, hasImage := history[0].Parts[1].(contexty.ImagePart)
 	require.True(t, hasImage)

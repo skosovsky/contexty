@@ -4,7 +4,7 @@
 //   - Typed message AST (ContentPart, Annotations, Provenance)
 //   - ConversationStore with named segments and optimistic concurrency
 //   - Non-mutating Render(ViewType) projections
-//   - BudgetPipeline (summarize + truncate) and Engine.Compile → AbstractPayload
+//   - BudgetPipeline (summarize + truncate) and Engine.Compile → CompileResult
 //
 // Example:
 //
@@ -13,6 +13,9 @@
 //	    contexty.WithConversationID("chat-1"),
 //	    contexty.WithStore(store),
 //	)
-//	payload, err := engine.Compile(ctx)
-//	_, _ = payload, err
+//	result, err := engine.Compile(ctx, contexty.CompileRequest{
+//	    History: historyMsgs,
+//	    Pending: pendingTurn,
+//	})
+//	_, _ = result.Payload, err
 package contexty

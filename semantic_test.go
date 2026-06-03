@@ -157,11 +157,11 @@ func TestEngine_Compile_DeferredAndOverlay(t *testing.T) {
 			},
 		}),
 	).WithOverlay(contexty.Overlay{"lang": "ru"})
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	assert.Equal(t, "sys", payload.System[0].TextContent())
 	assert.Equal(t, "dynamic", payload.Memory[0].TextContent())
-	assert.Equal(t, "ru", payload.Overlay["lang"])
 	// overlay not persisted
 	snap, _ := store.Load(ctx, "t")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))

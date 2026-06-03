@@ -97,9 +97,9 @@ func ensureBudgetObservation(ctx context.Context, pipeObserver Observer) context
 }
 
 // MessageNodeID returns a deterministic, non-empty identifier for observer events.
-// RefID takes priority; otherwise a stable hash+index fallback is used.
+// Message.ID takes priority; otherwise a stable hash+index fallback is used.
 func MessageNodeID(msg Message, index int, blockID string) string {
-	if id := strings.TrimSpace(msg.Annotations.RefID); id != "" {
+	if id := strings.TrimSpace(msg.ID); id != "" {
 		return id
 	}
 	if blockID == "" {
@@ -125,6 +125,7 @@ func messageFingerprint(msg Message) string {
 }
 
 func reportEvictions(ctx context.Context, before, after []Message, reason EvictionReason) {
+	recordEvictionsCtx(ctx, before, after, reason)
 	obs := observerFrom(ctx)
 	if obs == nil {
 		return

@@ -19,18 +19,18 @@ const (
 
 func main() {
 	ctx := context.Background()
-	payload, err := buildPrompt(ctx)
+	result, err := buildPrompt(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
-	msgs := payload.FlattenMessages()
+	msgs := result.Payload.FlattenMessages()
 	fmt.Printf("Compiled %d messages\n", len(msgs))
 	for i, m := range msgs {
 		fmt.Printf("  [%d] %s: %q\n", i, m.Role, m.TextContent())
 	}
 }
 
-func buildPrompt(ctx context.Context) (contexty.AbstractPayload, error) {
+func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	store := contexty.NewMemoryConversationStore()
 	s0, _ := store.Load(ctx, "demo")
 	_ = store.UpdateSegment(ctx, "demo", s0.Version(), contexty.SegmentSystem, []contexty.Message{
@@ -63,7 +63,11 @@ func buildPrompt(ctx context.Context) (contexty.AbstractPayload, error) {
 			},
 		}),
 	)
-	return engine.Compile(ctx)
+	return engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // only Pending for this example
+		Pending: []contexty.Message{
+			contexty.TextMessage(contexty.RoleUser, "What should I recommend for Anna?"),
+		},
+	})
 }
 
 type compileObserver struct{}

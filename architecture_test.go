@@ -38,6 +38,23 @@ func TestArchitecture_NoForbiddenExternalImports(t *testing.T) {
 	}
 }
 
+func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	violations, err := findJSONMetadataInTextViolations(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf(
+			"json metadata tunneling via TextContent forbidden in semantic core:\n%s",
+			strings.Join(violations, "\n"),
+		)
+	}
+}
+
 func TestArchitecture_NoBase64InCore(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
@@ -93,11 +110,82 @@ func isArchitectureSourceFile(path string) bool {
 
 func isArchitectureAllowlisted(path string) bool {
 	switch filepath.Base(path) {
-	case "transform.go", "views.go", "model.go":
+	case "transform.go", "views.go", "model.go", "provenance.go", "serializer.go", "content_part.go":
 		return true
 	default:
 		return false
 	}
+}
+
+func findJSONMetadataInTextViolations(root string) ([]string, error) {
+	fset := token.NewFileSet()
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if shouldSkipArchitectureDir(filepath.Base(path)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isArchitectureSourceFile(path) || isArchitectureAllowlisted(path) {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		violations = append(violations, collectJSONMetadataInTextViolations(fset, file)...)
+		return nil
+	})
+	return violations, err
+}
+
+func collectJSONMetadataInTextViolations(fset *token.FileSet, file *ast.File) []string {
+	var violations []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		if !isJSONUnmarshalCall(call) {
+			return true
+		}
+		if !exprReferencesTextContent(call.Args[0]) {
+			return true
+		}
+		pos := fset.Position(call.Pos())
+		violations = append(violations, pos.String())
+		return true
+	})
+	return violations
+}
+
+func isJSONUnmarshalCall(call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "json" && sel.Sel.Name == "Unmarshal"
+}
+
+func exprReferencesTextContent(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name == "TextContent" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func collectStringHeuristicCalls(fset *token.FileSet, file *ast.File) []string {

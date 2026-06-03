@@ -44,8 +44,9 @@ func TestDoD_MetadataIsolation(t *testing.T) {
 	s0, _ := store.Load(ctx, "meta")
 	require.NoError(t, store.UpdateSegment(ctx, "meta", s0.Version(), contexty.SegmentHistory, []contexty.Message{msg}))
 	engine := contexty.NewEngine(contexty.WithConversationID("meta"), contexty.WithStore(store))
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	assert.Equal(t, "hello", payload.History[0].TextContent())
 	assert.Equal(t, "alice", payload.History[0].Annotations.SenderName)
@@ -68,8 +69,9 @@ func TestDoD_ToolPartsEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateSegment(ctx, "tools", s0.Version(), contexty.SegmentHistory, msgs))
 	engine := contexty.NewEngine(contexty.WithConversationID("tools"), contexty.WithStore(store))
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.History, 2)
 	assert.True(t, contexty.ToolTurnUsesCanonicalLayout(payload.History, 0))
 	require.Len(t, payload.History[0].ToolCallParts(), 1)
@@ -207,8 +209,9 @@ func TestDoD_ProvenanceThroughCompile(t *testing.T) {
 	s0, _ := store.Load(ctx, "t")
 	require.NoError(t, store.UpdateSegment(ctx, "t", s0.Version(), contexty.SegmentHistory, []contexty.Message{msg}))
 	engine := contexty.NewEngine(contexty.WithConversationID("t"), contexty.WithStore(store))
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	assert.Equal(t, "api", payload.History[0].Provenance.(contexty.UserProvenance).Channel)
 }
@@ -225,8 +228,9 @@ func TestDoD_RedactionThroughCompile(t *testing.T) {
 		contexty.WithStore(store),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	assert.Equal(t, "reach me at [REDACTED]", payload.History[0].TextContent())
 	snap, _ := store.Load(ctx, "t")
@@ -251,8 +255,9 @@ func TestDoD_DeferredNotPersisted(t *testing.T) {
 			},
 		}),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	assert.Equal(t, "dynamic", payload.Memory[0].TextContent())
 	snap, _ := store.Load(ctx, "t")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
@@ -320,8 +325,9 @@ func TestDoD_DeferredRedactionThroughCompile(t *testing.T) {
 			},
 		}),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.Memory, 1)
 	assert.Equal(t, "contact [REDACTED]", payload.Memory[0].TextContent())
 }
@@ -337,9 +343,8 @@ func TestDoD_OverlayNotPersisted(t *testing.T) {
 		contexty.WithConversationID("ov"),
 		contexty.WithStore(store),
 	).WithOverlay(contexty.Overlay{"reason": "wake"})
-	payload, err := engine.Compile(ctx)
+	_, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
-	assert.Equal(t, "wake", payload.Overlay["reason"])
 	snap, _ := store.Load(ctx, "ov")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 	assert.Len(t, snap.Segment(contexty.SegmentSystem), 1)
@@ -362,8 +367,9 @@ func TestDoD_OverlayInDeferredResolve(t *testing.T) {
 			},
 		}),
 	).WithOverlay(contexty.Overlay{"locale": "ru-RU"})
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	assert.Equal(t, "locale=ru-RU", payload.Memory[0].TextContent())
 }
 
@@ -391,11 +397,16 @@ func TestDoD_CompileDeterminism(t *testing.T) {
 		contexty.WithConversationID("det"),
 		contexty.WithStore(store),
 	).WithOverlay(contexty.Overlay{"k": "v"})
-	p1, err := engine.Compile(ctx)
+	req := contexty.CompileRequest{History: []contexty.Message{{
+		ID:    "stable-1",
+		Role:  contexty.RoleUser,
+		Parts: []contexty.ContentPart{contexty.TextPart{Text: "stable"}},
+	}}}
+	r1, err := engine.Compile(ctx, req)
 	require.NoError(t, err)
-	p2, err := engine.Compile(ctx)
+	r2, err := engine.Compile(ctx, req)
 	require.NoError(t, err)
-	assert.Equal(t, p1, p2)
+	assert.Equal(t, r1.Payload, r2.Payload)
 }
 
 func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
@@ -406,14 +417,14 @@ func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 	require.NoError(t, err)
 	msgs := []contexty.Message{
 		{
-			Role:        contexty.RoleUser,
-			Parts:       []contexty.ContentPart{contexty.TextPart{Text: "old"}},
-			Annotations: contexty.Annotations{RefID: "u-old"},
+			ID:    "u-old",
+			Role:  contexty.RoleUser,
+			Parts: []contexty.ContentPart{contexty.TextPart{Text: "old"}},
 		},
 		{
-			Role:        contexty.RoleUser,
-			Parts:       []contexty.ContentPart{contexty.TextPart{Text: "new"}},
-			Annotations: contexty.Annotations{RefID: "u-new"},
+			ID:    "u-new",
+			Role:  contexty.RoleUser,
+			Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
 		},
 	}
 	require.NoError(t, store.UpdateSegment(ctx, "evict-obs", s0.Version(), contexty.SegmentHistory, msgs))
@@ -428,7 +439,7 @@ func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 		contexty.WithStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
-	_, err = engine.Compile(ctx)
+	_, err = engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	require.NotEmpty(t, rec.Evictions)
 	nodeIDs := rec.EvictionNodeIDs()
@@ -451,7 +462,7 @@ func TestDoD_ObserverCompileTelemetry(t *testing.T) {
 		contexty.WithStore(store),
 		contexty.WithObserver(rec),
 	)
-	_, err = engine.Compile(ctx)
+	_, err = engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	require.Len(t, rec.Compilations, 1)
 	assert.Equal(t, "dod-trace", rec.Compilations[0].Ctx.Value(traceContextKey{}))
@@ -478,8 +489,9 @@ func TestDoD_ObserverDoesNotBreakCompile(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
+	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	require.Empty(t, rec.Compilations)
 }

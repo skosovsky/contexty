@@ -13,14 +13,14 @@ func (f stubSummarizer) Summarize(ctx context.Context, msgs []contexty.Message) 
 	return f(ctx, msgs)
 }
 
-// callCountEstimator fails Estimate after the first successful call (telemetry isolation tests).
+// callCountEstimator fails Estimate after budget preflight + history apply (compile telemetry isolation).
 type callCountEstimator struct {
 	calls int
 }
 
 func (c *callCountEstimator) Estimate(context.Context, []contexty.Message) (int, error) {
 	c.calls++
-	if c.calls > 1 {
+	if c.calls > 2 {
 		return 0, errors.New("telemetry estimate failed")
 	}
 	return 50, nil

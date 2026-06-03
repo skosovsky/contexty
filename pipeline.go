@@ -40,6 +40,11 @@ func NewBudgetPipeline(cfg BudgetConfig, estimator TokenEstimator, opts ...Budge
 
 // Apply runs summarize (if configured) then truncate until within limit.
 func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, error) {
+	return p.ApplyWithLimit(ctx, msgs, p.cfg.TokenLimit)
+}
+
+// ApplyWithLimit runs the budget pipeline against an effective token limit (e.g. history slice after preflight).
+func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, msgs []Message, tokenLimit int) ([]Message, error) {
 	ctx = ensureBudgetObservation(ctx, p.observer)
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: budget: %w", err)
@@ -59,21 +64,24 @@ func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, 
 		}
 		obs.OnTokensEstimated(ctx, blockID, tokens)
 	}
-	if tokens <= p.cfg.TokenLimit {
+	if tokens <= tokenLimit {
 		return cur, nil
 	}
 	if p.cfg.Summarizer != nil {
 		originalTokens := tokens
+		beforeSum := cur
 		summary, sumErr := p.cfg.Summarizer.Summarize(ctx, cur)
 		if sumErr != nil {
 			return nil, fmt.Errorf("contexty: budget summarize: %w", sumErr)
 		}
+		summary = EnsureMessageID(summary)
+		recordSummarizeReplaceCtx(ctx, beforeSum, summary)
 		sumTokens, estErr := p.estimator.Estimate(ctx, []Message{summary})
 		if estErr != nil {
 			return nil, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, estErr)
 		}
 		emitContextSummarized(ctx, originalTokens, sumTokens)
-		if sumTokens <= p.cfg.TokenLimit {
+		if sumTokens <= tokenLimit {
 			return []Message{summary}, nil
 		}
 		cur = []Message{summary}
@@ -83,7 +91,7 @@ func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, 
 	if strategy == nil {
 		strategy = NewDropHeadStrategy(p.cfg.DropHead)
 	}
-	out, truncErr := strategy.Apply(ctx, cur, tokens, p.cfg.TokenLimit, p.estimator)
+	out, truncErr := strategy.Apply(ctx, cur, tokens, tokenLimit, p.estimator)
 	if truncErr != nil {
 		return nil, truncErr
 	}

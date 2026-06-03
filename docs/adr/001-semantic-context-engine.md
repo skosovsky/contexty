@@ -17,9 +17,9 @@ The library is the **final semantic container** for dialogue:
 - Single `ConversationStore` with named segments
 - Non-mutating `Render(ViewType)` projections
 - Unified budgeting pipeline (summarize + truncate, tool-pair atomicity)
-- `Compile()` → `AbstractPayload` with deferred blocks and overlay
-- `CompileSnapshot()` — stateless compile from in-memory `ConversationSnapshot` (no `Store` / `conversationID`)
-- Compile order: load → deferred → hooks → budget → payload (budget last for **token accuracy**: hooks and deferred blocks change text length)
+- `Compile(ctx, CompileRequest)` → `CompileResult` (see ADR-002); deferred blocks; overlay only for deferred resolve
+- `CompileSnapshot(ctx, CompileRequest)` — stateless compile (no `Store` / `conversationID`); see ADR-002 for Task13 breaking API
+- Compile order (Task13): deferred → hooks → segment formatters → budget preflight → budget(history) → merge Pending → payload
 - Polymorphic JSON codec with `ProvenanceRegistry` for provenance (wire contract v1: `kind` / `type_id`)
 - Structural sharing (copy-on-write) for snapshots/hooks/render
 - `ConversationStore` methods use `conversationID` parameter name (DB column may remain `thread_id`)
@@ -47,7 +47,7 @@ String heuristics (`strings.HasPrefix`, `strings.Contains`) on history for busin
 
 ## Task12: Architecture guardrails and stateless compile
 
-- `CompileSnapshot(ctx, snap)` compiles without `Store` / `conversationID`; pipeline steps match `Compile()` after load; `OnPipelineCompiled` fires on both entry points
+- `CompileSnapshot(ctx, CompileRequest)` compiles without `Store` / `conversationID`; pipeline matches `Compile()` after load; `OnPipelineCompiled` fires on both entry points
 - `TestArchitecture_NoForbiddenExternalImports` — AST import scan; no kosmify/metry/langfuse/OpenTelemetry in core
 - `TestArchitecture_NoBase64InCore` — no Base64 encoding heuristics in semantic core
 - Shared `Observer` may be wired via both `WithObserver` and `WithBudgetObserver` on the same instance
@@ -59,6 +59,6 @@ String heuristics (`strings.HasPrefix`, `strings.Contains`) on history for busin
 - `WithBudgetObserver` on `BudgetPipeline` (budget telemetry)
 - When both are configured, compile and budget events route to their respective observers
 - `OnNodeEvicted` emitted for truncation, budget drop, and orphan repair paths
-- Deterministic `nodeID`: `Annotations.RefID` or `{blockID}:index_{n}:{fingerprint}`
+- Deterministic `nodeID`: `Message.ID` or `{blockID}:index_{n}:{fingerprint}` (see ADR-002; `Annotations.RefID` is transport-only)
 - Observer is passive: telemetry estimate failures do not fail `Compile()`
 - No external telemetry dependencies in core

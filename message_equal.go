@@ -19,10 +19,23 @@ func MessageEqual(a, b Message) bool {
 	if !slices.EqualFunc(a.Parts, b.Parts, contentPartsEqual) {
 		return false
 	}
+	if a.ID != b.ID {
+		return false
+	}
 	if a.Annotations != b.Annotations {
 		return false
 	}
+	if !attributesEqual(a.Attributes, b.Attributes) {
+		return false
+	}
 	return provenanceEqual(a.Provenance, b.Provenance)
+}
+
+func attributesEqual(a, b Attributes) bool {
+	if len(a) == 0 && len(b) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 func contentPartsEqual(a, b ContentPart) bool {

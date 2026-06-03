@@ -10,20 +10,50 @@ flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier)
 
 `Render` never mutates the input snapshot. It does **not** apply transform hooks or budgeting — use `Engine.Compile()` when you need redaction or truncation before sending to an LLM.
 
-## Stateless compilation
-
-Compile an in-memory snapshot without `Store` or `conversationID`:
+## Compile API (Task13)
 
 ```go
-snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
+result, err := engine.Compile(ctx, contexty.CompileRequest{
+    System:  systemMsgs,
+    History: historyMsgs,
+    Memory:  memoryMsgs,
+    Tools:   toolMsgs,   // only from req — not loaded from store
+    Pending: pendingMsgs, // protected current turn; merged after history budget
+})
+payload := result.Payload
+if rec, ok := result.Transformations["msg-id"]; ok {
+    _ = rec.Action // passed | evicted | truncated | formatted
+}
+```
+
+`CompileSnapshot(ctx, req)` uses the same `CompileRequest` contract without `Store` / `conversationID`. Assign `Message.ID` on ingest (or rely on `Normalize()` UUIDs). Host metadata belongs in `Message.Attributes`, not in message text.
+
+**Pipeline order:** deferred → hooks → segment formatters → budget preflight → budget(history) → merge `Pending` → payload.
+
+See [ADR-002](adr/002-clear-break-compile-contract.md) for breaking changes and pending preflight rules.
+
+### Migrating from Task12
+
+1. Use `CompileRequest` / `CompileResult` instead of snapshot-only compile and `AbstractPayload`.
+2. Set `Message.ID` at ingest; use `Attributes` for host metadata (not text patching).
+3. Put the current turn in `Pending`, not post-compile append.
+4. Pass `Tools` explicitly when needed.
+5. Inspect `result.Transformations[msgID]` instead of string diffs on payload.
+
+## Stateless compilation
+
+```go
 engine := contexty.NewEngine(
     contexty.WithTransformHooks(contexty.NewRedactionHook()),
     contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 )
-payload, _ := engine.CompileSnapshot(ctx, snap)
+result, _ := engine.CompileSnapshot(ctx, contexty.CompileRequest{
+    History: msgs,
+    Pending: []contexty.Message{currentTurn},
+})
 ```
 
-`CompileSnapshot` runs the same pipeline as `Compile()` after load: deferred blocks → transform hooks → budget → payload. Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves identically.
+Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves the same on `Compile` and `CompileSnapshot`.
 
 ## Deferred blocks
 
@@ -39,24 +69,38 @@ engine := contexty.NewEngine(
         },
     }),
 )
-payload, _ := engine.Compile(ctx)
+result, _ := engine.Compile(ctx, contexty.CompileRequest{})
 ```
 
-Deferred content resolves at compile time (`Compile()` or `CompileSnapshot()`) and is not persisted unless written to the store separately.
+Deferred content resolves at compile time and is not persisted unless written to the store separately. Use `contexty.CompileOverlayFromContext(ctx)` inside `Resolve` to read vars from `Engine.WithOverlay`.
 
-Compile order after load (or direct snapshot): load snapshot (`Compile()` only) → resolve deferred blocks → transform hooks (redaction) → budget → payload. Deferred content is therefore redacted by hooks. Use `contexty.CompileOverlayFromContext(ctx)` inside `Resolve` to read overlay vars from `Engine.WithOverlay`.
+## Segment formatters
 
-**Token accuracy:** Budget runs after deferred resolution and hooks because both steps change message text and length; token estimates and truncation must reflect the final content sent to the LLM.
+Register host-side projection before budgeting (e.g. wrap memory in XML):
 
-## Overlay
+```go
+engine := contexty.NewEngine(
+    contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
+        // return formatted messages; preserve IDs when updating content in place
+        return msgs
+    }),
+)
+```
+
+## Overlay and pending
 
 ```go
 engine := contexty.NewEngine(
     contexty.WithStore(store),
     contexty.WithConversationID("chat-1"),
 ).WithOverlay(contexty.Overlay{"reason": "scheduled-wake"})
-payload, _ := engine.Compile(ctx) // payload.Overlay is ephemeral, not stored
+
+result, _ := engine.Compile(ctx, contexty.CompileRequest{
+    Pending: []contexty.Message{currentUserTurn}, // never evicted; reserved in preflight
+})
 ```
+
+Overlay is not part of `AbstractPayload`. If `Pending` alone exceeds `TokenLimit`, compile returns `ErrPendingExceedsBudget`.
 
 ## Redaction hooks
 
@@ -66,10 +110,10 @@ engine := contexty.NewEngine(
     contexty.WithConversationID("chat-1"),
     contexty.WithTransformHooks(contexty.NewRedactionHook()),
 )
-payload, _ := engine.Compile(ctx)
+result, _ := engine.Compile(ctx, contexty.CompileRequest{})
 ```
 
-Hooks run after deferred resolution and before budgeting inside `Compile()`. For ad-hoc transforms on a snapshot, use `TransformPipeline`.
+Hooks run after deferred resolution and before segment formatters and budgeting. For ad-hoc transforms on a snapshot, use `TransformPipeline`.
 
 ## Budget pipeline and truncation
 
@@ -113,12 +157,14 @@ pipe := contexty.NewBudgetPipeline(cfg, estimator, contexty.WithBudgetObserver(m
 
 Events:
 
-| Callback              | When                                                                                                                        |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `OnTokensEstimated`   | After initial token estimate for a budget block (`blockID` = segment name)                                                  |
-| `OnNodeEvicted`       | Strategy truncation, block drop, or orphan tool-pair repair (`nodeID` = `Annotations.RefID` or deterministic hash fallback) |
-| `OnContextSummarized` | After summarizer runs (`compressionRatio` = tokens before / tokens after)                                                   |
-| `OnPipelineCompiled`  | Successful `Compile()` or `CompileSnapshot()` with total payload cost and duration                                          |
+| Callback              | When                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `OnTokensEstimated`   | After initial token estimate for a budget block (`blockID` = segment name)                                     |
+| `OnNodeEvicted`       | Strategy truncation, block drop, or orphan tool-pair repair (`nodeID` = `Message.ID` or fallback hash)         |
+| `OnContextSummarized` | After summarizer runs (`compressionRatio` = tokens before / tokens after)                                      |
+| `OnPipelineCompiled`  | Successful `Compile()` / `CompileSnapshot()` with total payload cost and duration; failures skip callback only |
+
+`CompileResult.Transformations` is updated even when no `Observer` is configured.
 
 Use `contexty.NoopObserver` when telemetry is disabled.
 

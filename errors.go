@@ -19,6 +19,12 @@ var (
 	// ErrBlockTooLarge is returned when truncation cannot shrink a block to fit.
 	ErrBlockTooLarge = errors.New("contexty: block cannot be shrunk to fit limit")
 
+	// ErrPendingExceedsBudget is returned when protected Pending messages alone exceed the token limit.
+	ErrPendingExceedsBudget = errors.New("contexty: pending messages exceed token budget")
+
+	// ErrDuplicateMessageID is returned when the same Message.ID appears more than once in CompileRequest.
+	ErrDuplicateMessageID = errors.New("contexty: duplicate message id in compile request")
+
 	// ErrConversationVersionConflict is returned when a store write is rejected because
 	// the conversation was modified concurrently (optimistic concurrency).
 	// Do not retry the same write without a fresh Load: merge against the returned

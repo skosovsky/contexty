@@ -26,7 +26,7 @@ func TestObserver_MessageNodeIDDeterminism(t *testing.T) {
 	assert.NotEqual(t, id1, id3)
 
 	withRef := msg
-	withRef.Annotations.RefID = "msg-ref"
+	withRef.ID = "msg-ref"
 	assert.Equal(t, "msg-ref", contexty.MessageNodeID(withRef, 9, "history"))
 }
 
@@ -145,9 +145,9 @@ func TestObserver_CompilePipelineEvent(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
-	require.NotEmpty(t, payload.History)
+	require.NotEmpty(t, result.Payload.History)
 	require.Len(t, rec.Tokens, 1)
 	require.NotEmpty(t, rec.Evictions)
 	require.Len(t, rec.Compilations, 1)
@@ -232,9 +232,9 @@ func TestObserver_CompilePassiveOnTelemetryEstimateFailure(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
-	require.Len(t, payload.History, 1)
+	require.Len(t, result.Payload.History, 1)
 	require.Empty(t, rec.Compilations)
 }
 
@@ -262,7 +262,7 @@ func TestObserver_CompileAndBudgetObserverPriority(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(engineRec),
 	)
-	_, err = engine.Compile(ctx)
+	_, err = engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	require.Len(t, budgetRec.Tokens, 1)
 	require.NotEmpty(t, budgetRec.Evictions)
@@ -294,9 +294,9 @@ func TestObserver_EngineOnlyObserverGetsCompileEventOnly(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
-	payload, err := engine.Compile(ctx)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
-	require.NotEmpty(t, payload.History)
+	require.NotEmpty(t, result.Payload.History)
 	require.Len(t, rec.Compilations, 1)
 	require.Empty(t, rec.Tokens)
 	require.Empty(t, rec.Evictions)
@@ -311,7 +311,6 @@ func TestObserver_SharedAdapterForEngineAndBudget(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "b"),
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
-	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
@@ -321,9 +320,9 @@ func TestObserver_SharedAdapterForEngineAndBudget(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
-	payload, err := engine.CompileSnapshot(ctx, snap)
+	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{History: msgs})
 	require.NoError(t, err)
-	require.NotEmpty(t, payload.History)
+	require.NotEmpty(t, result.Payload.History)
 	require.Len(t, rec.Tokens, 1)
 	require.NotEmpty(t, rec.Evictions)
 	require.Len(t, rec.Compilations, 1)
