@@ -3,19 +3,16 @@ package contexty
 import (
 	"context"
 	"fmt"
-	"maps"
 	"time"
 )
 
 // DeferredBlock resolves content lazily at compile time into a target segment.
 type DeferredBlock struct {
-	Name    string
-	Segment SegmentName
-	Resolve func(ctx context.Context) ([]Message, error)
+	Name        string
+	Segment     SegmentName
+	MergePolicy MergePolicy
+	Resolve     func(ctx context.Context) ([]Message, error)
 }
-
-// Overlay holds ephemeral compile-time variables (not persisted).
-type Overlay map[string]string
 
 // AbstractPayload is the provider-agnostic compiled context tree (immutable LLM-ready output).
 type AbstractPayload struct {
@@ -32,8 +29,8 @@ type Engine struct {
 	budget         *BudgetPipeline
 	deferred       []DeferredBlock
 	formatters     map[SegmentName]SegmentFormatter
+	views          map[string]ViewConfiguration
 	conversationID string
-	overlay        Overlay
 	observer       Observer
 }
 
@@ -85,22 +82,14 @@ func NewEngine(opts ...EngineOption) *Engine {
 		budget:         nil,
 		deferred:       nil,
 		formatters:     nil,
+		views:          defaultViewRegistry(),
 		conversationID: "",
-		overlay:        make(Overlay),
 		observer:       nil,
 	}
 	for _, opt := range opts {
 		opt(e)
 	}
 	return e
-}
-
-// WithOverlay returns a shallow copy of the engine with ephemeral overlay vars for deferred resolve.
-func (e *Engine) WithOverlay(vars Overlay) *Engine {
-	clone := *e
-	clone.overlay = make(Overlay, len(vars))
-	maps.Copy(clone.overlay, vars)
-	return &clone
 }
 
 // Compile loads from store when configured, merges with req, and compiles.
@@ -149,6 +138,7 @@ func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) Com
 		Memory:  pick(req.Memory, storeSnap.Segment(SegmentMemory)),
 		Tools:   req.Tools,
 		Pending: req.Pending,
+		Options: req.Options,
 	}
 }
 
@@ -157,6 +147,12 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 	if err := req.Validate(); err != nil {
 		return CompileResult{}, fmt.Errorf("contexty: compile request: %w", err)
 	}
+	frozenSource := req.Freeze()
+	compileOpts := applyCompileOptions(req.Options)
+	if len(compileOpts.resolveVars) > 0 {
+		ctx = withCompileResolveVars(ctx, compileOpts.resolveVars)
+	}
+
 	recorder := newTransformRecorder(req.AllMessages())
 	ctx = withTransformRecorder(ctx, recorder)
 
@@ -171,6 +167,11 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 	recorder.registerDeferredMessageIDs(beforeDeferred, snap)
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
 		return CompileResult{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
+	}
+
+	snap = applyEphemeralPatches(ctx, snap, compileOpts, patchPhasePreBudget)
+	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
+		return CompileResult{}, fmt.Errorf("contexty: compile patches: %w", idErr)
 	}
 
 	beforeHooks := snap
@@ -189,6 +190,11 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		return CompileResult{}, err
 	}
 
+	snap = applyEphemeralPatches(ctx, snap, compileOpts, patchPhasePostBudget)
+	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
+		return CompileResult{}, fmt.Errorf("contexty: compile post-budget patches: %w", idErr)
+	}
+
 	pendingIDs := messageIDs(req.Pending)
 	recorder.markProtectedPending(pendingIDs)
 
@@ -201,6 +207,8 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 	return CompileResult{
 		Payload:         payload,
 		Transformations: recorder.snapshot(),
+		Source:          frozenSource,
+		Introduced:      recorder.introducedSnapshot(),
 	}, nil
 }
 
@@ -341,9 +349,6 @@ func (e *Engine) applyCompileHooks(ctx context.Context, snap ConversationSnapsho
 }
 
 func (e *Engine) applyDeferredBlocks(ctx context.Context, snap ConversationSnapshot) (ConversationSnapshot, error) {
-	if len(e.overlay) > 0 {
-		ctx = WithCompileOverlay(ctx, e.overlay)
-	}
 	for _, block := range e.deferred {
 		if block.Resolve == nil {
 			continue
@@ -358,9 +363,8 @@ func (e *Engine) applyDeferredBlocks(ctx context.Context, snap ConversationSnaps
 			seg = SegmentMemory
 		}
 		existing := snap.Segment(seg)
-		combined := make([]Message, len(existing)+len(msgs))
-		copy(combined, existing)
-		copy(combined[len(existing):], msgs)
+		combined := applyMergePolicy(existing, msgs, block.MergePolicy)
+		recordMergeRemovalsCtx(ctx, existing, combined)
 		snap = snap.WithSegment(seg, combined)
 	}
 	return snap, nil

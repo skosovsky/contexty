@@ -251,6 +251,8 @@ func expandedHistoryMessage() contexty.Message {
 		},
 		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "img-1"},
 		Attributes:  contexty.Attributes{"tier": "premium", "count": float64(2)},
+		Origin:      &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona"},
+		LLMCache:    &contexty.CachePolicyRef{Type: "ephemeral"},
 		Provenance:  contexty.UserProvenance{Channel: "web", UserID: "u2"},
 	}
 }
@@ -271,6 +273,11 @@ func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *S
 	assert.Equal(t, "msg-expanded-hist", history[0].ID)
 	assert.Equal(t, "premium", history[0].Attributes["tier"])
 	assert.InEpsilon(t, float64(2), history[0].Attributes["count"], 0)
+	require.NotNil(t, history[0].Origin)
+	assert.Equal(t, "agents/sales", history[0].Origin.TemplateID)
+	assert.Equal(t, "persona", history[0].Origin.LayerID)
+	require.NotNil(t, history[0].LLMCache)
+	assert.Equal(t, "ephemeral", history[0].LLMCache.Type)
 	require.Len(t, history[0].Parts, 2)
 	_, hasImage := history[0].Parts[1].(contexty.ImagePart)
 	require.True(t, hasImage)

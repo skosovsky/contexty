@@ -28,6 +28,12 @@ func MessageEqual(a, b Message) bool {
 	if !attributesEqual(a.Attributes, b.Attributes) {
 		return false
 	}
+	if !OriginEqual(a.Origin, b.Origin) {
+		return false
+	}
+	if !cachePolicyEqual(a.LLMCache, b.LLMCache) {
+		return false
+	}
 	return provenanceEqual(a.Provenance, b.Provenance)
 }
 

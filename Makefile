@@ -25,7 +25,7 @@ test:
 
 test-dod:
 	@echo "test-dod - root"
-	@$(GO) test -v -race -run='TestDoD_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans|TestObserver_|TestArchitecture_|TestStateless' ./...
+	@$(GO) test -v -race -run='TestDoD_|TestApplyMergePolicy_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans|TestObserver_|TestArchitecture_|TestStateless' ./...
 
 validate: lint test-dod bench-guardrails test
 

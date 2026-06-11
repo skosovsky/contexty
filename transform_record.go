@@ -16,6 +16,8 @@ const (
 	ReasonReplacedByFormatter = "replaced_by_formatter"
 	ReasonTransformHook       = "transform_hook"
 	ReasonReplacedByHook      = "replaced_by_hook"
+	ReasonReplacedByDeferred  = "replaced_by_deferred"
+	ReasonEphemeralPatch      = "ephemeral_patch"
 	ReasonTokenBudgetExceeded = "token_budget_exceeded" //nolint:gosec // reason label, not a credential
 )
 
@@ -29,6 +31,8 @@ type TransformRecord struct {
 type CompileResult struct {
 	Payload         AbstractPayload
 	Transformations map[string]TransformRecord
+	Source          CompileRequest     // immutable freeze after Normalize, before pipeline mutations
+	Introduced      map[string]Message // deep-cloned baseline for payload-born IDs (post-deferred, pre-hooks/patches)
 }
 
 // CompileRequest is the single exhaustive compile input (including stateless CompileSnapshot).
@@ -38,6 +42,7 @@ type CompileRequest struct {
 	Memory  []Message
 	Tools   []Message
 	Pending []Message
+	Options []CompileOption
 }
 
 // Normalize ensures every message has a non-empty ID.
@@ -48,6 +53,18 @@ func (r CompileRequest) Normalize() CompileRequest {
 		Memory:  EnsureMessageIDs(r.Memory),
 		Tools:   EnsureMessageIDs(r.Tools),
 		Pending: EnsureMessageIDs(r.Pending),
+		Options: r.Options,
+	}
+}
+
+// Freeze returns a deep copy of all messages for immutable CompileResult.Source.
+func (r CompileRequest) Freeze() CompileRequest {
+	return CompileRequest{ //nolint:exhaustruct // Options omitted from immutable source snapshot
+		System:  cloneMessageSlice(r.System),
+		History: cloneMessageSlice(r.History),
+		Memory:  cloneMessageSlice(r.Memory),
+		Tools:   cloneMessageSlice(r.Tools),
+		Pending: cloneMessageSlice(r.Pending),
 	}
 }
 

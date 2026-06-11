@@ -20,17 +20,9 @@ type ViewFormatter interface {
 }
 
 // Render projects a snapshot through the given view.
+// Prefer Engine.RenderView for named views and custom registry entries.
 func Render(ctx context.Context, snap ConversationSnapshot, view ViewType) (string, error) {
-	var formatter ViewFormatter
-	switch view {
-	case ViewLLMXML:
-		formatter = LLMXMLFormatter{}
-	case ViewFlatClassifier:
-		formatter = FlatClassifierFormatter{}
-	default:
-		return "", fmt.Errorf("contexty: unknown view type %q", view)
-	}
-	return formatter.Format(ctx, snap)
+	return NewEngine().RenderView(ctx, snap, string(view))
 }
 
 // LLMXMLFormatter wraps messages in XML-like tags per role.

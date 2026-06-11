@@ -8,7 +8,8 @@ import (
 type transformRecorderKey struct{}
 
 type transformRecorder struct {
-	records map[string]TransformRecord
+	records    map[string]TransformRecord
+	introduced map[string]Message
 }
 
 func withTransformRecorder(ctx context.Context, rec *transformRecorder) context.Context {
@@ -23,8 +24,34 @@ func transformRecorderFrom(ctx context.Context) *transformRecorder {
 	return rec
 }
 
+func (r *transformRecorder) introduceIfAbsent(m Message) {
+	if r == nil || m.ID == "" {
+		return
+	}
+	if r.introduced == nil {
+		r.introduced = make(map[string]Message)
+	}
+	if _, ok := r.introduced[m.ID]; ok {
+		return
+	}
+	r.introduced[m.ID] = m.Clone()
+}
+
+func (r *transformRecorder) introducedSnapshot() map[string]Message {
+	if r == nil || len(r.introduced) == 0 {
+		return nil
+	}
+	out := make(map[string]Message, len(r.introduced))
+	for id, m := range r.introduced {
+		out[id] = m.Clone()
+	}
+	return out
+}
+
 func newTransformRecorder(msgs []Message) *transformRecorder {
-	rec := &transformRecorder{records: make(map[string]TransformRecord, len(msgs))}
+	rec := &transformRecorder{ //nolint:exhaustruct // introduced starts empty
+		records: make(map[string]TransformRecord, len(msgs)),
+	}
 	for _, m := range msgs {
 		if m.ID == "" {
 			continue
@@ -48,6 +75,42 @@ func (r *transformRecorder) set(id string, action TransformAction, reason string
 		return
 	}
 	r.records[id] = TransformRecord{Action: action, Reason: reason}
+}
+
+func (r *transformRecorder) setUnlessFinal(id string, action TransformAction, reason string) {
+	if r == nil || id == "" {
+		return
+	}
+	if existing, ok := r.records[id]; ok {
+		switch existing.Action {
+		case ActionEvicted, ActionTruncated:
+			return
+		case ActionFormatted:
+			if !isInPlaceFormatReason(existing.Reason) {
+				return
+			}
+		case ActionPassed:
+			// allow overwrite for later compile stages (e.g. post-budget patch after passed)
+		}
+	}
+	r.set(id, action, reason)
+}
+
+func recordMergeRemovalsCtx(ctx context.Context, before, after []Message) {
+	rec := transformRecorderFrom(ctx)
+	if rec == nil {
+		return
+	}
+	afterSet := messageIDSet(after)
+	for _, m := range before {
+		if m.ID == "" {
+			continue
+		}
+		if _, ok := afterSet[m.ID]; ok {
+			continue
+		}
+		rec.setUnlessFinal(m.ID, ActionFormatted, ReasonReplacedByDeferred)
+	}
 }
 
 func (r *transformRecorder) markProtectedPending(ids []string) {
@@ -78,6 +141,7 @@ func (r *transformRecorder) registerDeferredMessageIDs(before, after Conversatio
 		if _, existed := beforeIDs[m.ID]; existed {
 			continue
 		}
+		r.introduceIfAbsent(m)
 		if _, ok := r.records[m.ID]; !ok {
 			r.records[m.ID] = TransformRecord{Action: ActionPassed, Reason: ""}
 		}
@@ -127,18 +191,19 @@ func recordContentTransformCtx(
 	afterSet := messageIDSet(after)
 	for id := range beforeSet {
 		if _, ok := afterSet[id]; !ok {
-			rec.set(id, ActionFormatted, replacedReason)
+			rec.setUnlessFinal(id, ActionFormatted, replacedReason)
 			continue
 		}
 		bm := findMessageByID(before, id)
 		am := findMessageByID(after, id)
 		if !MessageEqual(bm, am) {
-			rec.set(id, ActionFormatted, sameIDReason)
+			rec.setUnlessFinal(id, ActionFormatted, sameIDReason)
 		}
 	}
 	for id := range afterSet {
 		if _, ok := beforeSet[id]; !ok {
-			rec.set(id, ActionPassed, "")
+			rec.introduceIfAbsent(findMessageByID(after, id))
+			rec.setUnlessFinal(id, ActionPassed, "")
 		}
 	}
 }
@@ -176,7 +241,8 @@ func recordSummarizeReplaceCtx(ctx context.Context, before []Message, summary Me
 		}
 	}
 	if summary.ID != "" {
-		rec.set(summary.ID, ActionPassed, "")
+		rec.introduceIfAbsent(summary)
+		rec.setUnlessFinal(summary.ID, ActionPassed, "")
 	}
 }
 

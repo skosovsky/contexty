@@ -19,7 +19,7 @@ const (
 
 func main() {
 	ctx := context.Background()
-	result, err := buildPrompt(ctx)
+	result, engine, err := buildPrompt(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -28,13 +28,16 @@ func main() {
 	for i, m := range msgs {
 		fmt.Printf("  [%d] %s: %q\n", i, m.Role, m.TextContent())
 	}
+	if err := logCompileArtifacts(ctx, engine, result); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
+func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine, error) {
 	store := contexty.NewMemoryConversationStore()
 	s0, _ := store.Load(ctx, "demo")
 	_ = store.UpdateSegment(ctx, "demo", s0.Version(), contexty.SegmentSystem, []contexty.Message{
-		contexty.TextMessage(contexty.RoleSystem, "You are a medical assistant."),
+		withOrigin(contexty.TextMessage(contexty.RoleSystem, "You are a medical assistant."), "agents/medical", "base"),
 	})
 	_ = store.UpdateSegment(ctx, "demo", 1, contexty.SegmentMemory, []contexty.Message{
 		contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30."),
@@ -53,21 +56,61 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(compileObserver{}),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
-		contexty.WithDeferredBlocks(contexty.DeferredBlock{
-			Name:    "session_hint",
-			Segment: contexty.SegmentSystem,
-			Resolve: func(context.Context) ([]contexty.Message, error) {
-				return []contexty.Message{
-					contexty.TextMessage(contexty.RoleSystem, "Session locale: en-US"),
-				}, nil
+		contexty.WithDeferredBlocks(
+			contexty.DeferredBlock{
+				Name:        "session_hint",
+				Segment:     contexty.SegmentSystem,
+				MergePolicy: contexty.PolicyReplaceByOrigin,
+				Resolve: func(ctx context.Context) ([]contexty.Message, error) {
+					vars := contexty.CompileResolveVarFromContext(ctx)
+					locale := "en-US"
+					if vars != nil && vars["locale"] != "" {
+						locale = vars["locale"]
+					}
+					return []contexty.Message{
+						withOrigin(
+							contexty.TextMessage(contexty.RoleSystem, "Session locale: "+locale),
+							"agents/medical", "session",
+						),
+					}, nil
+				},
 			},
-		}),
+		),
 	)
-	return engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // only Pending for this example
+	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // only Pending for this example
 		Pending: []contexty.Message{
 			contexty.TextMessage(contexty.RoleUser, "What should I recommend for Anna?"),
 		},
+		Options: []contexty.CompileOption{
+			contexty.WithResolveVar("locale", "en-US"),
+			contexty.WithEphemeralPatch(contexty.MessageSelector{
+				Segment:  contexty.SegmentHistory,
+				Role:     contexty.RoleUser,
+				Position: contexty.PositionLast,
+			}, "REDACTED"),
+		},
 	})
+	return result, engine, err
+}
+
+func logCompileArtifacts(ctx context.Context, engine *contexty.Engine, result contexty.CompileResult) error {
+	snap := contexty.EmptySnapshot().
+		WithSegment(contexty.SegmentSystem, result.Payload.System).
+		WithSegment(contexty.SegmentHistory, result.Payload.History).
+		WithSegment(contexty.SegmentTools, result.Payload.Tools).
+		WithSegment(contexty.SegmentMemory, result.Payload.Memory)
+	view, err := engine.RenderView(ctx, snap, string(contexty.ViewFlatClassifier))
+	if err != nil {
+		return err
+	}
+	log.Printf("flat classifier view:\n%s", view)
+	for _, seg := range []contexty.SegmentName{
+		contexty.SegmentSystem, contexty.SegmentHistory, contexty.SegmentMemory,
+	} {
+		proj := result.DerivePersistenceProjection(seg)
+		log.Printf("persistence projection %s: %d messages", seg, len(proj))
+	}
+	return nil
 }
 
 type compileObserver struct{}
@@ -97,4 +140,9 @@ func fetchConversation() []contexty.Message {
 		contexty.TextMessage(contexty.RoleUser, "Thanks."),
 		contexty.TextMessage(contexty.RoleAssistant, "You're welcome."),
 	}
+}
+
+func withOrigin(msg contexty.Message, templateID, layerID string) contexty.Message {
+	msg.Origin = &contexty.MessageOrigin{TemplateID: templateID, LayerID: layerID}
+	return msg
 }

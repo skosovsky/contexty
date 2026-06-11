@@ -139,7 +139,7 @@ func TestRedactionHook_CopyOnWrite(t *testing.T) {
 	assert.Equal(t, "a@b.com", orig.Segment(contexty.SegmentHistory)[0].TextContent())
 }
 
-func TestEngine_Compile_DeferredAndOverlay(t *testing.T) {
+func TestEngine_Compile_DeferredAndResolveVar(t *testing.T) {
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStore()
 	s0, _ := store.Load(ctx, "t")
@@ -156,13 +156,13 @@ func TestEngine_Compile_DeferredAndOverlay(t *testing.T) {
 				return []contexty.Message{contexty.TextMessage(contexty.RoleUser, "dynamic")}, nil
 			},
 		}),
-	).WithOverlay(contexty.Overlay{"lang": "ru"})
+	)
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	payload := result.Payload
 	assert.Equal(t, "sys", payload.System[0].TextContent())
 	assert.Equal(t, "dynamic", payload.Memory[0].TextContent())
-	// overlay not persisted
+	// resolve vars not persisted
 	snap, _ := store.Load(ctx, "t")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 }

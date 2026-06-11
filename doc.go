@@ -3,7 +3,9 @@
 // Core concepts:
 //   - Typed message AST (ContentPart, Annotations, Provenance)
 //   - ConversationStore with named segments and optimistic concurrency
-//   - Non-mutating Render(ViewType) projections
+//   - Non-mutating Render(ViewType) and Engine.RenderView named projections
+//   - CompileRequest.Options (ephemeral patches, resolve vars)
+//   - CompileResult.Source + Introduced + DerivePersistenceProjection for persistence
 //   - BudgetPipeline (summarize + truncate) and Engine.Compile → CompileResult
 //
 // Example:

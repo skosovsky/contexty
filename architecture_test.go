@@ -55,6 +55,23 @@ func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
 	}
 }
 
+func TestArchitecture_NoGenerationMetadataInAttributes(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	violations, err := findGenerationMetadataInAttributesViolations(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf(
+			"generation metadata must use Message.Origin/LLMCache, not Attributes:\n%s",
+			strings.Join(violations, "\n"),
+		)
+	}
+}
+
 func TestArchitecture_NoBase64InCore(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
@@ -67,6 +84,53 @@ func TestArchitecture_NoBase64InCore(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("base64 encoding forbidden in semantic core:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+func TestArchitecture_NoRemovedOverlayAPIInCore(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	violations, err := findOverlayAPIViolations(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("removed Overlay API must not reappear in core:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+func findOverlayAPIViolations(root string) ([]string, error) {
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if shouldSkipArchitectureDir(filepath.Base(path)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		content := string(data)
+		for _, needle := range []string{
+			"WithOverlay", "CompileOverlayFromContext", "WithCompileOverlay",
+			"PromptOrigin", "ManifestID", "MessagePromptOrigin", "type Overlay",
+		} {
+			if strings.Contains(content, needle) {
+				violations = append(violations, path+": contains "+needle)
+			}
+		}
+		return nil
+	})
+	return violations, err
 }
 
 func findStringHeuristicViolations(root string) ([]string, error) {
@@ -110,7 +174,8 @@ func isArchitectureSourceFile(path string) bool {
 
 func isArchitectureAllowlisted(path string) bool {
 	switch filepath.Base(path) {
-	case "transform.go", "views.go", "model.go", "provenance.go", "serializer.go", "content_part.go":
+	case "transform.go", "views.go", "model.go", "provenance.go", "serializer.go",
+		"content_part.go", "message_origin.go", "attributes.go":
 		return true
 	default:
 		return false
@@ -186,6 +251,94 @@ func exprReferencesTextContent(expr ast.Expr) bool {
 		return true
 	})
 	return found
+}
+
+func forbiddenGenerationAttributeKeys() []string {
+	return []string{
+		"template_id",
+		"layer_id",
+		"manifest_id",
+		"llm_cache",
+		"prompt_origin",
+		"prompty",
+	}
+}
+
+func findGenerationMetadataInAttributesViolations(root string) ([]string, error) {
+	fset := token.NewFileSet()
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if shouldSkipArchitectureDir(filepath.Base(path)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isArchitectureSourceFile(path) || isArchitectureAllowlisted(path) {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		violations = append(violations, collectGenerationMetadataInAttributes(fset, file)...)
+		return nil
+	})
+	return violations, err
+}
+
+func collectGenerationMetadataInAttributes(fset *token.FileSet, file *ast.File) []string {
+	var violations []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		if !isAttributesCompositeLit(lit) {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			keyLit, ok := kv.Key.(*ast.BasicLit)
+			if !ok || keyLit.Kind != token.STRING {
+				continue
+			}
+			key := strings.Trim(keyLit.Value, `"`)
+			if isForbiddenGenerationAttributeKey(key) {
+				pos := fset.Position(keyLit.Pos())
+				violations = append(violations, pos.String()+": "+key)
+			}
+		}
+		return true
+	})
+	return violations
+}
+
+func isAttributesCompositeLit(lit *ast.CompositeLit) bool {
+	switch t := lit.Type.(type) {
+	case *ast.Ident:
+		return t.Name == "Attributes"
+	case *ast.SelectorExpr:
+		sel, ok := t.X.(*ast.Ident)
+		return ok && sel.Name == "contexty" && t.Sel.Name == "Attributes"
+	default:
+		return false
+	}
+}
+
+func isForbiddenGenerationAttributeKey(key string) bool {
+	for _, banned := range forbiddenGenerationAttributeKeys() {
+		if key == banned || strings.HasPrefix(key, banned+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func collectStringHeuristicCalls(fset *token.FileSet, file *ast.File) []string {

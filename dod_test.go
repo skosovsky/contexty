@@ -332,7 +332,7 @@ func TestDoD_DeferredRedactionThroughCompile(t *testing.T) {
 	assert.Equal(t, "contact [REDACTED]", payload.Memory[0].TextContent())
 }
 
-func TestDoD_OverlayNotPersisted(t *testing.T) {
+func TestDoD_ResolveVarNotPersisted(t *testing.T) {
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStore()
 	s0, _ := store.Load(ctx, "ov")
@@ -342,15 +342,19 @@ func TestDoD_OverlayNotPersisted(t *testing.T) {
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("ov"),
 		contexty.WithStore(store),
-	).WithOverlay(contexty.Overlay{"reason": "wake"})
-	_, err := engine.Compile(ctx, contexty.CompileRequest{})
+	)
+	_, err := engine.Compile(ctx, contexty.CompileRequest{
+		Options: []contexty.CompileOption{
+			contexty.WithResolveVar("reason", "wake"),
+		},
+	})
 	require.NoError(t, err)
 	snap, _ := store.Load(ctx, "ov")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 	assert.Len(t, snap.Segment(contexty.SegmentSystem), 1)
 }
 
-func TestDoD_OverlayInDeferredResolve(t *testing.T) {
+func TestDoD_ResolveVarInDeferredResolve(t *testing.T) {
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStore()
 	engine := contexty.NewEngine(
@@ -360,14 +364,18 @@ func TestDoD_OverlayInDeferredResolve(t *testing.T) {
 			Name:    "locale",
 			Segment: contexty.SegmentMemory,
 			Resolve: func(ctx context.Context) ([]contexty.Message, error) {
-				ov := contexty.CompileOverlayFromContext(ctx)
+				vars := contexty.CompileResolveVarFromContext(ctx)
 				return []contexty.Message{
-					contexty.TextMessage(contexty.RoleSystem, "locale="+ov["locale"]),
+					contexty.TextMessage(contexty.RoleSystem, "locale="+vars["locale"]),
 				}, nil
 			},
 		}),
-	).WithOverlay(contexty.Overlay{"locale": "ru-RU"})
-	result, err := engine.Compile(ctx, contexty.CompileRequest{})
+	)
+	result, err := engine.Compile(ctx, contexty.CompileRequest{
+		Options: []contexty.CompileOption{
+			contexty.WithResolveVar("locale", "ru-RU"),
+		},
+	})
 	require.NoError(t, err)
 	payload := result.Payload
 	assert.Equal(t, "locale=ru-RU", payload.Memory[0].TextContent())
@@ -396,12 +404,17 @@ func TestDoD_CompileDeterminism(t *testing.T) {
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("det"),
 		contexty.WithStore(store),
-	).WithOverlay(contexty.Overlay{"k": "v"})
-	req := contexty.CompileRequest{History: []contexty.Message{{
-		ID:    "stable-1",
-		Role:  contexty.RoleUser,
-		Parts: []contexty.ContentPart{contexty.TextPart{Text: "stable"}},
-	}}}
+	)
+	req := contexty.CompileRequest{
+		History: []contexty.Message{{
+			ID:    "stable-1",
+			Role:  contexty.RoleUser,
+			Parts: []contexty.ContentPart{contexty.TextPart{Text: "stable"}},
+		}},
+		Options: []contexty.CompileOption{
+			contexty.WithResolveVar("k", "v"),
+		},
+	}
 	r1, err := engine.Compile(ctx, req)
 	require.NoError(t, err)
 	r2, err := engine.Compile(ctx, req)

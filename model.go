@@ -19,12 +19,14 @@ const (
 
 // Message is a semantic AST node — no transport prefixes in text fields.
 type Message struct {
-	ID          string        `json:"id,omitempty"`
-	Role        Role          `json:"role"`
-	Parts       []ContentPart `json:"parts"`
-	Annotations Annotations   `json:"annotations"`
-	Attributes  Attributes    `json:"attributes,omitempty"`
-	Provenance  Provenance    `json:"-"`
+	ID          string          `json:"id,omitempty"`
+	Role        Role            `json:"role"`
+	Parts       []ContentPart   `json:"parts"`
+	Annotations Annotations     `json:"annotations"`
+	Attributes  Attributes      `json:"attributes,omitempty"`
+	Origin      *MessageOrigin  `json:"origin,omitempty"`
+	LLMCache    *CachePolicyRef `json:"llm_cache,omitempty"`
+	Provenance  Provenance      `json:"-"`
 }
 
 // Clone returns a deep copy of the message.
@@ -34,6 +36,8 @@ func (m Message) Clone() Message {
 		Role:        m.Role,
 		Annotations: m.Annotations.Clone(),
 		Attributes:  m.Attributes.Clone(),
+		Origin:      m.Origin.Clone(),
+		LLMCache:    m.LLMCache.Clone(),
 	}
 	if len(m.Parts) > 0 {
 		cloned.Parts = make([]ContentPart, len(m.Parts))
@@ -97,6 +101,8 @@ type messageWire struct {
 	Parts       json.RawMessage `json:"parts"`
 	Annotations Annotations     `json:"annotations"`
 	Attributes  Attributes      `json:"attributes,omitempty"`
+	Origin      *MessageOrigin  `json:"origin,omitempty"`
+	LLMCache    *CachePolicyRef `json:"llm_cache,omitempty"`
 	Provenance  json.RawMessage `json:"provenance,omitempty"`
 }
 
@@ -116,6 +122,8 @@ func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
 		Parts:       partsJSON,
 		Annotations: m.Annotations,
 		Attributes:  m.Attributes,
+		Origin:      m.Origin.Clone(),
+		LLMCache:    m.LLMCache.Clone(),
 		Provenance:  provJSON,
 	}
 	return json.Marshal(wire)
@@ -149,6 +157,8 @@ func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error)
 		Parts:       parts,
 		Annotations: wire.Annotations,
 		Attributes:  wire.Attributes,
+		Origin:      wire.Origin.Clone(),
+		LLMCache:    wire.LLMCache.Clone(),
 		Provenance:  prov,
 	}, nil
 }
