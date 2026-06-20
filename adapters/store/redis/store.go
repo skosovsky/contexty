@@ -39,7 +39,7 @@ redis.call('DEL', KEYS[1])
 return 1
 `
 
-// Store persists conversation snapshots in Redis.
+// Store persists conversation state in Redis.
 type Store struct {
 	client    goredis.UniversalClient
 	codec     contexty.ConversationCodec
@@ -47,12 +47,13 @@ type Store struct {
 	ttl       time.Duration
 }
 
-// New returns a Redis-backed ConversationStore.
+// New returns a Redis-backed ConversationStateStore.
 func New(client goredis.UniversalClient, opts ...Option) *Store {
 	store := &Store{
 		client:    client,
-		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil},
 		keyPrefix: defaultKeyPrefix,
+		ttl:       0,
 	}
 	for _, opt := range opts {
 		opt(store)
@@ -68,38 +69,38 @@ func (s *Store) dataKey(conversationID string) string {
 	return s.keyPrefix + conversationID + ":data"
 }
 
-// Load returns the stored conversation snapshot.
-func (s *Store) Load(ctx context.Context, conversationID string) (contexty.ConversationSnapshot, error) {
+// LoadState returns the full immutable conversation state.
+func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.ConversationState, error) {
 	if s.client == nil {
-		return contexty.ConversationSnapshot{}, errors.New("contexty/redis: nil client")
+		return contexty.ConversationState{}, errors.New("contexty/redis: nil client")
 	}
 	vstr, err := s.client.Get(ctx, s.verKey(conversationID)).Result()
 	switch {
 	case err == nil:
 		v, parseErr := strconv.ParseInt(vstr, 10, 64)
 		if parseErr != nil {
-			return contexty.ConversationSnapshot{}, fmt.Errorf("contexty/redis: parse version: %w", parseErr)
+			return contexty.ConversationState{}, fmt.Errorf("contexty/redis: parse version: %w", parseErr)
 		}
 		if v == 0 {
 			return contexty.EmptySnapshot(), nil
 		}
-		return s.loadSnapshot(ctx, conversationID, v)
+		return s.loadState(ctx, conversationID, v)
 	case errors.Is(err, goredis.Nil):
 		return contexty.EmptySnapshot(), nil
 	default:
-		return contexty.ConversationSnapshot{}, classifyRedisErr("load version", err)
+		return contexty.ConversationState{}, classifyRedisErr("load version", err)
 	}
 }
 
-func (s *Store) loadSnapshot(
+func (s *Store) loadState(
 	ctx context.Context,
 	conversationID string,
 	version int64,
-) (contexty.ConversationSnapshot, error) {
+) (contexty.ConversationState, error) {
 	raw, err := s.client.Get(ctx, s.dataKey(conversationID)).Result()
 	if errors.Is(err, goredis.Nil) {
 		if version > 0 {
-			return contexty.ConversationSnapshot{}, fmt.Errorf(
+			return contexty.ConversationState{}, fmt.Errorf(
 				"contexty/redis: version %d without payload for thread %q: %w",
 				version,
 				conversationID,
@@ -109,54 +110,30 @@ func (s *Store) loadSnapshot(
 		return contexty.EmptySnapshot(), nil
 	}
 	if err != nil {
-		return contexty.ConversationSnapshot{}, classifyRedisErr("load data", err)
+		return contexty.ConversationState{}, classifyRedisErr("load data", err)
 	}
 	snap, err := s.codec.Decode([]byte(raw))
 	if err != nil {
-		return contexty.ConversationSnapshot{}, fmt.Errorf("contexty/redis: decode: %w", err)
+		return contexty.ConversationState{}, fmt.Errorf("contexty/redis: decode: %w", err)
 	}
 	return snap.WithVersion(version), nil
 }
 
-// UpdateSegment replaces a segment when expectedVersion matches.
-func (s *Store) UpdateSegment(
+// ApplyDelta applies an immutable state transition when expectedVersion matches.
+func (s *Store) ApplyDelta(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs []contexty.Message,
+	delta contexty.ConversationDelta,
 ) error {
 	return s.mutate(ctx, conversationID, expectedVersion,
-		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
-			return snap.WithSegment(name, msgs)
+		func(snap contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
+			return contexty.ApplyDelta(snap, delta)
 		})
 }
 
-// AppendSegment appends messages to a segment.
-func (s *Store) AppendSegment(
-	ctx context.Context,
-	conversationID string,
-	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs ...contexty.Message,
-) error {
-	if len(msgs) == 0 {
-		return nil
-	}
-	return s.mutate(ctx, conversationID, expectedVersion,
-		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
-			existing := snap.Segment(name)
-			combined := make([]contexty.Message, len(existing)+len(msgs))
-			copy(combined, existing)
-			for i, m := range msgs {
-				combined[len(existing)+i] = m
-			}
-			return snap.WithSegment(name, combined)
-		})
-}
-
-// Clear removes stored conversation data.
-func (s *Store) Clear(ctx context.Context, conversationID string, expectedVersion int64) error {
+// ClearState removes stored conversation state.
+func (s *Store) ClearState(ctx context.Context, conversationID string, expectedVersion int64) error {
 	if s.client == nil {
 		return errors.New("contexty/redis: nil client")
 	}
@@ -176,19 +153,22 @@ func (s *Store) mutate(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	update func(contexty.ConversationSnapshot) contexty.ConversationSnapshot,
+	update func(contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error),
 ) error {
 	if s.client == nil {
 		return errors.New("contexty/redis: nil client")
 	}
-	cur, err := s.Load(ctx, conversationID)
+	cur, err := s.LoadState(ctx, conversationID)
 	if err != nil {
 		return err
 	}
 	if cur.Version() != expectedVersion {
 		return contexty.ErrConversationVersionConflict
 	}
-	next := update(cur)
+	next, err := update(cur)
+	if err != nil {
+		return err
+	}
 	next = next.WithVersion(expectedVersion + 1)
 	encoded, err := s.codec.Encode(next)
 	if err != nil {
@@ -239,4 +219,4 @@ func (s *Store) maybeExpire(ctx context.Context, conversationID string) {
 	_, _ = pipe.Exec(ctx)
 }
 
-var _ contexty.ConversationStore = (*Store)(nil)
+var _ contexty.ConversationStateStore = (*Store)(nil)

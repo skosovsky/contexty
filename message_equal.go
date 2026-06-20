@@ -25,7 +25,10 @@ func MessageEqual(a, b Message) bool {
 	if a.Annotations != b.Annotations {
 		return false
 	}
-	if !attributesEqual(a.Attributes, b.Attributes) {
+	if !reflect.DeepEqual(a.Actor, b.Actor) {
+		return false
+	}
+	if !reflect.DeepEqual(a.SourceRefs, b.SourceRefs) {
 		return false
 	}
 	if !OriginEqual(a.Origin, b.Origin) {
@@ -34,18 +37,50 @@ func MessageEqual(a, b Message) bool {
 	if !cachePolicyEqual(a.LLMCache, b.LLMCache) {
 		return false
 	}
+	if !extensionsEqual(a.Extensions, b.Extensions) {
+		return false
+	}
 	return provenanceEqual(a.Provenance, b.Provenance)
 }
 
-func attributesEqual(a, b Attributes) bool {
+func extensionsEqual(a, b []Extension) bool {
 	if len(a) == 0 && len(b) == 0 {
 		return true
 	}
-	return reflect.DeepEqual(a, b)
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !extensionEqual(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func contentPartsEqual(a, b ContentPart) bool {
 	return reflect.DeepEqual(a, b)
+}
+
+func extensionEqual(a, b Extension) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	if a.ExtensionType() != b.ExtensionType() {
+		return false
+	}
+	ja, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	jb, err := json.Marshal(b)
+	if err != nil {
+		return false
+	}
+	return string(ja) == string(jb)
 }
 
 func provenanceEqual(a, b Provenance) bool {

@@ -13,18 +13,18 @@ import (
 
 const defaultTableName = "contexty_conversations"
 
-// Store persists conversation segments in PostgreSQL with optimistic concurrency.
+// Store persists conversation state in PostgreSQL with optimistic concurrency.
 type Store struct {
 	pool      *pgxpool.Pool
 	codec     contexty.ConversationCodec
 	tableName string
 }
 
-// New returns a PostgreSQL-backed ConversationStore.
+// New returns a PostgreSQL-backed ConversationStateStore.
 func New(pool *pgxpool.Pool, opts ...Option) *Store {
 	store := &Store{
 		pool:      pool,
-		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil},
 		tableName: defaultTableName,
 	}
 	for _, opt := range opts {
@@ -33,10 +33,10 @@ func New(pool *pgxpool.Pool, opts ...Option) *Store {
 	return store
 }
 
-// Load returns the stored conversation snapshot.
-func (s *Store) Load(ctx context.Context, conversationID string) (contexty.ConversationSnapshot, error) {
+// LoadState returns the full immutable conversation state.
+func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.ConversationState, error) {
 	if s.pool == nil {
-		return contexty.ConversationSnapshot{}, errors.New("contexty/postgres: nil pool")
+		return contexty.ConversationState{}, errors.New("contexty/postgres: nil pool")
 	}
 	query := fmt.Sprintf(
 		`SELECT version, segments FROM %s WHERE thread_id = @thread_id`,
@@ -49,62 +49,34 @@ func (s *Store) Load(ctx context.Context, conversationID string) (contexty.Conve
 		if errors.Is(err, pgx.ErrNoRows) {
 			return contexty.EmptySnapshot(), nil
 		}
-		return contexty.ConversationSnapshot{}, classifyPostgresErr("load", err)
+		return contexty.ConversationState{}, classifyPostgresErr("load state", err)
 	}
 	snap, err := s.codec.Decode(payload)
 	if err != nil {
-		return contexty.ConversationSnapshot{}, fmt.Errorf("contexty/postgres: load decode: %w", err)
+		return contexty.ConversationState{}, fmt.Errorf("contexty/postgres: load state decode: %w", err)
 	}
 	return snap.WithVersion(version), nil
 }
 
-// UpdateSegment replaces a segment when expectedVersion matches.
-func (s *Store) UpdateSegment(
+// ApplyDelta applies an immutable state transition when expectedVersion matches.
+func (s *Store) ApplyDelta(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs []contexty.Message,
+	delta contexty.ConversationDelta,
 ) error {
 	return s.mutate(
 		ctx,
 		conversationID,
 		expectedVersion,
-		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
-			return snap.WithSegment(name, msgs)
+		func(snap contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
+			return contexty.ApplyDelta(snap, delta)
 		},
 	)
 }
 
-// AppendSegment appends messages to a segment.
-func (s *Store) AppendSegment(
-	ctx context.Context,
-	conversationID string,
-	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs ...contexty.Message,
-) error {
-	if len(msgs) == 0 {
-		return nil
-	}
-	return s.mutate(
-		ctx,
-		conversationID,
-		expectedVersion,
-		func(snap contexty.ConversationSnapshot) contexty.ConversationSnapshot {
-			existing := snap.Segment(name)
-			combined := make([]contexty.Message, len(existing)+len(msgs))
-			copy(combined, existing)
-			for i, m := range msgs {
-				combined[len(existing)+i] = m
-			}
-			return snap.WithSegment(name, combined)
-		},
-	)
-}
-
-// Clear removes the conversation row.
-func (s *Store) Clear(ctx context.Context, conversationID string, expectedVersion int64) error {
+// ClearState removes the conversation state.
+func (s *Store) ClearState(ctx context.Context, conversationID string, expectedVersion int64) error {
 	if s.pool == nil {
 		return errors.New("contexty/postgres: nil pool")
 	}
@@ -138,7 +110,7 @@ func (s *Store) mutate(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	update func(contexty.ConversationSnapshot) contexty.ConversationSnapshot,
+	update func(contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error),
 ) error {
 	if s.pool == nil {
 		return errors.New("contexty/postgres: nil pool")
@@ -168,7 +140,7 @@ func (s *Store) mutate(
 		if expectedVersion != 0 {
 			return contexty.ErrConversationVersionConflict
 		}
-		cur = contexty.ConversationSnapshot{}
+		cur = contexty.EmptySnapshot()
 	default:
 		return classifyPostgresErr("load for update", loadErr)
 	}
@@ -176,7 +148,10 @@ func (s *Store) mutate(
 		return contexty.ErrConversationVersionConflict
 	}
 
-	next := update(cur)
+	next, err := update(cur)
+	if err != nil {
+		return err
+	}
 	next = next.WithVersion(version + 1)
 	encoded, err := s.codec.Encode(next)
 	if err != nil {
@@ -240,4 +215,4 @@ func (s *Store) persistSnapshot(
 	return nil
 }
 
-var _ contexty.ConversationStore = (*Store)(nil)
+var _ contexty.ConversationStateStore = (*Store)(nil)

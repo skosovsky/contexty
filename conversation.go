@@ -2,7 +2,6 @@ package contexty
 
 import (
 	"context"
-	"errors"
 	"maps"
 	"sync"
 )
@@ -17,22 +16,35 @@ const (
 	SegmentMemory  SegmentName = "memory"
 )
 
-// ConversationSnapshot is an immutable read view of all segments.
-type ConversationSnapshot struct {
-	segments map[SegmentName][]Message
-	version  int64
+// ConversationState is an immutable read view of segments and artifacts.
+type ConversationState struct {
+	segments  map[SegmentName][]Message
+	artifacts map[string]ContextArtifact
+	version   int64
+}
+
+// ConversationSnapshot names the read-side state used by compile/render APIs.
+type ConversationSnapshot = ConversationState
+
+// EmptyState returns a zero-version empty state.
+func EmptyState() ConversationState {
+	return ConversationState{
+		segments:  map[SegmentName][]Message{},
+		artifacts: map[string]ContextArtifact{},
+		version:   0,
+	}
 }
 
 // EmptySnapshot returns a zero-version snapshot with an empty segment map.
 func EmptySnapshot() ConversationSnapshot {
-	return ConversationSnapshot{segments: map[SegmentName][]Message{}, version: 0}
+	return EmptyState()
 }
 
 // Version returns the optimistic concurrency version.
-func (s ConversationSnapshot) Version() int64 { return s.version }
+func (s ConversationState) Version() int64 { return s.version }
 
 // Segment returns a defensive copy of messages for the segment.
-func (s ConversationSnapshot) Segment(name SegmentName) []Message {
+func (s ConversationState) Segment(name SegmentName) []Message {
 	msgs := s.segments[name]
 	if len(msgs) == 0 {
 		return nil
@@ -45,7 +57,7 @@ func (s ConversationSnapshot) Segment(name SegmentName) []Message {
 }
 
 // SegmentNames returns segment keys present in the snapshot.
-func (s ConversationSnapshot) SegmentNames() []SegmentName {
+func (s ConversationState) SegmentNames() []SegmentName {
 	names := make([]SegmentName, 0, len(s.segments))
 	for n := range s.segments {
 		names = append(names, n)
@@ -54,7 +66,7 @@ func (s ConversationSnapshot) SegmentNames() []SegmentName {
 }
 
 // AllSegments returns shallow copies of every segment (COW container).
-func (s ConversationSnapshot) AllSegments() map[SegmentName][]Message {
+func (s ConversationState) AllSegments() map[SegmentName][]Message {
 	if len(s.segments) == 0 {
 		return nil
 	}
@@ -66,15 +78,16 @@ func (s ConversationSnapshot) AllSegments() map[SegmentName][]Message {
 }
 
 // AllSegmentsSnapshot builds a snapshot with cloned messages.
-func (s ConversationSnapshot) AllSegmentsSnapshot() ConversationSnapshot {
+func (s ConversationState) AllSegmentsSnapshot() ConversationSnapshot {
 	return ConversationSnapshot{
-		segments: s.AllSegments(),
-		version:  s.version,
+		segments:  s.AllSegments(),
+		artifacts: cloneArtifactMap(s.artifacts),
+		version:   s.version,
 	}
 }
 
 // WithSegment returns a new snapshot sharing unchanged segments (structural sharing).
-func (s ConversationSnapshot) WithSegment(name SegmentName, msgs []Message) ConversationSnapshot {
+func (s ConversationState) WithSegment(name SegmentName, msgs []Message) ConversationState {
 	segs := s.segments
 	if segs == nil {
 		segs = map[SegmentName][]Message{}
@@ -82,12 +95,64 @@ func (s ConversationSnapshot) WithSegment(name SegmentName, msgs []Message) Conv
 	next := make(map[SegmentName][]Message, len(segs)+1)
 	maps.Copy(next, segs)
 	next[name] = cloneMessageSlice(msgs)
-	return ConversationSnapshot{segments: next, version: s.version}
+	return ConversationState{
+		segments:  next,
+		artifacts: s.artifacts,
+		version:   s.version,
+	}
 }
 
 // WithVersion returns a snapshot with updated version (segments shared).
-func (s ConversationSnapshot) WithVersion(v int64) ConversationSnapshot {
-	return ConversationSnapshot{segments: s.segments, version: v}
+func (s ConversationState) WithVersion(v int64) ConversationState {
+	return ConversationState{
+		segments:  s.segments,
+		artifacts: s.artifacts,
+		version:   v,
+	}
+}
+
+// Artifacts returns state artifacts in deterministic ID order.
+func (s ConversationState) Artifacts() []ContextArtifact {
+	return artifactMapValues(s.artifacts)
+}
+
+// ToolRounds returns cloned canonical tool rounds.
+func (s ConversationState) ToolRounds() []ToolRound {
+	return toolRoundsFromMessages(s.segments[SegmentHistory])
+}
+
+// WithArtifact returns state with artifact upserted by ID.
+func (s ConversationState) WithArtifact(artifact ContextArtifact) ConversationState {
+	next := mergeArtifactMaps(s.artifacts, []ContextArtifact{artifact})
+	return ConversationState{
+		segments:  s.segments,
+		artifacts: next,
+		version:   s.version,
+	}
+}
+
+// WithoutArtifact returns state without the artifact ID.
+func (s ConversationState) WithoutArtifact(id string) ConversationState {
+	next := cloneArtifactMap(s.artifacts)
+	delete(next, id)
+	return ConversationState{
+		segments:  s.segments,
+		artifacts: next,
+		version:   s.version,
+	}
+}
+
+// WithArtifacts returns state with the exact artifact set.
+func (s ConversationState) WithArtifacts(artifacts []ContextArtifact) ConversationState {
+	next := make(map[string]ContextArtifact, len(artifacts))
+	for _, artifact := range artifacts {
+		next[artifact.ID] = artifact.Clone()
+	}
+	return ConversationState{
+		segments:  s.segments,
+		artifacts: next,
+		version:   s.version,
+	}
 }
 
 func cloneMessageSlice(msgs []Message) []Message {
@@ -101,43 +166,20 @@ func cloneMessageSlice(msgs []Message) []Message {
 	return out
 }
 
-// ConversationStore persists named dialogue segments with OCC.
-type ConversationStore interface {
-	Load(ctx context.Context, conversationID string) (ConversationSnapshot, error)
-	UpdateSegment(
-		ctx context.Context,
-		conversationID string,
-		expectedVersion int64,
-		name SegmentName,
-		msgs []Message,
-	) error
-	AppendSegment(
-		ctx context.Context,
-		conversationID string,
-		expectedVersion int64,
-		name SegmentName,
-		msgs ...Message,
-	) error
-	Clear(ctx context.Context, conversationID string, expectedVersion int64) error
-}
-
-// ErrSegmentNotFound is returned when a segment is missing.
-var ErrSegmentNotFound = errors.New("contexty: segment not found")
-
-// MemoryConversationStore is an in-memory reference ConversationStore.
-type MemoryConversationStore struct {
+// MemoryConversationStateStore is an in-memory reference ConversationStateStore.
+type MemoryConversationStateStore struct {
 	mu            sync.RWMutex
 	conversations map[string]ConversationSnapshot
 }
 
-// NewMemoryConversationStore returns an empty store.
-func NewMemoryConversationStore() *MemoryConversationStore {
+// NewMemoryConversationStateStore returns an empty store.
+func NewMemoryConversationStateStore() *MemoryConversationStateStore {
 	//nolint:exhaustruct // sync.RWMutex zero-initializes
-	return &MemoryConversationStore{conversations: make(map[string]ConversationSnapshot)}
+	return &MemoryConversationStateStore{conversations: make(map[string]ConversationSnapshot)}
 }
 
-// Load returns a snapshot with cloned segment slices.
-func (s *MemoryConversationStore) Load(_ context.Context, conversationID string) (ConversationSnapshot, error) {
+// LoadState returns the full immutable state for a conversation.
+func (s *MemoryConversationStateStore) LoadState(_ context.Context, conversationID string) (ConversationState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	st, ok := s.conversations[conversationID]
@@ -147,51 +189,13 @@ func (s *MemoryConversationStore) Load(_ context.Context, conversationID string)
 	return st.AllSegmentsSnapshot(), nil
 }
 
-// UpdateSegment replaces a segment when expectedVersion matches.
-func (s *MemoryConversationStore) UpdateSegment(
+// ApplyDelta applies a transition when expectedVersion matches.
+func (s *MemoryConversationStateStore) ApplyDelta(
 	_ context.Context,
 	conversationID string,
 	expectedVersion int64,
-	name SegmentName,
-	msgs []Message,
+	delta ConversationDelta,
 ) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.updateSegmentLocked(conversationID, expectedVersion, name, msgs)
-}
-
-func (s *MemoryConversationStore) updateSegmentLocked(
-	conversationID string,
-	expectedVersion int64,
-	name SegmentName,
-	msgs []Message,
-) error {
-	cur, ok := s.conversations[conversationID]
-	if !ok {
-		if expectedVersion != 0 {
-			return ErrConversationVersionConflict
-		}
-		cur = EmptySnapshot()
-	} else if cur.version != expectedVersion {
-		return ErrConversationVersionConflict
-	}
-	next := cur.WithSegment(name, msgs)
-	next.version = cur.version + 1
-	s.conversations[conversationID] = next
-	return nil
-}
-
-// AppendSegment appends messages to a segment.
-func (s *MemoryConversationStore) AppendSegment(
-	_ context.Context,
-	conversationID string,
-	expectedVersion int64,
-	name SegmentName,
-	msgs ...Message,
-) error {
-	if len(msgs) == 0 {
-		return nil
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.conversations[conversationID]
@@ -199,20 +203,25 @@ func (s *MemoryConversationStore) AppendSegment(
 		if expectedVersion != 0 {
 			return ErrConversationVersionConflict
 		}
-		cur = EmptySnapshot()
+		cur = EmptyState()
 	} else if cur.version != expectedVersion {
 		return ErrConversationVersionConflict
 	}
-	existing := cur.segments[name]
-	combined := append(cloneMessageSlice(existing), cloneMessageSlice(msgs)...)
-	next := cur.WithSegment(name, combined)
+	next, err := ApplyDelta(cur, delta)
+	if err != nil {
+		return err
+	}
 	next.version = cur.version + 1
 	s.conversations[conversationID] = next
 	return nil
 }
 
-// Clear removes all segments for a thread.
-func (s *MemoryConversationStore) Clear(_ context.Context, conversationID string, expectedVersion int64) error {
+// ClearState removes all state for a thread.
+func (s *MemoryConversationStateStore) ClearState(
+	_ context.Context,
+	conversationID string,
+	expectedVersion int64,
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.conversations[conversationID]
@@ -229,4 +238,4 @@ func (s *MemoryConversationStore) Clear(_ context.Context, conversationID string
 	return nil
 }
 
-var _ ConversationStore = (*MemoryConversationStore)(nil)
+var _ ConversationStateStore = (*MemoryConversationStateStore)(nil)

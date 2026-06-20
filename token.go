@@ -63,11 +63,11 @@ func (c *CharFallbackEstimator) EstimatePerMessage(ctx context.Context, msgs []M
 				if c.EstimateTool != nil {
 					toolTokens += c.EstimateTool(v) + ToolCallOverhead
 				} else {
-					runes += utf8.RuneCountInString(v.Arguments) + utf8.RuneCountInString(v.Name)
+					runes += utf8.RuneCountInString(v.Arguments.PlainText()) + utf8.RuneCountInString(v.Name)
 					toolTokens += ToolCallOverhead
 				}
 			case ToolResultPart:
-				runes += utf8.RuneCountInString(v.Content)
+				runes += utf8.RuneCountInString(v.Payload.PlainText())
 			}
 		}
 		tokensFromRunes := 0

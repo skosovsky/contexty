@@ -1,5 +1,5 @@
-// Resilient store example: stdlib-only retries on [contexty.ErrUnavailable] around
-// [testutil.MemoryConversationStore]. Run: go run ./examples/resilient_store
+// Resilient store example: stdlib-only retries on [contexty.ErrUnavailable]
+// around a [contexty.ConversationStateStore]. Run: go run ./examples/resilient_store
 package main
 
 import (
@@ -18,13 +18,13 @@ const (
 	exampleSimulatedFails   = 2
 )
 
-type resilientConversationStore struct {
-	base     contexty.ConversationStore
+type resilientConversationStateStore struct {
+	base     contexty.ConversationStateStore
 	attempts int
 	failLeft int
 }
 
-func (s *resilientConversationStore) withRetry(ctx context.Context, op func(context.Context) error) error {
+func (s *resilientConversationStateStore) withRetry(ctx context.Context, op func(context.Context) error) error {
 	backoff := exampleInitialBackoffMs * time.Millisecond
 	var last error
 	for attempt := 0; attempt <= exampleMaxRetries; attempt++ {
@@ -48,92 +48,83 @@ func (s *resilientConversationStore) withRetry(ctx context.Context, op func(cont
 	return last
 }
 
-func (s *resilientConversationStore) Load(
+func (s *resilientConversationStateStore) LoadState(
 	ctx context.Context,
 	conversationID string,
-) (contexty.ConversationSnapshot, error) {
-	var snap contexty.ConversationSnapshot
+) (contexty.ConversationState, error) {
+	var state contexty.ConversationState
 	err := s.withRetry(ctx, func(ctx context.Context) error {
 		if s.failLeft > 0 {
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
 		var e error
-		snap, e = s.base.Load(ctx, conversationID)
+		state, e = s.base.LoadState(ctx, conversationID)
 		return e
 	})
-	return snap, err
+	return state, err
 }
 
-func (s *resilientConversationStore) UpdateSegment(
+func (s *resilientConversationStateStore) ApplyDelta(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs []contexty.Message,
+	delta contexty.ConversationDelta,
 ) error {
 	return s.withRetry(ctx, func(ctx context.Context) error {
 		if s.failLeft > 0 {
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
-		return s.base.UpdateSegment(ctx, conversationID, expectedVersion, name, msgs)
+		return s.base.ApplyDelta(ctx, conversationID, expectedVersion, delta)
 	})
 }
 
-func (s *resilientConversationStore) AppendSegment(
+func (s *resilientConversationStateStore) ClearState(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	name contexty.SegmentName,
-	msgs ...contexty.Message,
 ) error {
 	return s.withRetry(ctx, func(ctx context.Context) error {
 		if s.failLeft > 0 {
 			s.failLeft--
 			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
 		}
-		return s.base.AppendSegment(ctx, conversationID, expectedVersion, name, msgs...)
-	})
-}
-
-func (s *resilientConversationStore) Clear(ctx context.Context, conversationID string, expectedVersion int64) error {
-	return s.withRetry(ctx, func(ctx context.Context) error {
-		if s.failLeft > 0 {
-			s.failLeft--
-			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
-		}
-		return s.base.Clear(ctx, conversationID, expectedVersion)
+		return s.base.ClearState(ctx, conversationID, expectedVersion)
 	})
 }
 
 func main() {
 	ctx := context.Background()
-	base := testutil.NewMemoryConversationStore()
-	store := &resilientConversationStore{
+	base := testutil.NewMemoryConversationStateStore()
+	store := &resilientConversationStateStore{
 		base:     base,
 		attempts: 0,
 		failLeft: exampleSimulatedFails,
 	}
 
-	snap0, err := store.Load(ctx, "demo")
+	state0, err := store.LoadState(ctx, "demo")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("Load after %d attempts (%d simulated ErrUnavailable): version=%d\n",
-		store.attempts, exampleSimulatedFails, snap0.Version())
+		store.attempts, exampleSimulatedFails, state0.Version())
 
 	store.attempts = 0
 	store.failLeft = 0
-	err = store.AppendSegment(ctx, "demo", snap0.Version(), contexty.SegmentHistory,
-		contexty.TextMessage(contexty.RoleUser, "hello"))
+	//nolint:exhaustruct // zero-value fields omitted in example
+	err = store.ApplyDelta(ctx, "demo", state0.Version(), contexty.ConversationDelta{
+		Operation: contexty.DeltaAppendMessages,
+		Segment:   contexty.SegmentHistory,
+		Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")},
+	})
 	if err != nil {
 		panic(err)
 	}
-	snap1, err := store.Load(ctx, "demo")
+	state1, err := store.LoadState(ctx, "demo")
 	if err != nil {
 		panic(err)
 	}
 	fmt.Printf("Append ok; reload version=%d content=%q\n",
-		snap1.Version(), snap1.Segment(contexty.SegmentHistory)[0].TextContent())
+		state1.Version(), state1.Segment(contexty.SegmentHistory)[0].TextContent())
 }

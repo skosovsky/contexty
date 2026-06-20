@@ -13,8 +13,11 @@ import (
 func TestCharFallbackEstimator(t *testing.T) {
 	estimator := &contexty.CharFallbackEstimator{CharsPerToken: 2}
 	msgs := []contexty.Message{{
-		Role:  contexty.RoleAssistant,
-		Parts: []contexty.ContentPart{contexty.TextPart{Text: "ab"}, contexty.ToolCallPart{Name: "x", Arguments: "yz"}},
+		Role: contexty.RoleAssistant,
+		Parts: []contexty.ContentPart{
+			contexty.TextPart{Text: "ab"},
+			contexty.ToolCallPart{Name: "x", Arguments: contexty.TextPayload("yz")},
+		},
 	}}
 	n, err := estimator.Estimate(context.Background(), msgs)
 	require.NoError(t, err)
@@ -24,8 +27,10 @@ func TestCharFallbackEstimator(t *testing.T) {
 func TestFixedEstimator_ToolParts(t *testing.T) {
 	estimator := &contexty.FixedEstimator{TokensPerMessage: 1, TokensPerToolCall: 5}
 	msgs := []contexty.Message{{
-		Role:  contexty.RoleAssistant,
-		Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "1", Name: "f", Arguments: "{}"}},
+		Role: contexty.RoleAssistant,
+		Parts: []contexty.ContentPart{
+			contexty.ToolCallPart{ID: "1", Name: "f", Arguments: contexty.JSONPayload("{}")},
+		},
 	}}
 	per, err := estimator.EstimatePerMessage(context.Background(), msgs)
 	require.NoError(t, err)

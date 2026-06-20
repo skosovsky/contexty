@@ -102,16 +102,16 @@ func TestStatelessCompile_DeferredBlocks(t *testing.T) {
 func TestStatelessCompile_IgnoresStoreAndConversationID(t *testing.T) {
 	ctx := context.Background()
 	const convID = "stored-conv"
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, convID)
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, convID)
 	require.NoError(t, err)
 	storeMsgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "from-store"),
 	}
-	require.NoError(t, store.UpdateSegment(ctx, convID, s0.Version(), contexty.SegmentHistory, storeMsgs))
+	require.NoError(t, updateSegment(ctx, store, convID, s0.Version(), contexty.SegmentHistory, storeMsgs))
 
 	engine := contexty.NewEngine(
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithConversationID(convID),
 	)
 	result, err := engine.CompileSnapshot(ctx, reqHistory([]contexty.Message{

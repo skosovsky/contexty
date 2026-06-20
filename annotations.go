@@ -2,11 +2,9 @@ package contexty
 
 import "time"
 
-// Annotations holds transport metadata separate from message payload text.
+// Annotations holds non-identity transport metadata separate from message payload text.
 type Annotations struct {
-	Timestamp  *time.Time `json:"timestamp,omitempty"`
-	SenderName string     `json:"sender_name,omitempty"`
-	RefID      string     `json:"ref_id,omitempty"`
+	Timestamp *time.Time `json:"timestamp,omitempty"`
 }
 
 // Clone returns a deep copy of annotations.

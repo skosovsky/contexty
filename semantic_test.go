@@ -14,27 +14,28 @@ import (
 func TestMessageClone_DeepCopy(t *testing.T) {
 	ts := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
 	original := contexty.Message{
-		Role: contexty.RoleUser,
+		Actor: &contexty.Actor{Kind: "user", ID: "u1", DisplayName: "alice"},
+		Role:  contexty.RoleUser,
 		Parts: []contexty.ContentPart{
 			contexty.TextPart{Text: "hello"},
-			contexty.ToolCallPart{ID: "c1", Name: "search", Arguments: `{"q":"go"}`},
+			contexty.ToolCallPart{ID: "c1", Name: "search", Arguments: contexty.JSONPayload(`{"q":"go"}`)},
 		},
-		Annotations: contexty.Annotations{SenderName: "alice", Timestamp: &ts},
+		Annotations: contexty.Annotations{Timestamp: &ts},
 		Provenance:  contexty.UserProvenance{Channel: "web", UserID: "u1"},
 	}
 	cloned := original.Clone()
 	cloned.Parts[0] = contexty.TextPart{Text: "changed"}
-	cloned.Annotations.SenderName = "bob"
+	cloned.Actor.DisplayName = "bob"
 	assert.Equal(t, "hello", original.TextContent())
-	assert.Equal(t, "alice", original.Annotations.SenderName)
+	assert.Equal(t, "alice", original.Actor.DisplayName)
 }
 
 func TestPolymorphicPartsRoundTrip(t *testing.T) {
 	parts := []contexty.ContentPart{
 		contexty.TextPart{Text: "hi"},
 		contexty.ImagePart{URL: "https://example.com/a.png"},
-		contexty.ToolCallPart{ID: "1", Name: "fn", Arguments: "{}"},
-		contexty.ToolResultPart{ToolCallID: "1", Content: "ok"},
+		contexty.ToolCallPart{ID: "1", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+		contexty.ToolResultPart{ToolCallID: "1", Payload: contexty.TextPayload("ok")},
 	}
 	data, err := contexty.MarshalParts(parts)
 	require.NoError(t, err)
@@ -59,9 +60,9 @@ func TestProvenanceRegistry_RoundTrip(t *testing.T) {
 		Parts:      []contexty.ContentPart{contexty.TextPart{Text: "x"}},
 		Provenance: contexty.UserProvenance{Channel: "tg"},
 	}
-	data, err := contexty.MarshalMessageJSON(msg, reg)
+	data, err := contexty.MarshalMessageJSON(msg, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
-	out, err := contexty.UnmarshalMessageJSON(data, reg)
+	out, err := contexty.UnmarshalMessageJSON(data, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
 	assert.Equal(t, "tg", out.Provenance.(contexty.UserProvenance).Channel)
 }
@@ -79,26 +80,29 @@ func TestUnmarshalMessageJSON_NilRegistryWithProvenanceFails(t *testing.T) {
 		Parts:      []contexty.ContentPart{contexty.TextPart{Text: "x"}},
 		Provenance: contexty.UserProvenance{Channel: "tg"},
 	}
-	data, err := contexty.MarshalMessageJSON(msg, contexty.DefaultProvenanceRegistry())
+	data, err := contexty.MarshalMessageJSON(
+		msg,
+		contexty.MessageCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+	)
 	require.NoError(t, err)
-	_, err = contexty.UnmarshalMessageJSON(data, nil)
+	_, err = contexty.UnmarshalMessageJSON(data, contexty.MessageCodec{})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "registry is nil")
 }
 
-func TestConversationStore_OCC(t *testing.T) {
+func TestConversationStateStore_OCC(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "t1")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "t1")
 	require.NoError(t, err)
-	require.NoError(t, store.AppendSegment(ctx, "t1", s0.Version(), contexty.SegmentHistory,
+	require.NoError(t, appendSegment(ctx, store, "t1", s0.Version(), contexty.SegmentHistory,
 		contexty.TextMessage(contexty.RoleUser, "one"),
 	))
-	s1, err := store.Load(ctx, "t1")
+	s1, err := loadState(ctx, store, "t1")
 	require.NoError(t, err)
-	err = store.AppendSegment(ctx, "t1", 0, contexty.SegmentHistory, contexty.TextMessage(contexty.RoleUser, "stale"))
+	err = appendSegment(ctx, store, "t1", 0, contexty.SegmentHistory, contexty.TextMessage(contexty.RoleUser, "stale"))
 	require.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
-	require.NoError(t, store.AppendSegment(ctx, "t1", s1.Version(), contexty.SegmentHistory,
+	require.NoError(t, appendSegment(ctx, store, "t1", s1.Version(), contexty.SegmentHistory,
 		contexty.TextMessage(contexty.RoleAssistant, "two"),
 	))
 }
@@ -141,14 +145,14 @@ func TestRedactionHook_CopyOnWrite(t *testing.T) {
 
 func TestEngine_Compile_DeferredAndResolveVar(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "t")
-	_ = store.UpdateSegment(ctx, "t", s0.Version(), contexty.SegmentSystem, []contexty.Message{
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "t")
+	_ = updateSegment(ctx, store, "t", s0.Version(), contexty.SegmentSystem, []contexty.Message{
 		contexty.TextMessage(contexty.RoleSystem, "sys"),
 	})
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("t"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "mem",
 			Segment: contexty.SegmentMemory,
@@ -163,7 +167,7 @@ func TestEngine_Compile_DeferredAndResolveVar(t *testing.T) {
 	assert.Equal(t, "sys", payload.System[0].TextContent())
 	assert.Equal(t, "dynamic", payload.Memory[0].TextContent())
 	// resolve vars not persisted
-	snap, _ := store.Load(ctx, "t")
+	snap, _ := loadState(ctx, store, "t")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 }
 

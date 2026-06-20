@@ -1,4 +1,6 @@
 GO      := go
+GOLANGCI_LINT_CACHE ?= /private/tmp/contexty-golangci-cache
+GOLANGCI_LINT_RUN := env GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) golangci-lint run --allow-parallel-runners
 MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \;)
 
 .PHONY: lint fix test test-dod validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
@@ -6,7 +8,7 @@ MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor"
 lint:
 	@for dir in $(MODULES); do \
 		echo "golangci-lint - $$dir"; \
-		(cd "$$dir" && golangci-lint run ./...) || exit 1; \
+		(cd "$$dir" && $(GOLANGCI_LINT_RUN) ./...) || exit 1; \
 	done
 
 fix:
@@ -14,7 +16,7 @@ fix:
 	@for dir in $(MODULES); do \
 		echo "fix & tidy - $$dir"; \
 		(cd "$$dir" && $(GO) fix ./... && $(GO) mod tidy) || exit 1; \
-		(cd "$$dir" && golangci-lint run --fix ./...) || exit 1; \
+		(cd "$$dir" && $(GOLANGCI_LINT_RUN) --fix ./...) || exit 1; \
 	done
 
 test:
@@ -57,10 +59,10 @@ cover:
 		(cd "$$dir" && $(GO) test -coverprofile=coverage.out ./... && $(GO) tool cover -func=coverage.out) || exit 1; \
 	done
 
-release-patch: lint test ## v0.5.0 -> v0.5.1
+release-patch: lint test
 	@chmod +x ./scripts/release.sh
 	@./scripts/release.sh patch "$(MODULES)"
 
-release-break: lint test ## v0.5.1 -> v0.6.0
+release-break: lint test
 	@chmod +x ./scripts/release.sh
 	@./scripts/release.sh break "$(MODULES)"

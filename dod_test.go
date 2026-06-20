@@ -18,16 +18,18 @@ func TestDoD_MetadataIsolation(t *testing.T) {
 	ctx := context.Background()
 	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	msg := contexty.Message{
-		Role:  contexty.RoleUser,
-		Parts: []contexty.ContentPart{contexty.TextPart{Text: "hello"}},
-		Annotations: contexty.Annotations{
-			SenderName: "alice",
-			RefID:      "msg-42",
-			Timestamp:  &ts,
-		},
+		Actor:       &contexty.Actor{Kind: "user", ID: "alice", DisplayName: "alice"},
+		Role:        contexty.RoleUser,
+		Parts:       []contexty.ContentPart{contexty.TextPart{Text: "hello"}},
+		Annotations: contexty.Annotations{Timestamp: &ts},
+		SourceRefs: []contexty.SourceRef{{
+			Namespace: "messages",
+			Kind:      "external",
+			ID:        "msg-42",
+		}},
 	}
 	assert.Equal(t, "hello", msg.TextContent())
-	assert.Equal(t, "alice", msg.Annotations.SenderName)
+	assert.Equal(t, "alice", msg.Actor.DisplayName)
 	assert.NotContains(t, msg.TextContent(), "alice")
 
 	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{msg})
@@ -40,35 +42,58 @@ func TestDoD_MetadataIsolation(t *testing.T) {
 	assert.NotContains(t, flat, "alice")
 	assert.NotContains(t, flat, "msg-42")
 
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "meta")
-	require.NoError(t, store.UpdateSegment(ctx, "meta", s0.Version(), contexty.SegmentHistory, []contexty.Message{msg}))
-	engine := contexty.NewEngine(contexty.WithConversationID("meta"), contexty.WithStore(store))
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "meta")
+	require.NoError(
+		t,
+		updateSegment(
+			ctx,
+			store,
+			"meta",
+			s0.Version(),
+			contexty.SegmentHistory,
+			[]contexty.Message{msg},
+		),
+	)
+	engine := contexty.NewEngine(contexty.WithConversationID("meta"), contexty.WithStateStore(store))
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	assert.Equal(t, "hello", payload.History[0].TextContent())
-	assert.Equal(t, "alice", payload.History[0].Annotations.SenderName)
+	assert.Equal(t, "alice", payload.History[0].Actor.DisplayName)
+	require.Len(t, payload.History[0].SourceRefs, 1)
+	assert.Equal(t, "msg-42", payload.History[0].SourceRefs[0].ID)
 }
 
 func TestDoD_ToolPartsEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	msgs := []contexty.Message{
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "c1", Name: "search", Arguments: `{"q":"x"}`}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{
+					ID:        "c1",
+					Name:      "search",
+					Arguments: contexty.JSONPayload(`{"q":"x"}`),
+				},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "c1", Content: "ok"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "c1", Payload: contexty.TextPayload("ok")},
+			},
 		},
 	}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "tools")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "tools")
 	require.NoError(t, err)
-	require.NoError(t, store.UpdateSegment(ctx, "tools", s0.Version(), contexty.SegmentHistory, msgs))
-	engine := contexty.NewEngine(contexty.WithConversationID("tools"), contexty.WithStore(store))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "tools", s0.Version(), contexty.SegmentHistory, msgs),
+	)
+	engine := contexty.NewEngine(contexty.WithConversationID("tools"), contexty.WithStateStore(store))
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	payload := result.Payload
@@ -80,13 +105,23 @@ func TestDoD_ToolPartsEndToEnd(t *testing.T) {
 	msg := contexty.Message{
 		Role: contexty.RoleAssistant,
 		Parts: []contexty.ContentPart{
-			contexty.ToolCallPart{ID: "c1", Name: "search", Arguments: `{"q":"x"}`},
-			contexty.ToolResultPart{ToolCallID: "c1", Content: "ok"},
+			contexty.ToolCallPart{
+				ID:        "c1",
+				Name:      "search",
+				Arguments: contexty.JSONPayload(`{"q":"x"}`),
+			},
+			contexty.ToolResultPart{ToolCallID: "c1", Payload: contexty.TextPayload("ok")},
 		},
 	}
-	data, err := contexty.MarshalMessageJSON(msg, contexty.DefaultProvenanceRegistry())
+	data, err := contexty.MarshalMessageJSON(
+		msg,
+		contexty.MessageCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+	)
 	require.NoError(t, err)
-	out, err := contexty.UnmarshalMessageJSON(data, contexty.DefaultProvenanceRegistry())
+	out, err := contexty.UnmarshalMessageJSON(
+		data,
+		contexty.MessageCodec{Provenance: contexty.DefaultProvenanceRegistry()},
+	)
 	require.NoError(t, err)
 	require.Len(t, out.ToolCallParts(), 1)
 	require.Len(t, out.ToolResultParts(), 1)
@@ -100,12 +135,14 @@ func TestDoD_TruncationAtomicity(t *testing.T) {
 		{
 			Role: contexty.RoleAssistant,
 			Parts: []contexty.ContentPart{
-				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: "{}"},
+				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: contexty.JSONPayload("{}")},
 			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "a", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "a", Payload: contexty.TextPayload("r")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -130,9 +167,11 @@ func TestDoD_UnifiedBudgeting(t *testing.T) {
 	}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		TokenLimit: 15,
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-			return contexty.TextMessage(contexty.RoleSystem, "sum"), nil
-		}),
+		Summarizer: stubSummarizer(
+			func(context.Context, []contexty.Message) (contexty.Message, error) {
+				return contexty.TextMessage(contexty.RoleSystem, "sum"), nil
+			},
+		),
 	}, &contexty.FixedEstimator{TokensPerMessage: 10})
 	out, err := pipe.Apply(ctx, msgs)
 	require.NoError(t, err)
@@ -161,9 +200,9 @@ func TestDoD_ProvenanceTyped(t *testing.T) {
 		Parts:      []contexty.ContentPart{contexty.TextPart{Text: "x"}},
 		Provenance: contexty.UserProvenance{Channel: "tg", UserID: "u1"},
 	}
-	data, err := contexty.MarshalMessageJSON(msg, reg)
+	data, err := contexty.MarshalMessageJSON(msg, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
-	out, err := contexty.UnmarshalMessageJSON(data, reg)
+	out, err := contexty.UnmarshalMessageJSON(data, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
 	prov, ok := out.Provenance.(contexty.UserProvenance)
 	require.True(t, ok)
@@ -198,17 +237,32 @@ func TestDoD_StructuralSharing(t *testing.T) {
 
 func TestDoD_ProvenanceThroughCompile(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
+	store := contexty.NewMemoryConversationStateStore()
 	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	msg := contexty.Message{
 		Role:        contexty.RoleUser,
 		Parts:       []contexty.ContentPart{contexty.TextPart{Text: "hi"}},
-		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "r1"},
-		Provenance:  contexty.UserProvenance{Channel: "api"},
+		Annotations: contexty.Annotations{Timestamp: &ts},
+		SourceRefs: []contexty.SourceRef{{
+			Namespace: "messages",
+			Kind:      "external",
+			ID:        "r1",
+		}},
+		Provenance: contexty.UserProvenance{Channel: "api"},
 	}
-	s0, _ := store.Load(ctx, "t")
-	require.NoError(t, store.UpdateSegment(ctx, "t", s0.Version(), contexty.SegmentHistory, []contexty.Message{msg}))
-	engine := contexty.NewEngine(contexty.WithConversationID("t"), contexty.WithStore(store))
+	s0, _ := loadState(ctx, store, "t")
+	require.NoError(
+		t,
+		updateSegment(
+			ctx,
+			store,
+			"t",
+			s0.Version(),
+			contexty.SegmentHistory,
+			[]contexty.Message{msg},
+		),
+	)
+	engine := contexty.NewEngine(contexty.WithConversationID("t"), contexty.WithStateStore(store))
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	payload := result.Payload
@@ -218,14 +272,17 @@ func TestDoD_ProvenanceThroughCompile(t *testing.T) {
 
 func TestDoD_RedactionThroughCompile(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "t")
-	require.NoError(t, store.UpdateSegment(ctx, "t", s0.Version(), contexty.SegmentHistory, []contexty.Message{
-		contexty.TextMessage(contexty.RoleUser, "reach me at a@b.com"),
-	}))
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "t")
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "t", s0.Version(), contexty.SegmentHistory, []contexty.Message{
+			contexty.TextMessage(contexty.RoleUser, "reach me at a@b.com"),
+		}),
+	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("t"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
 	)
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
@@ -233,20 +290,23 @@ func TestDoD_RedactionThroughCompile(t *testing.T) {
 	payload := result.Payload
 	require.Len(t, payload.History, 1)
 	assert.Equal(t, "reach me at [REDACTED]", payload.History[0].TextContent())
-	snap, _ := store.Load(ctx, "t")
+	snap, _ := loadState(ctx, store, "t")
 	assert.Equal(t, "reach me at a@b.com", snap.Segment(contexty.SegmentHistory)[0].TextContent())
 }
 
 func TestDoD_DeferredNotPersisted(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "t")
-	require.NoError(t, store.UpdateSegment(ctx, "t", s0.Version(), contexty.SegmentSystem, []contexty.Message{
-		contexty.TextMessage(contexty.RoleSystem, "sys"),
-	}))
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "t")
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "t", s0.Version(), contexty.SegmentSystem, []contexty.Message{
+			contexty.TextMessage(contexty.RoleSystem, "sys"),
+		}),
+	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("t"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "mem",
 			Segment: contexty.SegmentMemory,
@@ -259,27 +319,38 @@ func TestDoD_DeferredNotPersisted(t *testing.T) {
 	require.NoError(t, err)
 	payload := result.Payload
 	assert.Equal(t, "dynamic", payload.Memory[0].TextContent())
-	snap, _ := store.Load(ctx, "t")
+	snap, _ := loadState(ctx, store, "t")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 }
 
 func TestDoD_ToolPartsStorageRoundTrip(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
+	store := contexty.NewMemoryConversationStateStore()
 	msgs := []contexty.Message{
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "c1", Name: "search", Arguments: `{}`}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{
+					ID:        "c1",
+					Name:      "search",
+					Arguments: contexty.JSONPayload(`{}`),
+				},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "c1", Content: "ok"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "c1", Payload: contexty.TextPayload("ok")},
+			},
 		},
 	}
-	s0, err := store.Load(ctx, "roundtrip")
+	s0, err := loadState(ctx, store, "roundtrip")
 	require.NoError(t, err)
-	require.NoError(t, store.UpdateSegment(ctx, "roundtrip", s0.Version(), contexty.SegmentHistory, msgs))
-	snap, err := store.Load(ctx, "roundtrip")
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "roundtrip", s0.Version(), contexty.SegmentHistory, msgs),
+	)
+	snap, err := loadState(ctx, store, "roundtrip")
 	require.NoError(t, err)
 	got := snap.Segment(contexty.SegmentHistory)
 	require.Len(t, got, 2)
@@ -291,20 +362,24 @@ func TestDoD_ToolPartsStorageRoundTrip(t *testing.T) {
 func TestDoD_ToolTurnCanonicalLayout(t *testing.T) {
 	msgs := []contexty.Message{
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: "{}"}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "a", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "a", Payload: contexty.TextPayload("r")},
+			},
 		},
 	}
 	assert.True(t, contexty.ToolTurnUsesCanonicalLayout(msgs, 0))
 	inMessage := []contexty.Message{{
 		Role: contexty.RoleAssistant,
 		Parts: []contexty.ContentPart{
-			contexty.ToolCallPart{ID: "b", Name: "fn", Arguments: "{}"},
-			contexty.ToolResultPart{ToolCallID: "b", Content: "inline"},
+			contexty.ToolCallPart{ID: "b", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+			contexty.ToolResultPart{ToolCallID: "b", Payload: contexty.TextPayload("inline")},
 		},
 	}}
 	assert.False(t, contexty.ToolTurnUsesCanonicalLayout(inMessage, 0))
@@ -312,16 +387,18 @@ func TestDoD_ToolTurnCanonicalLayout(t *testing.T) {
 
 func TestDoD_DeferredRedactionThroughCompile(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
+	store := contexty.NewMemoryConversationStateStore()
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("t"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "mem",
 			Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
-				return []contexty.Message{contexty.TextMessage(contexty.RoleUser, "contact a@b.com")}, nil
+				return []contexty.Message{
+					contexty.TextMessage(contexty.RoleUser, "contact a@b.com"),
+				}, nil
 			},
 		}),
 	)
@@ -334,14 +411,17 @@ func TestDoD_DeferredRedactionThroughCompile(t *testing.T) {
 
 func TestDoD_ResolveVarNotPersisted(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "ov")
-	require.NoError(t, store.UpdateSegment(ctx, "ov", s0.Version(), contexty.SegmentSystem, []contexty.Message{
-		contexty.TextMessage(contexty.RoleSystem, "sys"),
-	}))
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "ov")
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "ov", s0.Version(), contexty.SegmentSystem, []contexty.Message{
+			contexty.TextMessage(contexty.RoleSystem, "sys"),
+		}),
+	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("ov"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 	)
 	_, err := engine.Compile(ctx, contexty.CompileRequest{
 		Options: []contexty.CompileOption{
@@ -349,17 +429,17 @@ func TestDoD_ResolveVarNotPersisted(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	snap, _ := store.Load(ctx, "ov")
+	snap, _ := loadState(ctx, store, "ov")
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 	assert.Len(t, snap.Segment(contexty.SegmentSystem), 1)
 }
 
 func TestDoD_ResolveVarInDeferredResolve(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
+	store := contexty.NewMemoryConversationStateStore()
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("ov"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "locale",
 			Segment: contexty.SegmentMemory,
@@ -396,14 +476,17 @@ func TestDoD_EstimatorErrorPropagation(t *testing.T) {
 
 func TestDoD_CompileDeterminism(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "det")
-	require.NoError(t, store.UpdateSegment(ctx, "det", s0.Version(), contexty.SegmentHistory, []contexty.Message{
-		contexty.TextMessage(contexty.RoleUser, "stable"),
-	}))
+	store := contexty.NewMemoryConversationStateStore()
+	s0, _ := loadState(ctx, store, "det")
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "det", s0.Version(), contexty.SegmentHistory, []contexty.Message{
+			contexty.TextMessage(contexty.RoleUser, "stable"),
+		}),
+	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("det"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 	)
 	req := contexty.CompileRequest{
 		History: []contexty.Message{{
@@ -425,8 +508,8 @@ func TestDoD_CompileDeterminism(t *testing.T) {
 func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "evict-obs")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "evict-obs")
 	require.NoError(t, err)
 	msgs := []contexty.Message{
 		{
@@ -440,7 +523,10 @@ func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 			Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
 		},
 	}
-	require.NoError(t, store.UpdateSegment(ctx, "evict-obs", s0.Version(), contexty.SegmentHistory, msgs))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "evict-obs", s0.Version(), contexty.SegmentHistory, msgs),
+	)
 
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
@@ -449,7 +535,7 @@ func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("evict-obs"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	_, err = engine.Compile(ctx, contexty.CompileRequest{})
@@ -465,14 +551,17 @@ func TestDoD_ObserverEvictionTelemetry(t *testing.T) {
 func TestDoD_ObserverCompileTelemetry(t *testing.T) {
 	ctx := context.WithValue(context.Background(), traceContextKey{}, "dod-trace")
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "compile-obs")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "compile-obs")
 	require.NoError(t, err)
 	history := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")}
-	require.NoError(t, store.UpdateSegment(ctx, "compile-obs", s0.Version(), contexty.SegmentHistory, history))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "compile-obs", s0.Version(), contexty.SegmentHistory, history),
+	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("compile-obs"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithObserver(rec),
 	)
 	_, err = engine.Compile(ctx, contexty.CompileRequest{})
@@ -485,11 +574,14 @@ func TestDoD_ObserverCompileTelemetry(t *testing.T) {
 func TestDoD_ObserverDoesNotBreakCompile(t *testing.T) {
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "obs-passive")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "obs-passive")
 	require.NoError(t, err)
 	history := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "stable")}
-	require.NoError(t, store.UpdateSegment(ctx, "obs-passive", s0.Version(), contexty.SegmentHistory, history))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "obs-passive", s0.Version(), contexty.SegmentHistory, history),
+	)
 	est := &callCountEstimator{}
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 1000},
@@ -498,7 +590,7 @@ func TestDoD_ObserverDoesNotBreakCompile(t *testing.T) {
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("obs-passive"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)

@@ -113,14 +113,7 @@ func dropTailAtomicUnit(msgs []Message) []Message {
 	if msgs[last].Role != RoleTool {
 		return msgs[:last]
 	}
-	start := last
-	for start > 0 && msgs[start-1].Role == RoleTool {
-		start--
-	}
-	if start > 0 && msgs[start-1].Role == RoleAssistant && msgs[start-1].HasToolCalls() {
-		return msgs[:start-1]
-	}
-	return msgs[:last]
+	return msgs[:toolRoundStartForTail(msgs)]
 }
 
 // dropHeadStrategy removes older messages from the front until the block fits.
@@ -287,46 +280,8 @@ func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState, protecte
 }
 
 // toolTurnEndIndex returns the last index (inclusive) of the atomic tool-turn block.
-//
-//nolint:gocognit // matches tool call IDs to contiguous tool result messages.
 func (s *dropHeadStrategy) toolTurnEndIndex(cur []Message, startIdx int, deleted []bool) int {
-	msg := cur[startIdx]
-	calls := msg.ToolCallParts()
-	expectedIDs := make(map[string]bool)
-	for _, tc := range calls {
-		if tc.ID != "" {
-			expectedIDs[tc.ID] = true
-		}
-	}
-	expectedCount := len(calls)
-	endIdx := startIdx
-	for j := startIdx + 1; j < len(cur); j++ {
-		if deleted != nil && deleted[j] {
-			continue
-		}
-		if cur[j].Role != RoleTool {
-			break
-		}
-		matched := false
-		for _, tr := range cur[j].ToolResultParts() {
-			if tr.ToolCallID != "" {
-				if !expectedIDs[tr.ToolCallID] {
-					break
-				}
-				delete(expectedIDs, tr.ToolCallID)
-				matched = true
-			}
-		}
-		if !matched && len(cur[j].ToolResultParts()) > 0 {
-			break
-		}
-		endIdx = j
-		expectedCount--
-		if expectedCount <= 0 && len(expectedIDs) == 0 {
-			break
-		}
-	}
-	return endIdx
+	return activeToolRoundEndIndex(cur, startIdx, deleted)
 }
 
 // Compile-time checks.

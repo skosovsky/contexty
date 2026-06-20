@@ -55,18 +55,18 @@ func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
 	}
 }
 
-func TestArchitecture_NoGenerationMetadataInAttributes(t *testing.T) {
+func TestArchitecture_NoContractMetadataInAttributes(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	violations, err := findGenerationMetadataInAttributesViolations(root)
+	violations, err := findAttributesEscapeHatchViolations(root)
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
 	if len(violations) > 0 {
 		t.Fatalf(
-			"generation metadata must use Message.Origin/LLMCache, not Attributes:\n%s",
+			"contract metadata must use first-class fields, SourceRefs, or Extensions, not Attributes:\n%s",
 			strings.Join(violations, "\n"),
 		)
 	}
@@ -98,6 +98,221 @@ func TestArchitecture_NoRemovedOverlayAPIInCore(t *testing.T) {
 	if len(violations) > 0 {
 		t.Fatalf("removed Overlay API must not reappear in core:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+func TestArchitecture_FormattersUseExplicitContext(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	violations, err := findFormatterContextViolations(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf(
+			"formatters must receive request context explicitly without package-level context globals:\n%s",
+			strings.Join(violations, "\n"),
+		)
+	}
+}
+
+func findFormatterContextViolations(root string) ([]string, error) {
+	var violations []string
+	fset := token.NewFileSet()
+	formattersFile, err := parser.ParseFile(
+		fset,
+		filepath.Join(root, "formatters.go"),
+		nil,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !hasSegmentFormatterSignature(formattersFile) {
+		violations = append(violations, "formatters.go: SegmentFormatter must accept context and return error")
+	}
+	viewFile, err := parser.ParseFile(
+		fset,
+		filepath.Join(root, "view_registry.go"),
+		nil,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !viewConfigurationUsesSegmentFormatter(viewFile) {
+		violations = append(violations, "view_registry.go: ViewConfiguration must reuse SegmentFormatter")
+	}
+	globalViolations, err := findPackageContextGlobalViolations(root)
+	if err != nil {
+		return nil, err
+	}
+	violations = append(violations, globalViolations...)
+	return violations, nil
+}
+
+func hasSegmentFormatterSignature(file *ast.File) bool {
+	typeSpec := findTypeSpec(file, "SegmentFormatter")
+	if typeSpec == nil {
+		return false
+	}
+	fn, ok := typeSpec.Type.(*ast.FuncType)
+	if !ok || fn.Params == nil || fn.Results == nil {
+		return false
+	}
+	return fn.Params.NumFields() == 2 &&
+		fn.Results.NumFields() == 2 &&
+		exprContainsContextContext(fn.Params.List[0].Type) &&
+		exprIsMessageSlice(fn.Params.List[1].Type) &&
+		exprIsMessageSlice(fn.Results.List[0].Type) &&
+		exprIsIdent(fn.Results.List[1].Type, "error")
+}
+
+func viewConfigurationUsesSegmentFormatter(file *ast.File) bool {
+	typeSpec := findTypeSpec(file, "ViewConfiguration")
+	if typeSpec == nil {
+		return false
+	}
+	st, ok := typeSpec.Type.(*ast.StructType)
+	if !ok {
+		return false
+	}
+	field := findStructField(st, "Formatter")
+	return field != nil && exprIsIdent(field.Type, "SegmentFormatter")
+}
+
+func findTypeSpec(file *ast.File, name string) *ast.TypeSpec {
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.TYPE {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != name {
+				continue
+			}
+			return typeSpec
+		}
+	}
+	return nil
+}
+
+func findStructField(st *ast.StructType, name string) *ast.Field {
+	for _, field := range st.Fields.List {
+		for _, fieldName := range field.Names {
+			if fieldName.Name == name {
+				return field
+			}
+		}
+	}
+	return nil
+}
+
+func exprIsMessageSlice(expr ast.Expr) bool {
+	arr, ok := expr.(*ast.ArrayType)
+	return ok && exprIsIdent(arr.Elt, "Message")
+}
+
+func exprIsIdent(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+func findPackageContextGlobalViolations(root string) ([]string, error) {
+	fset := token.NewFileSet()
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if shouldSkipArchitectureDir(filepath.Base(path)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isArchitectureSourceFile(path) {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		if parseErr != nil {
+			return parseErr
+		}
+		violations = append(violations, collectPackageContextGlobals(fset, file)...)
+		return nil
+	})
+	return violations, err
+}
+
+func collectPackageContextGlobals(fset *token.FileSet, file *ast.File) []string {
+	var violations []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			values, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			if exprContainsContextContext(values.Type) {
+				pos := fset.Position(values.Pos())
+				violations = append(violations, pos.String()+": package-level context.Context variable")
+				continue
+			}
+			for _, value := range values.Values {
+				if exprContainsContextConstructor(value) {
+					pos := fset.Position(value.Pos())
+					violations = append(violations, pos.String()+": package-level context constructor")
+				}
+			}
+		}
+	}
+	return violations
+}
+
+func exprContainsContextContext(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if ok && pkg.Name == "context" && sel.Sel.Name == "Context" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func exprContainsContextConstructor(expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if ok && pkg.Name == "context" && (sel.Sel.Name == "Background" || sel.Sel.Name == "TODO") {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
 
 func findOverlayAPIViolations(root string) ([]string, error) {
@@ -175,11 +390,41 @@ func isArchitectureSourceFile(path string) bool {
 func isArchitectureAllowlisted(path string) bool {
 	switch filepath.Base(path) {
 	case "transform.go", "views.go", "model.go", "provenance.go", "serializer.go",
-		"content_part.go", "message_origin.go", "attributes.go":
+		"content_part.go", "message_origin.go":
 		return true
 	default:
 		return false
 	}
+}
+
+func findAttributesEscapeHatchViolations(root string) ([]string, error) {
+	var violations []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			if shouldSkipArchitectureDir(filepath.Base(path)) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !isArchitectureSourceFile(path) {
+			return nil
+		}
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		content := string(data)
+		for _, needle := range []string{"type Attributes", "Attributes map", ".Attributes", " Attributes `"} {
+			if strings.Contains(content, needle) {
+				violations = append(violations, path+": contains "+needle)
+			}
+		}
+		return nil
+	})
+	return violations, err
 }
 
 func findJSONMetadataInTextViolations(root string) ([]string, error) {
@@ -251,94 +496,6 @@ func exprReferencesTextContent(expr ast.Expr) bool {
 		return true
 	})
 	return found
-}
-
-func forbiddenGenerationAttributeKeys() []string {
-	return []string{
-		"template_id",
-		"layer_id",
-		"manifest_id",
-		"llm_cache",
-		"prompt_origin",
-		"prompty",
-	}
-}
-
-func findGenerationMetadataInAttributesViolations(root string) ([]string, error) {
-	fset := token.NewFileSet()
-	var violations []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			if shouldSkipArchitectureDir(filepath.Base(path)) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !isArchitectureSourceFile(path) || isArchitectureAllowlisted(path) {
-			return nil
-		}
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
-		if parseErr != nil {
-			return parseErr
-		}
-		violations = append(violations, collectGenerationMetadataInAttributes(fset, file)...)
-		return nil
-	})
-	return violations, err
-}
-
-func collectGenerationMetadataInAttributes(fset *token.FileSet, file *ast.File) []string {
-	var violations []string
-	ast.Inspect(file, func(n ast.Node) bool {
-		lit, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		if !isAttributesCompositeLit(lit) {
-			return true
-		}
-		for _, elt := range lit.Elts {
-			kv, ok := elt.(*ast.KeyValueExpr)
-			if !ok {
-				continue
-			}
-			keyLit, ok := kv.Key.(*ast.BasicLit)
-			if !ok || keyLit.Kind != token.STRING {
-				continue
-			}
-			key := strings.Trim(keyLit.Value, `"`)
-			if isForbiddenGenerationAttributeKey(key) {
-				pos := fset.Position(keyLit.Pos())
-				violations = append(violations, pos.String()+": "+key)
-			}
-		}
-		return true
-	})
-	return violations
-}
-
-func isAttributesCompositeLit(lit *ast.CompositeLit) bool {
-	switch t := lit.Type.(type) {
-	case *ast.Ident:
-		return t.Name == "Attributes"
-	case *ast.SelectorExpr:
-		sel, ok := t.X.(*ast.Ident)
-		return ok && sel.Name == "contexty" && t.Sel.Name == "Attributes"
-	default:
-		return false
-	}
-}
-
-func isForbiddenGenerationAttributeKey(key string) bool {
-	for _, banned := range forbiddenGenerationAttributeKeys() {
-		if key == banned || strings.HasPrefix(key, banned+".") {
-			return true
-		}
-	}
-	return false
 }
 
 func collectStringHeuristicCalls(fset *token.FileSet, file *ast.File) []string {

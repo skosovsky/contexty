@@ -64,12 +64,18 @@ func TestObserver_ToolTurnAtomicEviction(t *testing.T) {
 			Role: contexty.RoleAssistant,
 			Parts: []contexty.ContentPart{
 				contexty.TextPart{Text: "call"},
-				contexty.ToolCallPart{ID: "call_a", Name: "f", Arguments: "{}"},
+				contexty.ToolCallPart{
+					ID:        "call_a",
+					Name:      "f",
+					Arguments: contexty.JSONPayload("{}"),
+				},
 			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "call_a", Content: "r1"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "call_a", Payload: contexty.TextPayload("r1")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -93,9 +99,11 @@ func TestObserver_BudgetPipelineSummarizeAndTokens(t *testing.T) {
 	msgs := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "long message")}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		TokenLimit: 10,
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-			return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
-		}),
+		Summarizer: stubSummarizer(
+			func(context.Context, []contexty.Message) (contexty.Message, error) {
+				return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
+			},
+		),
 	}, contexty.CharTokenEstimator{})
 	out, err := pipe.Apply(ctx, msgs)
 	require.NoError(t, err)
@@ -124,15 +132,15 @@ func TestObserver_ContextPropagation(t *testing.T) {
 func TestObserver_CompilePipelineEvent(t *testing.T) {
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "obs")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "obs")
 	require.NoError(t, err)
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "a"),
 		contexty.TextMessage(contexty.RoleUser, "b"),
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
-	require.NoError(t, store.UpdateSegment(ctx, "obs", s0.Version(), contexty.SegmentHistory, msgs))
+	require.NoError(t, updateSegment(ctx, store, "obs", s0.Version(), contexty.SegmentHistory, msgs))
 
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
@@ -141,7 +149,7 @@ func TestObserver_CompilePipelineEvent(t *testing.T) {
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("obs"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
@@ -170,12 +178,16 @@ func TestObserver_OrphanRepairEmitsEvictions(t *testing.T) {
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "old"),
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: "{}"}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "a", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "a", Payload: contexty.TextPayload("r")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -214,12 +226,22 @@ func TestObserver_DirectBudgetPipelineApply(t *testing.T) {
 func TestObserver_CompilePassiveOnTelemetryEstimateFailure(t *testing.T) {
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "passive")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "passive")
 	require.NoError(t, err)
-	require.NoError(t, store.UpdateSegment(ctx, "passive", s0.Version(), contexty.SegmentHistory, []contexty.Message{
-		contexty.TextMessage(contexty.RoleUser, "hello"),
-	}))
+	require.NoError(
+		t,
+		updateSegment(
+			ctx,
+			store,
+			"passive",
+			s0.Version(),
+			contexty.SegmentHistory,
+			[]contexty.Message{
+				contexty.TextMessage(contexty.RoleUser, "hello"),
+			},
+		),
+	)
 	est := &callCountEstimator{}
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 1000},
@@ -228,7 +250,7 @@ func TestObserver_CompilePassiveOnTelemetryEstimateFailure(t *testing.T) {
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("passive"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
@@ -242,15 +264,18 @@ func TestObserver_CompileAndBudgetObserverPriority(t *testing.T) {
 	ctx := context.Background()
 	engineRec := &contexty.RecordingObserver{}
 	budgetRec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "priority")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "priority")
 	require.NoError(t, err)
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "a"),
 		contexty.TextMessage(contexty.RoleUser, "b"),
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
-	require.NoError(t, store.UpdateSegment(ctx, "priority", s0.Version(), contexty.SegmentHistory, msgs))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "priority", s0.Version(), contexty.SegmentHistory, msgs),
+	)
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
@@ -258,7 +283,7 @@ func TestObserver_CompileAndBudgetObserverPriority(t *testing.T) {
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("priority"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(engineRec),
 	)
@@ -275,22 +300,25 @@ func TestObserver_CompileAndBudgetObserverPriority(t *testing.T) {
 func TestObserver_EngineOnlyObserverGetsCompileEventOnly(t *testing.T) {
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
-	store := contexty.NewMemoryConversationStore()
-	s0, err := store.Load(ctx, "engine-only")
+	store := contexty.NewMemoryConversationStateStore()
+	s0, err := loadState(ctx, store, "engine-only")
 	require.NoError(t, err)
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "a"),
 		contexty.TextMessage(contexty.RoleUser, "b"),
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
-	require.NoError(t, store.UpdateSegment(ctx, "engine-only", s0.Version(), contexty.SegmentHistory, msgs))
+	require.NoError(
+		t,
+		updateSegment(ctx, store, "engine-only", s0.Version(), contexty.SegmentHistory, msgs),
+	)
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("engine-only"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)

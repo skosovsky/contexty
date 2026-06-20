@@ -51,9 +51,9 @@ func messageRuneWeight(m Message) int {
 		case ImagePart:
 			n += len(v.URL)
 		case ToolCallPart:
-			n += len(v.Name) + len(v.Arguments) + len(v.ID)
+			n += len(v.Name) + len(v.Arguments.PlainText()) + len(v.ID)
 		case ToolResultPart:
-			n += len(v.Content) + len(v.ToolCallID)
+			n += len(v.Payload.PlainText()) + len(v.ToolCallID)
 		}
 	}
 	return n

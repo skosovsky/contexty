@@ -112,58 +112,88 @@ func emitContextSummarized(ctx context.Context, beforeTokens, afterTokens int) {
 }
 
 // enforceToolPairAtomicity drops orphan tool results or assistant calls without results.
-//
-//nolint:gocognit // scans assistant/tool runs for paired tool call IDs.
 func enforceToolPairAtomicity(msgs []Message) []Message {
 	if len(msgs) == 0 {
 		return msgs
 	}
-	out := make([]Message, len(msgs))
-	copy(out, msgs)
-	out = stripOrphanToolMessages(out)
-	for i := 0; i < len(out); i++ {
-		if out[i].Role != RoleAssistant || !out[i].HasToolCalls() {
-			continue
-		}
-		calls := out[i].ToolCallParts()
-		expected := make(map[string]bool, len(calls))
-		for _, c := range calls {
-			if c.ID != "" {
-				expected[c.ID] = true
+	out := make([]Message, 0, len(msgs))
+	for i := 0; i < len(msgs); {
+		switch {
+		case msgs[i].Role == RoleTool:
+			i++
+		case msgs[i].Role == RoleAssistant && msgs[i].HasToolCalls():
+			round, err := ToolRoundFromMessages(msgs, i)
+			end := contiguousToolBlockEnd(msgs, i)
+			if err == nil {
+				out = append(out, round.Assistant)
+				out = append(out, round.Results...)
 			}
-		}
-		end := i
-		for j := i + 1; j < len(out); j++ {
-			if out[j].Role != RoleTool {
-				break
-			}
-			for _, tr := range out[j].ToolResultParts() {
-				delete(expected, tr.ToolCallID)
-			}
-			end = j
-		}
-		if len(expected) > 0 {
-			out = append(out[:i], out[end+1:]...)
-			i--
-		} else {
-			i = end
+			i = end + 1
+		default:
+			out = append(out, msgs[i].Clone())
+			i++
 		}
 	}
 	return out
 }
 
-func stripOrphanToolMessages(msgs []Message) []Message {
-	out := msgs
-	for i := 0; i < len(out); {
-		if out[i].Role != RoleTool {
-			i++
-			continue
+func contiguousToolBlockEnd(msgs []Message, assistantIdx int) int {
+	end := assistantIdx
+	for idx := assistantIdx + 1; idx < len(msgs); idx++ {
+		if msgs[idx].Role != RoleTool {
+			break
 		}
-		if i == 0 || out[i-1].Role != RoleAssistant || !out[i-1].HasToolCalls() {
-			out = append(out[:i], out[i+1:]...)
-			continue
-		}
-		i++
+		end = idx
 	}
-	return out
+	return end
+}
+
+func toolRoundEndIndex(msgs []Message, assistantIdx int) int {
+	round, err := ToolRoundFromMessages(msgs, assistantIdx)
+	if err != nil {
+		return assistantIdx
+	}
+	return assistantIdx + len(round.Results)
+}
+
+func activeToolRoundEndIndex(cur []Message, startIdx int, deleted []bool) int {
+	if startIdx < 0 || startIdx >= len(cur) {
+		return startIdx
+	}
+	visible := make([]Message, 0, len(cur)-startIdx)
+	indexes := make([]int, 0, len(cur)-startIdx)
+	for idx := startIdx; idx < len(cur); idx++ {
+		if deleted != nil && deleted[idx] {
+			continue
+		}
+		if idx != startIdx && cur[idx].Role != RoleTool {
+			break
+		}
+		visible = append(visible, cur[idx].Clone())
+		indexes = append(indexes, idx)
+	}
+	round, err := ToolRoundFromMessages(visible, 0)
+	if err != nil {
+		return startIdx
+	}
+	lastVisible := len(round.Results)
+	if lastVisible >= len(indexes) {
+		return startIdx
+	}
+	return indexes[lastVisible]
+}
+
+func toolRoundStartForTail(msgs []Message) int {
+	last := len(msgs) - 1
+	start := last
+	for start > 0 && msgs[start-1].Role == RoleTool {
+		start--
+	}
+	if start > 0 && msgs[start-1].Role == RoleAssistant && msgs[start-1].HasToolCalls() {
+		assistantIdx := start - 1
+		if toolRoundEndIndex(msgs, assistantIdx) == last {
+			return assistantIdx
+		}
+	}
+	return last
 }

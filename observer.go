@@ -114,9 +114,9 @@ func messageFingerprint(msg Message) string {
 	for _, p := range msg.Parts {
 		switch v := p.(type) {
 		case ToolCallPart:
-			_, _ = fmt.Fprintf(h, "|tc:%s:%s", v.ID, v.Name)
+			_, _ = fmt.Fprintf(h, "|tc:%s:%s:%s", v.ID, v.Name, v.Arguments.PlainText())
 		case ToolResultPart:
-			_, _ = fmt.Fprintf(h, "|tr:%s", v.ToolCallID)
+			_, _ = fmt.Fprintf(h, "|tr:%s:%s", v.ToolCallID, v.Payload.PlainText())
 		case TextPart:
 			_, _ = fmt.Fprintf(h, "|txt:%d", len(v.Text))
 		}

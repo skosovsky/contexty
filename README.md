@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/skosovsky/contexty)](https://goreportcard.com/report/github.com/skosovsky/contexty)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`contexty` is a **semantic context engine** for LLM applications: typed message AST, segment-based `ConversationStore`, named views (`RenderView`), unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `Introduced` + `DerivePersistenceProjection`).
+`contexty` is a **semantic context engine** for LLM applications: typed message AST, actor-aware provider-role projection, typed tool payloads, context artifacts, immutable conversation deltas, named views (`RenderView`), unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `Introduced` + `DerivePersistenceProjection`).
 
 ## Installation
 
@@ -18,19 +18,26 @@ Requires Go 1.26+.
 
 ```go
 ctx := context.Background()
-store := contexty.NewMemoryConversationStore()
+store := contexty.NewMemoryConversationStateStore()
 
-s0, _ := store.Load(ctx, "chat-1")
-_ = store.UpdateSegment(ctx, "chat-1", s0.Version(), contexty.SegmentSystem, []contexty.Message{
-    contexty.TextMessage(contexty.RoleSystem, "You are helpful."),
+_ = store.ApplyDelta(ctx, "chat-1", 0, contexty.ConversationDelta{
+    Operation: contexty.DeltaReplaceSegment,
+    Segment:   contexty.SegmentSystem,
+    Messages: []contexty.Message{
+        contexty.TextMessage(contexty.RoleSystem, "You are helpful."),
+    },
 })
-_ = store.AppendSegment(ctx, "chat-1", 1, contexty.SegmentHistory,
-    contexty.TextMessage(contexty.RoleUser, "Hello"),
-)
+_ = store.ApplyDelta(ctx, "chat-1", 1, contexty.ConversationDelta{
+    Operation: contexty.DeltaAppendMessages,
+    Segment:   contexty.SegmentHistory,
+    Messages: []contexty.Message{
+        contexty.TextMessage(contexty.RoleUser, "Hello"),
+    },
+})
 
 engine := contexty.NewEngine(
     contexty.WithConversationID("chat-1"),
-    contexty.WithStore(store),
+    contexty.WithStateStore(store),
     contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
         contexty.BudgetConfig{TokenLimit: 4000},
         contexty.CharTokenEstimator{},
@@ -44,7 +51,11 @@ result, err := engine.Compile(ctx, contexty.CompileRequest{
     },
 })
 toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
-_ = toSave
+_ = store.ApplyDelta(ctx, "chat-1", 2, contexty.ConversationDelta{
+    Operation: contexty.DeltaReplaceSegment,
+    Segment:   contexty.SegmentHistory,
+    Messages:  toSave,
+})
 ```
 
 ## Compile API
@@ -71,11 +82,11 @@ toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
 
 **Pipeline order:** freeze Source → deferred → ephemeral patches (pre-budget) → hooks → segment formatters → budget preflight → budget(history) → ephemeral patches (post-budget, history + Pending) → payload.
 
-See [ADR-002](docs/adr/002-clear-break-compile-contract.md) and [ADR-003](docs/adr/003-strict-contracts-task14.md).
+The current clear-break contract is summarized below; the task-level implementation spec is `.cursor/docs/task15.md`.
 
 ### Migrating from Task13
 
-1. `PromptOrigin` / `ManifestID` → `Origin` / `TemplateID`.
+1. Removed prompt-origin aliases now map to `Origin` / `TemplateID`.
 2. Replace `WithOverlay` with `CompileRequest.Options` (`WithResolveVar`, `WithEphemeralPatch`).
 3. Use `RenderView` + `WithNamedView` for classifier projections.
 4. Set `DeferredBlock.MergePolicy` for origin/layer collision handling.
@@ -84,7 +95,7 @@ See [ADR-002](docs/adr/002-clear-break-compile-contract.md) and [ADR-003](docs/a
 ### Migrating from Task12
 
 1. Use `CompileRequest` / `CompileResult` instead of snapshot-only compile and `AbstractPayload`.
-2. Set `Message.ID` at ingest; use `Attributes` for host metadata (not text patching).
+2. Set `Message.ID` as the semantic node ID; use `SourceRefs` for external identity and typed `Extensions` for host metadata.
 3. Put the current turn in `Pending`, not post-compile append.
 4. Pass `Tools` explicitly when needed.
 5. Inspect `result.Transformations[msgID]` instead of string diffs on payload.
@@ -109,7 +120,7 @@ Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves the same on `C
 Built-in views render all segments (system → history → tools → memory):
 
 ```go
-snap, _ := store.Load(ctx, "chat-1")
+snap, _ := store.LoadState(ctx, "chat-1")
 engine := contexty.NewEngine()
 xml, _ := engine.RenderView(ctx, snap, string(contexty.ViewLLMXML))
 flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier) // shortcut: NewEngine() + builtin RenderView only
@@ -131,9 +142,22 @@ out, _ := engine.RenderView(ctx, snap, "classifier")
 
 Built-in view names (`llm_xml`, `flat_classifier`) are resolved before the custom registry; `WithNamedView("llm_xml", …)` does not override the built-in formatter. Custom views join segment messages as plain text (not LLMXML).
 
-## Message origin and cache hints
+## Messages, Actors, and Source Refs
 
-Attach generation metadata as first-class fields (not `Attributes`):
+`Role` is only the provider-facing role (`system`, `user`, `assistant`, `tool`). Use `Actor` for participant identity and `SourceRefs` for host-owned IDs:
+
+```go
+msg := contexty.TextMessage(contexty.RoleUser, "I need help")
+msg.Actor = &contexty.Actor{Kind: "customer", ID: "actor-1", DisplayName: "Customer"}
+msg.SourceRefs = []contexty.SourceRef{{
+    Namespace:    "messages",
+    Kind:         "external",
+    ID:           "msg-1",
+    CheckpointID: "stable-1",
+}}
+```
+
+Attach generation metadata as first-class fields:
 
 ```go
 msg := contexty.TextMessage(contexty.RoleSystem, "persona rules")
@@ -141,13 +165,57 @@ msg.Origin = &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "perso
 msg.LLMCache = &contexty.CachePolicyRef{Type: "ephemeral"}
 ```
 
-Architecture tests forbid tunneling generation metadata into `Attributes`.
+Configure role projection when actor-aware messages must be rendered with provider roles:
+
+```go
+engine := contexty.NewEngine(
+    contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(func(msg contexty.Message) (contexty.Role, error) {
+        if msg.Actor != nil && msg.Actor.Kind == "system_alert" {
+            return contexty.RoleSystem, nil
+        }
+        return msg.Role, nil
+    })),
+)
+```
+
+Naked attributes are not part of the semantic contract.
+
+## Tool Payloads and Tool Rounds
+
+Tool calls and results carry typed payloads, not text prefixes:
+
+```go
+args, err := contexty.StructuredPayload(struct {
+    Query string `json:"query"`
+}{Query: "typed"})
+_ = err
+
+assistant := contexty.Message{
+    Role: contexty.RoleAssistant,
+    Parts: []contexty.ContentPart{contexty.ToolCallPart{
+        ID:        "call-1",
+        Name:      "lookup",
+        Arguments: args,
+    }},
+}
+tool := contexty.Message{
+    Role: contexty.RoleTool,
+    Parts: []contexty.ContentPart{contexty.ToolResultPart{
+        ToolCallID: "call-1",
+        Name:       "lookup",
+        Payload:    contexty.TextPayload("result"),
+    }},
+}
+round, err := contexty.ToolRoundFromMessages([]contexty.Message{assistant, tool}, 0)
+_ = round
+_ = err
+```
 
 ## Deferred blocks and merge policies
 
 ```go
 engine := contexty.NewEngine(
-    contexty.WithStore(store),
+    contexty.WithStateStore(store),
     contexty.WithConversationID("chat-1"),
     contexty.WithDeferredBlocks(contexty.DeferredBlock{
         Name:        "persona",
@@ -203,9 +271,9 @@ Register host-side projection before budgeting (e.g. wrap memory in XML):
 
 ```go
 engine := contexty.NewEngine(
-    contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
+    contexty.WithSegmentFormatter(contexty.SegmentMemory, func(ctx context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
         // return formatted messages; preserve IDs when updating content in place
-        return msgs
+        return msgs, ctx.Err()
     }),
 )
 ```
@@ -214,7 +282,7 @@ engine := contexty.NewEngine(
 
 ```go
 engine := contexty.NewEngine(
-    contexty.WithStore(store),
+    contexty.WithStateStore(store),
     contexty.WithConversationID("chat-1"),
     contexty.WithTransformHooks(contexty.NewRedactionHook()),
 )
@@ -242,7 +310,50 @@ Tool-call turns are truncated atomically by default (`KeepTurnAtomicity` default
 
 When using a custom `Summarizer`, return a summary with a **new** `Message.ID`. Reusing a truncated message ID prevents the summary from appearing in `DerivePersistenceProjection`.
 
-**Canonical tool-turn layout** for atomic truncation: `RoleAssistant` with `ToolCallPart`(s), then `RoleTool` message(s) with matching `ToolResultPart.ToolCallID`. Use `ToolTurnUsesCanonicalLayout` to validate. In-message call+result in a single `Message` is valid for JSON transport but is not the canonical multi-message turn block.
+**Canonical tool-turn layout** for atomic truncation: `RoleAssistant` with `ToolCallPart`(s), then `RoleTool` message(s) with matching `ToolResultPart.ToolCallID`. Use `ToolRoundFromMessages` / `ToolRound.Validate` for first-class validation. `ToolTurnUsesCanonicalLayout` remains a lightweight layout predicate.
+
+## Context Artifacts and Deltas
+
+Use artifacts for retrieval and memory lifecycle instead of host-side run metadata:
+
+```go
+owner := contexty.SourceRef{Namespace: "tenant", Kind: "workspace", ID: "workspace-1"}
+doc := contexty.NewRetrievalDocument(
+    "doc-1",
+    contexty.TextPayload("retrieved context"),
+).ContextArtifact.WithTurn("turn-1").WithOwner(owner)
+doc = doc.WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 2000})
+memory := contexty.NewMemoryBlock("memory-1", contexty.TextPayload("durable context")).ContextArtifact
+memory = memory.WithPersistence(contexty.ArtifactPersistenceStore)
+
+result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
+    TurnID:    "turn-1",
+    Artifacts: []contexty.ContextArtifact{doc, memory},
+    History:   historyMsgs,
+})
+_ = result
+_ = err
+```
+
+Turn-bound retrieval artifacts are visible only when `CompileRequest.TurnID` matches `BoundTurnID`. Ownership is `OwnerRef`, a typed `SourceRef` owned by the host application. Ephemeral artifacts and `ArtifactPersistenceSkip` are omitted from checkpoints; `ArtifactPersistenceStore` forces checkpoint persistence.
+
+Use deltas for immutable state transitions:
+
+```go
+state, err := contexty.ApplyDelta(contexty.EmptyState(), contexty.ConversationDelta{
+    Operation: contexty.DeltaAppendMessages,
+    Segment:   contexty.SegmentHistory,
+    Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")},
+})
+_ = state
+_ = err
+
+err = store.ApplyDelta(ctx, "chat-1", expectedVersion, contexty.ConversationDelta{
+    Operation: contexty.DeltaReplaceSegment,
+    Segment:   contexty.SegmentHistory,
+    Messages:  state.Segment(contexty.SegmentHistory),
+})
+```
 
 ## Observer (telemetry)
 
@@ -287,8 +398,12 @@ pipe := contexty.NewBudgetPipeline(cfg, estimator, contexty.WithBudgetObserver(m
 import postgresstore "github.com/skosovsky/contexty/adapters/store/postgres"
 
 store := postgresstore.New(pool)
-snap, err := store.Load(ctx, conversationID)
-err = store.AppendSegment(ctx, conversationID, snap.Version(), contexty.SegmentHistory, msg)
+state, err := store.LoadState(ctx, conversationID)
+err = store.ApplyDelta(ctx, conversationID, state.Version(), contexty.ConversationDelta{
+    Operation: contexty.DeltaAppendMessages,
+    Segment:   contexty.SegmentHistory,
+    Messages:  []contexty.Message{msg},
+})
 ```
 
 Schema (Postgres):
@@ -307,13 +422,13 @@ Postgres and Redis adapters share a minimum integration contract (testcontainers
 
 | Case                                        | Expected behavior                                                    |
 | ------------------------------------------- | -------------------------------------------------------------------- |
-| Empty `Load`                                | `Version()==0`, empty segments                                       |
-| Append / update / OCC                       | Monotonic version, stale write → `ErrConversationVersionConflict`    |
-| `Clear` missing thread, `expectedVersion=0` | No-op                                                                |
-| `Clear` stale version                       | `ErrConversationVersionConflict`                                     |
-| `Clear` existing thread                     | `Version()==0`, segments empty; other threads isolated               |
-| Semantic round-trip                         | `ToolCallPart`, `ToolResultPart`, `Annotations`, `UserProvenance`    |
-| Expanded round-trip                         | `ImagePart`, `SystemProvenance`, `Origin`, `LLMCache`, multi-segment |
+| Empty `LoadState`                           | `Version()==0`, empty segments                                       |
+| Delta append / replace / OCC                | Monotonic version, stale write → `ErrConversationVersionConflict`    |
+| `ClearState` missing thread, expected zero  | No-op                                                                |
+| `ClearState` stale version                  | `ErrConversationVersionConflict`                                     |
+| `ClearState` existing thread                | `Version()==0`, segments empty; other threads isolated               |
+| Semantic round-trip                         | `ToolCallPart`, `ToolResultPart`, `SourceRefs`, `UserProvenance`     |
+| Expanded round-trip                         | `ImagePart`, `SystemProvenance`, `Origin`, `LLMCache`, `SourceRefs`  |
 | Redis: version without payload              | `ErrUnavailable` (corrupt state)                                     |
 | Postgres: concurrent first insert           | One success, one `ErrConversationVersionConflict`                    |
 
@@ -324,7 +439,7 @@ go test -v ./adapters/store/postgres/...
 go test -v ./adapters/store/redis/...
 ```
 
-Adapters must use `contexty.ConversationCodec` / `MarshalMessageJSON` — no custom part parsing in storage layers.
+Adapters must use `contexty.ConversationCodec`, `contexty.JSONSerializer`, or registry-aware `contexty.MessageCodec` helpers — no custom part parsing in storage layers.
 
 ## Storage resilience
 
@@ -333,16 +448,19 @@ Adapters must use `contexty.ConversationCodec` / `MarshalMessageJSON` — no cus
 | `ErrConversationVersionConflict` | OCC mismatch — reload and merge                |
 | `ErrUnavailable`                 | Transient storage failure — retry with backoff |
 
-Wrap `ConversationStore` with retry logic on `ErrUnavailable`. Respect `context.Context` deadlines in storage calls.
+Wrap `ConversationStateStore` with retry logic on `ErrUnavailable`. Respect `context.Context` deadlines in storage calls.
 
-## Wire JSON contract (v1)
+## Wire JSON contract
 
 Messages and segments serialize as JSON with explicit discriminators:
 
 - Content parts: `kind` ∈ `text`, `image`, `tool_call`, `tool_result`
+- Tool payloads: `text`, `data`, explicit `binary_hex`, MIME type, error, progress, control
 - Provenance: `type_id` resolved via `ProvenanceRegistry` (unknown types error at decode)
+- Extensions: `type_id` resolved via `ExtensionRegistry` (unknown types error at decode)
 - Message origin: `origin` object with `template_id`, `layer_id` (optional)
 - LLM cache hint: `llm_cache` object (provider-specific fields)
+- Source refs: `source_refs` with namespace, kind, ID, checkpoint ID, URI
 
 ## Architecture guardrails
 
@@ -351,9 +469,10 @@ AST tests in `architecture_test.go` (run via `make test-dod`):
 - `TestArchitecture_NoStringHeuristicsForSemantics` — no string-prefix heuristics in semantic core
 - `TestArchitecture_NoForbiddenExternalImports` — stdlib + `github.com/skosovsky/contexty/*` only in core
 - `TestArchitecture_NoJSONMetadataInTextParts` — no JSON tunneling in `TextPart`
-- `TestArchitecture_NoGenerationMetadataInAttributes` — use `Origin` / `LLMCache`
+- `TestArchitecture_NoContractMetadataInAttributes` — no naked attributes escape hatch
 - `TestArchitecture_NoBase64InCore`
-- `TestArchitecture_NoRemovedOverlayAPIInCore` — Overlay / `PromptOrigin` / `ManifestID` must not reappear
+- `TestArchitecture_NoRemovedOverlayAPIInCore` — removed overlay and prompt-origin aliases must not reappear
+- `TestArchitecture_FormattersUseExplicitContext` — formatter context flows through explicit parameters, not globals
 
 ## Development
 
@@ -369,10 +488,8 @@ Hot-path benchmarks live in `bench_test.go`. Full acceptance gate: `make validat
 
 ## Policy
 
-Do **not** encode transport metadata in message text or use string heuristics (`strings.HasPrefix`, `strings.Contains`) on message history for business logic. Use typed `ContentPart`, `Annotations`, `Provenance`, and `ProvenanceRegistry`.
+Do **not** encode transport metadata in message text or use string heuristics (`strings.HasPrefix`, `strings.Contains`) on message history for business logic. Use typed `ContentPart`, `Actor`, `SourceRef`, `Extension`, `Provenance`, and registries.
 
-## ADRs
+## Architecture Notes
 
-- [ADR-001](docs/adr/001-semantic-context-engine.md) — semantic context engine foundations
-- [ADR-002](docs/adr/002-clear-break-compile-contract.md) — CompileRequest, Transformations, formatters
-- [ADR-003](docs/adr/003-strict-contracts-task14.md) — origin, views, merge, patches, persistence
+The shipped contract is documented in this README and the package docs. Task-level planning notes live under `.cursor/docs/`; do not treat older task docs as compatibility guarantees.

@@ -20,17 +20,29 @@ func TestDropHeadStrategy_ToolTurnAtomicity(t *testing.T) {
 			Role: contexty.RoleAssistant,
 			Parts: []contexty.ContentPart{
 				contexty.TextPart{Text: "call"},
-				contexty.ToolCallPart{ID: "call_a", Name: "f", Arguments: "{}"},
-				contexty.ToolCallPart{ID: "call_b", Name: "f", Arguments: "{}"},
+				contexty.ToolCallPart{
+					ID:        "call_a",
+					Name:      "f",
+					Arguments: contexty.JSONPayload("{}"),
+				},
+				contexty.ToolCallPart{
+					ID:        "call_b",
+					Name:      "f",
+					Arguments: contexty.JSONPayload("{}"),
+				},
 			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "call_a", Content: "r1"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "call_a", Payload: contexty.TextPayload("r1")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "call_b", Content: "r2"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "call_b", Payload: contexty.TextPayload("r2")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -53,12 +65,16 @@ func TestDropTailStrategy_ToolTurnAtomicity(t *testing.T) {
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "keep"),
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "c1", Name: "f", Arguments: "{}"}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "c1", Name: "f", Arguments: contexty.JSONPayload("{}")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "c1", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "c1", Payload: contexty.TextPayload("r")},
+			},
 		},
 	}
 	out, err := strategy.Apply(ctx, msgs, 30, 5, estimator)
@@ -73,9 +89,11 @@ func TestBudgetPipeline_Summarize(t *testing.T) {
 	msgs := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "long message")}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		TokenLimit: 10,
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-			return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
-		}),
+		Summarizer: stubSummarizer(
+			func(context.Context, []contexty.Message) (contexty.Message, error) {
+				return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
+			},
+		),
 	}, contexty.CharTokenEstimator{})
 	out, err := pipe.Apply(ctx, msgs)
 	require.NoError(t, err)
@@ -92,12 +110,16 @@ func TestDropHeadStrategy_AtomicityOptOut(t *testing.T) {
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "old"),
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: "{}"}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "a", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "a", Payload: contexty.TextPayload("r")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -122,12 +144,16 @@ func TestBudgetPipeline_RepairsStrategyOrphans(t *testing.T) {
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "old"),
 		{
-			Role:  contexty.RoleAssistant,
-			Parts: []contexty.ContentPart{contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: "{}"}},
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{ID: "a", Name: "fn", Arguments: contexty.JSONPayload("{}")},
+			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "a", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "a", Payload: contexty.TextPayload("r")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
@@ -181,12 +207,14 @@ func TestDropHeadStrategy_SelectivePathEmitsObserverEvictions(t *testing.T) {
 		{
 			Role: contexty.RoleAssistant,
 			Parts: []contexty.ContentPart{
-				contexty.ToolCallPart{ID: "c1", Name: "fn", Arguments: "{}"},
+				contexty.ToolCallPart{ID: "c1", Name: "fn", Arguments: contexty.JSONPayload("{}")},
 			},
 		},
 		{
-			Role:  contexty.RoleTool,
-			Parts: []contexty.ContentPart{contexty.ToolResultPart{ToolCallID: "c1", Content: "r"}},
+			Role: contexty.RoleTool,
+			Parts: []contexty.ContentPart{
+				contexty.ToolResultPart{ToolCallID: "c1", Payload: contexty.TextPayload("r")},
+			},
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}

@@ -20,10 +20,13 @@ func TestDoD_MergePolicyReplaceByOrigin(t *testing.T) {
 			MergePolicy: contexty.PolicyReplaceByOrigin,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:     "new-persona",
-					Role:   contexty.RoleSystem,
-					Parts:  []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
-					Origin: &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona-v2"},
+					ID:    "new-persona",
+					Role:  contexty.RoleSystem,
+					Parts: []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
+					Origin: &contexty.MessageOrigin{
+						TemplateID: "agents/sales",
+						LayerID:    "persona-v2",
+					},
 				}}, nil
 			},
 		}),
@@ -105,8 +108,16 @@ func TestDoD_EphemeralPatchLastUserMessage(t *testing.T) {
 	engine := contexty.NewEngine()
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "u1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "hello"}}},
-			{ID: "a1", Role: contexty.RoleAssistant, Parts: []contexty.ContentPart{contexty.TextPart{Text: "hi"}}},
+			{
+				ID:    "u1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "hello"}},
+			},
+			{
+				ID:    "a1",
+				Role:  contexty.RoleAssistant,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "hi"}},
+			},
 			{
 				ID:    "u2",
 				Role:  contexty.RoleUser,
@@ -244,14 +255,16 @@ func TestDoD_NamedViewFormatterInjected(t *testing.T) {
 	engine := contexty.NewEngine(
 		contexty.WithNamedView("wrapped", contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
-			Formatter: func(msgs []contexty.Message) []contexty.Message {
+			Formatter: func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
 				out := make([]contexty.Message, len(msgs))
 				for i, m := range msgs {
 					cloned := m.Clone()
-					cloned.Parts = []contexty.ContentPart{contexty.TextPart{Text: "WRAP:" + m.TextContent()}}
+					cloned.Parts = []contexty.ContentPart{
+						contexty.TextPart{Text: "WRAP:" + m.TextContent()},
+					}
 					out[i] = cloned
 				}
-				return out
+				return out, nil
 			},
 		}),
 	)
@@ -297,9 +310,21 @@ func TestDoD_PersistenceProjectionDropsTruncatedByDropHead(t *testing.T) {
 	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "old"}}},
-			{ID: "h2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}}},
-			{ID: "h3", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}}},
+			{
+				ID:    "h1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "old"}},
+			},
+			{
+				ID:    "h2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}},
+			},
+			{
+				ID:    "h3",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -356,13 +381,16 @@ func TestDoD_PersistenceProjection_ReplacedByFormatter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func([]contexty.Message) []contexty.Message {
-			return []contexty.Message{{
-				ID:    "mem-new",
-				Role:  contexty.RoleSystem,
-				Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
-			}}
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(context.Context, []contexty.Message) ([]contexty.Message, error) {
+				return []contexty.Message{{
+					ID:    "mem-new",
+					Role:  contexty.RoleSystem,
+					Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
+				}}, nil
+			},
+		),
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -384,13 +412,15 @@ func TestDoD_PersistenceProjection_IncludesSummary(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 25,
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    "summary-1",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(context.Context, []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    "summary-1",
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
+					}, nil
+				},
+			),
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
@@ -399,9 +429,21 @@ func TestDoD_PersistenceProjection_IncludesSummary(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
-			{ID: "h-c", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
+			{
+				ID:    "h-c",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -475,10 +517,13 @@ func TestDoD_MergePolicyReplaceByOrigin_PersistenceProjection(t *testing.T) {
 			MergePolicy: contexty.PolicyReplaceByOrigin,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:     "new-persona",
-					Role:   contexty.RoleSystem,
-					Parts:  []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
-					Origin: &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona-v2"},
+					ID:    "new-persona",
+					Role:  contexty.RoleSystem,
+					Parts: []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
+					Origin: &contexty.MessageOrigin{
+						TemplateID: "agents/sales",
+						LayerID:    "persona-v2",
+					},
 				}}, nil
 			},
 		}),
@@ -545,9 +590,11 @@ func TestDoD_PersistenceProjection_DeferredPlusHook(t *testing.T) {
 			Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:    "mem-deferred",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "contact me@example.com"}},
+					ID:   "mem-deferred",
+					Role: contexty.RoleSystem,
+					Parts: []contexty.ContentPart{
+						contexty.TextPart{Text: "contact me@example.com"},
+					},
 				}}, nil
 			},
 		}),
@@ -598,13 +645,15 @@ func TestDoD_PersistenceProjection_SummaryPlusEphemeralPatch(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 25,
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    "summary-1",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "secret@mail.com"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(context.Context, []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    "summary-1",
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "secret@mail.com"}},
+					}, nil
+				},
+			),
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
@@ -613,9 +662,21 @@ func TestDoD_PersistenceProjection_SummaryPlusEphemeralPatch(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
-			{ID: "h-c", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
+			{
+				ID:    "h-c",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}},
+			},
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithEphemeralPatch(contexty.MessageSelector{
@@ -638,13 +699,15 @@ func TestDoD_PersistenceProjectionDropsTruncated(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 25,
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    "summary-1",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(context.Context, []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    "summary-1",
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
+					}, nil
+				},
+			),
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
@@ -653,9 +716,21 @@ func TestDoD_PersistenceProjectionDropsTruncated(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
-			{ID: "h-c", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
+			{
+				ID:    "h-c",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -673,15 +748,20 @@ func TestDoD_PersistenceProjection_InPlaceFormatter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
-			out := make([]contexty.Message, len(msgs))
-			for i, m := range msgs {
-				cloned := m.Clone()
-				cloned.Parts = []contexty.ContentPart{contexty.TextPart{Text: "fmt:" + m.TextContent()}}
-				out[i] = cloned
-			}
-			return out
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
+				out := make([]contexty.Message, len(msgs))
+				for i, m := range msgs {
+					cloned := m.Clone()
+					cloned.Parts = []contexty.ContentPart{
+						contexty.TextPart{Text: "fmt:" + m.TextContent()},
+					}
+					out[i] = cloned
+				}
+				return out, nil
+			},
+		),
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -931,13 +1011,15 @@ func TestDoD_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 25,
-			Summarizer: stubSummarizer(func(_ context.Context, msgs []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    msgs[0].ID,
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "summary-reused-id"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(_ context.Context, msgs []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    msgs[0].ID,
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "summary-reused-id"}},
+					}, nil
+				},
+			),
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
@@ -946,9 +1028,21 @@ func TestDoD_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
-			{ID: "h-c", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
+			{
+				ID:    "h-c",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -965,13 +1059,15 @@ func TestDoD_PersistenceProjection_SummaryEvictedByTruncate(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 5,
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    "summary-1",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "still-too-large"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(context.Context, []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    "summary-1",
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "still-too-large"}},
+					}, nil
+				},
+			),
 			DropHead: contexty.DropHeadConfig{MinMessages: 0},
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
@@ -981,8 +1077,16 @@ func TestDoD_PersistenceProjection_SummaryEvictedByTruncate(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -998,15 +1102,20 @@ func TestDoD_PersistenceProjection_DeferredPlusInPlaceFormatter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
-			out := make([]contexty.Message, len(msgs))
-			for i, m := range msgs {
-				cloned := m.Clone()
-				cloned.Parts = []contexty.ContentPart{contexty.TextPart{Text: "fmt:" + m.TextContent()}}
-				out[i] = cloned
-			}
-			return out
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
+				out := make([]contexty.Message, len(msgs))
+				for i, m := range msgs {
+					cloned := m.Clone()
+					cloned.Parts = []contexty.ContentPart{
+						contexty.TextPart{Text: "fmt:" + m.TextContent()},
+					}
+					out[i] = cloned
+				}
+				return out, nil
+			},
+		),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "facts",
 			Segment: contexty.SegmentMemory,
@@ -1037,9 +1146,11 @@ func TestDoD_IntroducedBaseline_DeferredAndHook(t *testing.T) {
 			Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:    "mem-deferred",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "contact me@example.com"}},
+					ID:   "mem-deferred",
+					Role: contexty.RoleSystem,
+					Parts: []contexty.ContentPart{
+						contexty.TextPart{Text: "contact me@example.com"},
+					},
 				}}, nil
 			},
 		}),
@@ -1058,8 +1169,16 @@ func TestDoD_PersistenceProjection_PartialHookReplaceOrder(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-keep", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "keep"}}},
-			{ID: "h-drop", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "drop"}}},
+			{
+				ID:    "h-keep",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "keep"}},
+			},
+			{
+				ID:    "h-drop",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "drop"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -1113,9 +1232,21 @@ func TestDoD_EphemeralPatch_PositionAll(t *testing.T) {
 	engine := contexty.NewEngine()
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "u1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}}},
-			{ID: "a1", Role: contexty.RoleAssistant, Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}}},
-			{ID: "u2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "second"}}},
+			{
+				ID:    "u1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}},
+			},
+			{
+				ID:    "a1",
+				Role:  contexty.RoleAssistant,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}},
+			},
+			{
+				ID:    "u2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "second"}},
+			},
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithEphemeralPatch(contexty.MessageSelector{
@@ -1144,12 +1275,12 @@ func TestDoD_RenderView_BuiltinTakesPrecedenceOverRegistry(t *testing.T) {
 	engine := contexty.NewEngine(
 		contexty.WithNamedView(string(contexty.ViewLLMXML), contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
-			Formatter: func(msgs []contexty.Message) []contexty.Message {
+			Formatter: func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
 				out := make([]contexty.Message, len(msgs))
 				for i := range msgs {
 					out[i] = contexty.TextMessage(contexty.RoleUser, "OVERRIDDEN")
 				}
-				return out
+				return out, nil
 			},
 		}),
 	)
@@ -1175,8 +1306,16 @@ func TestDoD_PersistenceProjection_DropsBudgetEvicted(t *testing.T) {
 	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "one"}}},
-			{ID: "h2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "two"}}},
+			{
+				ID:    "h1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "one"}},
+			},
+			{
+				ID:    "h2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "two"}},
+			},
 		},
 	})
 	require.NoError(t, err)
@@ -1270,10 +1409,13 @@ func TestDoD_Recorder_StructuralFormattedNotOverwrittenByPassed(t *testing.T) {
 			MergePolicy: contexty.PolicyReplaceByOrigin,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:     "new-persona",
-					Role:   contexty.RoleSystem,
-					Parts:  []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
-					Origin: &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona-v2"},
+					ID:    "new-persona",
+					Role:  contexty.RoleSystem,
+					Parts: []contexty.ContentPart{contexty.TextPart{Text: "updated persona"}},
+					Origin: &contexty.MessageOrigin{
+						TemplateID: "agents/sales",
+						LayerID:    "persona-v2",
+					},
 				}}, nil
 			},
 		}),
@@ -1307,9 +1449,21 @@ func TestDoD_EphemeralPatch_PositionFirst(t *testing.T) {
 	engine := contexty.NewEngine()
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "u1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}}},
-			{ID: "a1", Role: contexty.RoleAssistant, Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}}},
-			{ID: "u2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "last"}}},
+			{
+				ID:    "u1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}},
+			},
+			{
+				ID:    "a1",
+				Role:  contexty.RoleAssistant,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "mid"}},
+			},
+			{
+				ID:    "u2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "last"}},
+			},
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithEphemeralPatch(contexty.MessageSelector{
@@ -1334,8 +1488,16 @@ func TestDoD_EphemeralPatch_ZeroPositionDefaultsToFirst(t *testing.T) {
 	engine := contexty.NewEngine()
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "u1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}}},
-			{ID: "u2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "second"}}},
+			{
+				ID:    "u1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "first"}},
+			},
+			{
+				ID:    "u2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "second"}},
+			},
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithEphemeralPatch(contexty.MessageSelector{
@@ -1423,9 +1585,11 @@ func TestDoD_Introduced_BaselineBeforeHooksAndPatches(t *testing.T) {
 			Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) ([]contexty.Message, error) {
 				return []contexty.Message{{
-					ID:    "mem-deferred",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "contact me@example.com"}},
+					ID:   "mem-deferred",
+					Role: contexty.RoleSystem,
+					Parts: []contexty.ContentPart{
+						contexty.TextPart{Text: "contact me@example.com"},
+					},
 				}}, nil
 			},
 		}),

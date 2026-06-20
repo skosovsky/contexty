@@ -33,44 +33,68 @@ type CompileResult struct {
 	Transformations map[string]TransformRecord
 	Source          CompileRequest     // immutable freeze after Normalize, before pipeline mutations
 	Introduced      map[string]Message // deep-cloned baseline for payload-born IDs (post-deferred, pre-hooks/patches)
+	Artifacts       []ContextArtifact
 }
 
 // CompileRequest is the single exhaustive compile input (including stateless CompileSnapshot).
 type CompileRequest struct {
-	System  []Message
-	History []Message
-	Memory  []Message
-	Tools   []Message
-	Pending []Message
-	Options []CompileOption
+	TurnID    string
+	System    []Message
+	History   []Message
+	Memory    []Message
+	Tools     []Message
+	Pending   []Message
+	Artifacts []ContextArtifact
+	Options   []CompileOption
 }
 
 // Normalize ensures every message has a non-empty ID.
 func (r CompileRequest) Normalize() CompileRequest {
 	return CompileRequest{
-		System:  EnsureMessageIDs(r.System),
-		History: EnsureMessageIDs(r.History),
-		Memory:  EnsureMessageIDs(r.Memory),
-		Tools:   EnsureMessageIDs(r.Tools),
-		Pending: EnsureMessageIDs(r.Pending),
-		Options: r.Options,
+		TurnID:    r.TurnID,
+		System:    EnsureMessageIDs(r.System),
+		History:   EnsureMessageIDs(r.History),
+		Memory:    EnsureMessageIDs(r.Memory),
+		Tools:     EnsureMessageIDs(r.Tools),
+		Pending:   EnsureMessageIDs(r.Pending),
+		Artifacts: cloneArtifacts(r.Artifacts),
+		Options:   r.Options,
 	}
 }
 
 // Freeze returns a deep copy of all messages for immutable CompileResult.Source.
 func (r CompileRequest) Freeze() CompileRequest {
 	return CompileRequest{ //nolint:exhaustruct // Options omitted from immutable source snapshot
-		System:  cloneMessageSlice(r.System),
-		History: cloneMessageSlice(r.History),
-		Memory:  cloneMessageSlice(r.Memory),
-		Tools:   cloneMessageSlice(r.Tools),
-		Pending: cloneMessageSlice(r.Pending),
+		TurnID:    r.TurnID,
+		System:    cloneMessageSlice(r.System),
+		History:   cloneMessageSlice(r.History),
+		Memory:    cloneMessageSlice(r.Memory),
+		Tools:     cloneMessageSlice(r.Tools),
+		Pending:   cloneMessageSlice(r.Pending),
+		Artifacts: cloneArtifacts(r.Artifacts),
 	}
 }
 
 // Validate checks compile input invariants after Normalize.
 func (r CompileRequest) Validate() error {
-	return validateUniqueMessageIDs(r.AllMessages())
+	if err := validateUniqueMessageIDs(r.AllMessages()); err != nil {
+		return err
+	}
+	return validateUniqueArtifactIDs(r.Artifacts)
+}
+
+func validateUniqueArtifactIDs(artifacts []ContextArtifact) error {
+	seen := make(map[string]struct{}, len(artifacts))
+	for _, artifact := range artifacts {
+		if artifact.ID == "" {
+			continue
+		}
+		if _, dup := seen[artifact.ID]; dup {
+			return ErrDuplicateMessageID
+		}
+		seen[artifact.ID] = struct{}{}
+	}
+	return nil
 }
 
 // validateUniqueMessageIDs returns ErrDuplicateMessageID when any non-empty ID repeats.
@@ -121,10 +145,11 @@ func (r CompileRequest) AllMessages() []Message {
 // RequestFromSnapshot builds a CompileRequest from snapshot segments (no Pending).
 func RequestFromSnapshot(snap ConversationSnapshot) CompileRequest {
 	return CompileRequest{ //nolint:exhaustruct // Pending is compile-time only
-		System:  snap.Segment(SegmentSystem),
-		History: snap.Segment(SegmentHistory),
-		Memory:  snap.Segment(SegmentMemory),
-		Tools:   snap.Segment(SegmentTools),
+		System:    snap.Segment(SegmentSystem),
+		History:   snap.Segment(SegmentHistory),
+		Memory:    snap.Segment(SegmentMemory),
+		Tools:     snap.Segment(SegmentTools),
+		Artifacts: snap.Artifacts(),
 	}
 }
 
@@ -142,6 +167,9 @@ func (r CompileRequest) ToSnapshot() ConversationSnapshot {
 	}
 	if len(r.Tools) > 0 {
 		snap = snap.WithSegment(SegmentTools, cloneMessageSlice(r.Tools))
+	}
+	if len(r.Artifacts) > 0 {
+		snap = snap.WithArtifacts(r.Artifacts)
 	}
 	return snap
 }

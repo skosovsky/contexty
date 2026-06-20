@@ -52,7 +52,7 @@ func TestStoreIntegration(t *testing.T) {
 
 	t.Run("empty load", func(t *testing.T) {
 		store := New(pool)
-		snap, err := store.Load(ctx, "empty")
+		snap, err := store.LoadState(ctx, "empty")
 		require.NoError(t, err)
 		assert.Empty(t, snap.Segment(contexty.SegmentHistory))
 		assert.Equal(t, int64(0), snap.Version())
@@ -61,18 +61,18 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("append segment and OCC", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-ordered"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "one"),
 			contexty.TextMessage(contexty.RoleAssistant, "two"),
 		))
-		s1, err := store.Load(ctx, conversationID)
+		s1, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s1.Version(),
 			contexty.TextMessage(contexty.RoleUser, "three")))
 
-		snap, err := store.Load(ctx, conversationID)
+		snap, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
 		msgs := snap.Segment(contexty.SegmentHistory)
 		require.Len(t, msgs, 3)
@@ -83,27 +83,63 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("update segment overwrite", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-save"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "old")))
-		s1, err := store.Load(ctx, conversationID)
+		s1, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
 		require.NoError(
 			t,
-			store.UpdateSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory, []contexty.Message{
+			updateSegment(ctx, store, conversationID, s1.Version(), contexty.SegmentHistory, []contexty.Message{
 				contexty.TextMessage(contexty.RoleAssistant, "new"),
 			}),
 		)
-		snap, err := store.Load(ctx, conversationID)
+		snap, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
 		assert.Equal(t, "new", snap.Segment(contexty.SegmentHistory)[0].TextContent())
 	})
 
+	t.Run("apply delta state and OCC", func(t *testing.T) {
+		store := New(pool)
+		conversationID := "thread-delta"
+		require.NoError(t, store.ApplyDelta(ctx, conversationID, 0, contexty.ConversationDelta{
+			Operation: contexty.DeltaReplaceSegment,
+			Segment:   contexty.SegmentHistory,
+			Messages: []contexty.Message{
+				contexty.TextMessage(contexty.RoleUser, "delta"),
+			},
+		}))
+		state, err := store.LoadState(ctx, conversationID)
+		require.NoError(t, err)
+		assert.Equal(t, int64(1), state.Version())
+		assert.Equal(t, "delta", state.Segment(contexty.SegmentHistory)[0].TextContent())
+
+		artifact := contexty.NewMemoryBlock(
+			"memory-1",
+			contexty.TextPayload("memory"),
+		).ContextArtifact
+		require.NoError(t, store.ApplyDelta(ctx, conversationID, state.Version(), contexty.ConversationDelta{
+			Operation: contexty.DeltaUpsertArtifact,
+			Artifact:  &artifact,
+		}))
+		state, err = store.LoadState(ctx, conversationID)
+		require.NoError(t, err)
+		require.Len(t, state.Artifacts(), 1)
+		assert.Equal(t, "memory-1", state.Artifacts()[0].ID)
+
+		err = store.ApplyDelta(ctx, conversationID, 1, contexty.ConversationDelta{
+			Operation: contexty.DeltaAppendMessages,
+			Segment:   contexty.SegmentHistory,
+			Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "stale")},
+		})
+		require.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
+	})
+
 	t.Run("clear no-op on missing thread", func(t *testing.T) {
 		store := New(pool)
-		require.NoError(t, store.Clear(ctx, "missing-thread", 0))
-		snap, err := store.Load(ctx, "missing-thread")
+		require.NoError(t, store.ClearState(ctx, "missing-thread", 0))
+		snap, err := store.LoadState(ctx, "missing-thread")
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), snap.Version())
 		assert.Empty(t, snap.Segment(contexty.SegmentHistory))
@@ -112,11 +148,11 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("clear stale version conflict", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-clear-stale"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "data")))
-		err = store.Clear(ctx, conversationID, 0)
+		err = store.ClearState(ctx, conversationID, 0)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
 	})
@@ -131,7 +167,7 @@ func TestStoreIntegration(t *testing.T) {
 		worker := func() {
 			barrier.Done()
 			<-release
-			errCh <- store.AppendSegment(ctx, conversationID, 0, contexty.SegmentHistory,
+			errCh <- appendHistory(ctx, store, conversationID, 0,
 				contexty.TextMessage(contexty.RoleUser, "race"))
 		}
 		go worker()
@@ -147,7 +183,7 @@ func TestStoreIntegration(t *testing.T) {
 		require.Len(t, errs, 1)
 		require.ErrorIs(t, errs[0], contexty.ErrConversationVersionConflict)
 
-		snap, err := store.Load(ctx, conversationID)
+		snap, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
 		assert.Equal(t, int64(1), snap.Version())
 		assert.Len(t, snap.Segment(contexty.SegmentHistory), 1)
@@ -155,25 +191,25 @@ func TestStoreIntegration(t *testing.T) {
 
 	t.Run("clear and isolation", func(t *testing.T) {
 		store := New(pool)
-		sa, err := store.Load(ctx, "thread-a")
+		sa, err := store.LoadState(ctx, "thread-a")
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, "thread-a", sa.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, "thread-a", sa.Version(),
 			contexty.TextMessage(contexty.RoleUser, "A")))
-		sb, err := store.Load(ctx, "thread-b")
+		sb, err := store.LoadState(ctx, "thread-b")
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, "thread-b", sb.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, "thread-b", sb.Version(),
 			contexty.TextMessage(contexty.RoleUser, "B")))
 
-		sa2, err := store.Load(ctx, "thread-a")
+		sa2, err := store.LoadState(ctx, "thread-a")
 		require.NoError(t, err)
-		require.NoError(t, store.Clear(ctx, "thread-a", sa2.Version()))
+		require.NoError(t, store.ClearState(ctx, "thread-a", sa2.Version()))
 
-		emptyA, err := store.Load(ctx, "thread-a")
+		emptyA, err := store.LoadState(ctx, "thread-a")
 		require.NoError(t, err)
 		assert.Equal(t, int64(0), emptyA.Version())
 		assert.Empty(t, emptyA.Segment(contexty.SegmentHistory))
 
-		msgsB, err := store.Load(ctx, "thread-b")
+		msgsB, err := store.LoadState(ctx, "thread-b")
 		require.NoError(t, err)
 		assert.Equal(t, "B", msgsB.Segment(contexty.SegmentHistory)[0].TextContent())
 	})
@@ -181,11 +217,11 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("stale version returns conflict", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-conflict"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "first")))
-		err = store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		err = appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "stale"))
 		require.Error(t, err)
 		assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
@@ -194,9 +230,9 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("semantic round trip", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-semantic"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.UpdateSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, updateSegment(ctx, store, conversationID, s0.Version(), contexty.SegmentHistory,
 			[]contexty.Message{semanticFixtureMessage()}))
 		assertSemanticRoundTrip(t, ctx, store, conversationID)
 	})
@@ -213,11 +249,11 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("custom table", func(t *testing.T) {
 		store := New(pool, WithTableName("custom_contexty_conversations"))
 		conversationID := "thread-custom"
-		s0, err := store.Load(ctx, conversationID)
+		s0, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
-		require.NoError(t, store.AppendSegment(ctx, conversationID, s0.Version(), contexty.SegmentHistory,
+		require.NoError(t, appendHistory(ctx, store, conversationID, s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "custom")))
-		snap, err := store.Load(ctx, conversationID)
+		snap, err := store.LoadState(ctx, conversationID)
 		require.NoError(t, err)
 		assert.Equal(t, "custom", snap.Segment(contexty.SegmentHistory)[0].TextContent())
 	})
@@ -236,18 +272,23 @@ func semanticFixtureMessage() contexty.Message {
 	return contexty.Message{
 		Role: contexty.RoleAssistant,
 		Parts: []contexty.ContentPart{
-			contexty.ToolCallPart{ID: "tc-1", Name: "search", Arguments: `{"q":"go"}`},
-			contexty.ToolResultPart{ToolCallID: "tc-1", Content: "result"},
+			contexty.ToolCallPart{ID: "tc-1", Name: "search", Arguments: contexty.JSONPayload(`{"q":"go"}`)},
+			contexty.ToolResultPart{ToolCallID: "tc-1", Payload: contexty.TextPayload("result")},
 		},
-		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "turn-1"},
-		Provenance:  contexty.UserProvenance{Channel: "api", UserID: "u1"},
+		Annotations: contexty.Annotations{Timestamp: &ts},
+		SourceRefs: []contexty.SourceRef{{
+			Namespace: "messages",
+			Kind:      "external",
+			ID:        "turn-1",
+		}},
+		Provenance: contexty.UserProvenance{Channel: "api", UserID: "u1"},
 	}
 }
 
 //nolint:revive // testing.T must precede context in test helpers
 func assertSemanticRoundTrip(t *testing.T, ctx context.Context, store *Store, conversationID string) {
 	t.Helper()
-	snap, err := store.Load(ctx, conversationID)
+	snap, err := store.LoadState(ctx, conversationID)
 	require.NoError(t, err)
 	msgs := snap.Segment(contexty.SegmentHistory)
 	require.Len(t, msgs, 1)
@@ -257,31 +298,32 @@ func assertSemanticRoundTrip(t *testing.T, ctx context.Context, store *Store, co
 	prov, ok := got.Provenance.(contexty.UserProvenance)
 	require.True(t, ok)
 	assert.Equal(t, "api", prov.Channel)
-	assert.Equal(t, "turn-1", got.Annotations.RefID)
+	require.Len(t, got.SourceRefs, 1)
+	assert.Equal(t, "turn-1", got.SourceRefs[0].ID)
 }
 
 func persistExpandedSemanticFixture(ctx context.Context, store *Store, conversationID string) error {
-	s0, err := store.Load(ctx, conversationID)
+	s0, err := store.LoadState(ctx, conversationID)
 	if err != nil {
 		return err
 	}
-	if err = store.UpdateSegment(ctx, conversationID, s0.Version(), contexty.SegmentSystem,
+	if err = updateSegment(ctx, store, conversationID, s0.Version(), contexty.SegmentSystem,
 		[]contexty.Message{expandedSystemMessage()}); err != nil {
 		return err
 	}
-	s1, err := store.Load(ctx, conversationID)
+	s1, err := store.LoadState(ctx, conversationID)
 	if err != nil {
 		return err
 	}
-	if err = store.UpdateSegment(ctx, conversationID, s1.Version(), contexty.SegmentHistory,
+	if err = updateSegment(ctx, store, conversationID, s1.Version(), contexty.SegmentHistory,
 		[]contexty.Message{expandedHistoryMessage()}); err != nil {
 		return err
 	}
-	s2, err := store.Load(ctx, conversationID)
+	s2, err := store.LoadState(ctx, conversationID)
 	if err != nil {
 		return err
 	}
-	return store.UpdateSegment(ctx, conversationID, s2.Version(), contexty.SegmentTools,
+	return updateSegment(ctx, store, conversationID, s2.Version(), contexty.SegmentTools,
 		[]contexty.Message{semanticFixtureMessage()})
 }
 
@@ -302,18 +344,23 @@ func expandedHistoryMessage() contexty.Message {
 			contexty.TextPart{Text: "see image"},
 			contexty.ImagePart{URL: "https://example.com/a.png", Detail: "low"},
 		},
-		Annotations: contexty.Annotations{Timestamp: &ts, RefID: "img-1"},
-		Attributes:  contexty.Attributes{"tier": "premium", "count": float64(2)},
-		Origin:      &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona"},
-		LLMCache:    &contexty.CachePolicyRef{Type: "ephemeral"},
-		Provenance:  contexty.UserProvenance{Channel: "web", UserID: "u2"},
+		Annotations: contexty.Annotations{Timestamp: &ts},
+		SourceRefs: []contexty.SourceRef{{
+			Namespace:    "tenant",
+			Kind:         "profile",
+			ID:           "premium",
+			CheckpointID: "2",
+		}},
+		Origin:     &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona"},
+		LLMCache:   &contexty.CachePolicyRef{Type: "ephemeral"},
+		Provenance: contexty.UserProvenance{Channel: "web", UserID: "u2"},
 	}
 }
 
 //nolint:revive // testing.T must precede context in test helpers
 func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *Store, conversationID string) {
 	t.Helper()
-	snap, err := store.Load(ctx, conversationID)
+	snap, err := store.LoadState(ctx, conversationID)
 	require.NoError(t, err)
 	sys := snap.Segment(contexty.SegmentSystem)
 	require.Len(t, sys, 1)
@@ -324,8 +371,11 @@ func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *S
 	history := snap.Segment(contexty.SegmentHistory)
 	require.Len(t, history, 1)
 	assert.Equal(t, "msg-expanded-hist", history[0].ID)
-	assert.Equal(t, "premium", history[0].Attributes["tier"])
-	assert.InEpsilon(t, float64(2), history[0].Attributes["count"], 0)
+	require.Len(t, history[0].SourceRefs, 1)
+	assert.Equal(t, "tenant", history[0].SourceRefs[0].Namespace)
+	assert.Equal(t, "profile", history[0].SourceRefs[0].Kind)
+	assert.Equal(t, "premium", history[0].SourceRefs[0].ID)
+	assert.Equal(t, "2", history[0].SourceRefs[0].CheckpointID)
 	require.NotNil(t, history[0].Origin)
 	assert.Equal(t, "agents/sales", history[0].Origin.TemplateID)
 	assert.Equal(t, "persona", history[0].Origin.LayerID)

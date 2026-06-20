@@ -7,7 +7,9 @@ import (
 	"strings"
 )
 
-// Role identifies the speaker of a message.
+const jsonNullLiteral = "null"
+
+// Role identifies the provider-facing role of a message.
 type Role string
 
 const (
@@ -21,9 +23,11 @@ const (
 type Message struct {
 	ID          string          `json:"id,omitempty"`
 	Role        Role            `json:"role"`
+	Actor       *Actor          `json:"actor,omitempty"`
 	Parts       []ContentPart   `json:"parts"`
 	Annotations Annotations     `json:"annotations"`
-	Attributes  Attributes      `json:"attributes,omitempty"`
+	SourceRefs  []SourceRef     `json:"source_refs,omitempty"`
+	Extensions  []Extension     `json:"-"`
 	Origin      *MessageOrigin  `json:"origin,omitempty"`
 	LLMCache    *CachePolicyRef `json:"llm_cache,omitempty"`
 	Provenance  Provenance      `json:"-"`
@@ -34,8 +38,10 @@ func (m Message) Clone() Message {
 	cloned := Message{
 		ID:          m.ID,
 		Role:        m.Role,
+		Actor:       m.Actor.Clone(),
 		Annotations: m.Annotations.Clone(),
-		Attributes:  m.Attributes.Clone(),
+		SourceRefs:  cloneSourceRefs(m.SourceRefs),
+		Extensions:  cloneExtensions(m.Extensions),
 		Origin:      m.Origin.Clone(),
 		LLMCache:    m.LLMCache.Clone(),
 	}
@@ -98,16 +104,38 @@ func (m Message) ToolResultParts() []ToolResultPart {
 type messageWire struct {
 	ID          string          `json:"id,omitempty"`
 	Role        Role            `json:"role"`
+	Actor       *Actor          `json:"actor,omitempty"`
 	Parts       json.RawMessage `json:"parts"`
 	Annotations Annotations     `json:"annotations"`
-	Attributes  Attributes      `json:"attributes,omitempty"`
+	SourceRefs  []SourceRef     `json:"source_refs,omitempty"`
+	Extensions  json.RawMessage `json:"extensions,omitempty"`
 	Origin      *MessageOrigin  `json:"origin,omitempty"`
 	LLMCache    *CachePolicyRef `json:"llm_cache,omitempty"`
 	Provenance  json.RawMessage `json:"provenance,omitempty"`
 }
 
+// MessageCodec carries registries required by message-level JSON helpers.
+// Host-owned typed extensions require an ExtensionRegistry with matching decoders.
+type MessageCodec struct {
+	Provenance *ProvenanceRegistry
+	Extensions *ExtensionRegistry
+}
+
+// DefaultMessageCodec returns the default message codec configuration.
+func DefaultMessageCodec() MessageCodec {
+	return MessageCodec{Provenance: DefaultProvenanceRegistry(), Extensions: NewExtensionRegistry()}
+}
+
 // MarshalMessageJSON serializes a message using the polymorphic codec.
-func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
+func MarshalMessageJSON(m Message, codec MessageCodec) ([]byte, error) {
+	return marshalMessageJSONWithRegistries(m, codec.Provenance, codec.Extensions)
+}
+
+func marshalMessageJSONWithRegistries(
+	m Message,
+	_ *ProvenanceRegistry,
+	_ *ExtensionRegistry,
+) ([]byte, error) {
 	partsJSON, err := MarshalParts(m.Parts)
 	if err != nil {
 		return nil, err
@@ -116,12 +144,18 @@ func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	extJSON, err := encodeExtensions(m.Extensions)
+	if err != nil {
+		return nil, err
+	}
 	wire := messageWire{
 		ID:          m.ID,
 		Role:        m.Role,
+		Actor:       m.Actor.Clone(),
 		Parts:       partsJSON,
 		Annotations: m.Annotations,
-		Attributes:  m.Attributes,
+		SourceRefs:  cloneSourceRefs(m.SourceRefs),
+		Extensions:  extJSON,
 		Origin:      m.Origin.Clone(),
 		LLMCache:    m.LLMCache.Clone(),
 		Provenance:  provJSON,
@@ -130,7 +164,15 @@ func MarshalMessageJSON(m Message, _ *ProvenanceRegistry) ([]byte, error) {
 }
 
 // UnmarshalMessageJSON deserializes a message using the polymorphic codec.
-func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error) {
+func UnmarshalMessageJSON(data []byte, codec MessageCodec) (Message, error) {
+	return unmarshalMessageJSONWithRegistries(data, codec.Provenance, codec.Extensions)
+}
+
+func unmarshalMessageJSONWithRegistries(
+	data []byte,
+	reg *ProvenanceRegistry,
+	extReg *ExtensionRegistry,
+) (Message, error) {
 	var wire messageWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return Message{}, fmt.Errorf("contexty: unmarshal message: %w", err)
@@ -140,7 +182,7 @@ func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error)
 		return Message{}, err
 	}
 	var prov Provenance
-	if len(wire.Provenance) > 0 && string(wire.Provenance) != "null" {
+	if len(wire.Provenance) > 0 && string(wire.Provenance) != jsonNullLiteral {
 		if reg == nil {
 			return Message{}, errors.New("contexty: unmarshal message: provenance present but registry is nil")
 		}
@@ -151,12 +193,18 @@ func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error)
 			return Message{}, err
 		}
 	}
+	extensions, err := decodeExtensions(wire.Extensions, extReg)
+	if err != nil {
+		return Message{}, err
+	}
 	return Message{
 		ID:          wire.ID,
 		Role:        wire.Role,
+		Actor:       wire.Actor.Clone(),
 		Parts:       parts,
 		Annotations: wire.Annotations,
-		Attributes:  wire.Attributes,
+		SourceRefs:  cloneSourceRefs(wire.SourceRefs),
+		Extensions:  extensions,
 		Origin:      wire.Origin.Clone(),
 		LLMCache:    wire.LLMCache.Clone(),
 		Provenance:  prov,
@@ -164,10 +212,18 @@ func UnmarshalMessageJSON(data []byte, reg *ProvenanceRegistry) (Message, error)
 }
 
 // MarshalMessages serializes a slice of messages.
-func MarshalMessages(msgs []Message, reg *ProvenanceRegistry) ([]byte, error) {
+func MarshalMessages(msgs []Message, codec MessageCodec) ([]byte, error) {
+	return marshalMessagesWithRegistries(msgs, codec.Provenance, codec.Extensions)
+}
+
+func marshalMessagesWithRegistries(
+	msgs []Message,
+	reg *ProvenanceRegistry,
+	extReg *ExtensionRegistry,
+) ([]byte, error) {
 	wires := make([]json.RawMessage, len(msgs))
 	for i, m := range msgs {
-		b, err := MarshalMessageJSON(m, reg)
+		b, err := marshalMessageJSONWithRegistries(m, reg, extReg)
 		if err != nil {
 			return nil, err
 		}
@@ -177,14 +233,25 @@ func MarshalMessages(msgs []Message, reg *ProvenanceRegistry) ([]byte, error) {
 }
 
 // UnmarshalMessages deserializes a slice of messages.
-func UnmarshalMessages(data []byte, reg *ProvenanceRegistry) ([]Message, error) {
+func UnmarshalMessages(data []byte, codec MessageCodec) ([]Message, error) {
+	return unmarshalMessagesWithRegistries(data, codec.Provenance, codec.Extensions)
+}
+
+func unmarshalMessagesWithRegistries(
+	data []byte,
+	reg *ProvenanceRegistry,
+	extReg *ExtensionRegistry,
+) ([]Message, error) {
+	if len(data) == 0 || string(data) == jsonNullLiteral {
+		return nil, nil
+	}
 	var wires []json.RawMessage
 	if err := json.Unmarshal(data, &wires); err != nil {
 		return nil, fmt.Errorf("contexty: unmarshal messages: %w", err)
 	}
 	out := make([]Message, len(wires))
 	for i, w := range wires {
-		m, err := UnmarshalMessageJSON(w, reg)
+		m, err := unmarshalMessageJSONWithRegistries(w, reg, extReg)
 		if err != nil {
 			return nil, fmt.Errorf("contexty: unmarshal messages index %d: %w", i, err)
 		}

@@ -2,6 +2,7 @@ package contexty_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,13 +38,36 @@ func TestDoD_CompileResultImmutableContract(t *testing.T) {
 	// Pending is merged into History; host must not patch Payload after compile.
 }
 
-func TestDoD_AttributesRoundTrip(t *testing.T) {
-	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+type testExtension struct {
+	Tenant string  `json:"tenant"`
+	Score  float64 `json:"score"`
+}
+
+func (e testExtension) ExtensionType() string { return "test_extension" }
+
+func (e testExtension) CloneExtension() contexty.Extension { return e }
+
+func newTestExtensionRegistry() *contexty.ExtensionRegistry {
+	reg := contexty.NewExtensionRegistry()
+	reg.Register("test_extension", func(data []byte) (contexty.Extension, error) {
+		var ext testExtension
+		err := json.Unmarshal(data, &ext)
+		return ext, err
+	})
+	return reg
+}
+
+func TestDoD_ExtensionsRoundTrip(t *testing.T) {
+	reg := newTestExtensionRegistry()
+	codec := contexty.ConversationCodec{
+		Provenance: contexty.DefaultProvenanceRegistry(),
+		Extensions: reg,
+	}
 	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{{
-		ID:         "attr-1",
+		ID:         "ext-1",
 		Role:       contexty.RoleUser,
 		Parts:      []contexty.ContentPart{contexty.TextPart{Text: "hi"}},
-		Attributes: contexty.Attributes{"tenant": "acme", "score": float64(3)},
+		Extensions: []contexty.Extension{testExtension{Tenant: "acme", Score: 3}},
 	}})
 	data, err := codec.Encode(snap)
 	require.NoError(t, err)
@@ -51,8 +75,10 @@ func TestDoD_AttributesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	msgs := decoded.Segment(contexty.SegmentHistory)
 	require.Len(t, msgs, 1)
-	assert.Equal(t, "acme", msgs[0].Attributes["tenant"])
-	assert.InEpsilon(t, float64(3), msgs[0].Attributes["score"], 0)
+	ext, ok := msgs[0].Extensions[0].(testExtension)
+	require.True(t, ok)
+	assert.Equal(t, "acme", ext.Tenant)
+	assert.InEpsilon(t, float64(3), ext.Score, 0)
 }
 
 func TestDoD_TransformationsByMessageID(t *testing.T) {
@@ -65,8 +91,16 @@ func TestDoD_TransformationsByMessageID(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	req := contexty.CompileRequest{History: []contexty.Message{
-		{ID: "drop", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "old"}}},
-		{ID: "keep", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}}},
+		{
+			ID:    "drop",
+			Role:  contexty.RoleUser,
+			Parts: []contexty.ContentPart{contexty.TextPart{Text: "old"}},
+		},
+		{
+			ID:    "keep",
+			Role:  contexty.RoleUser,
+			Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
+		},
 	}}
 	result, err := engine.CompileSnapshot(ctx, req)
 	require.NoError(t, err)
@@ -81,15 +115,20 @@ func TestDoD_TransformationsByMessageID(t *testing.T) {
 func TestDoD_SegmentFormatterInjectedByHost(t *testing.T) {
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
-			out := make([]contexty.Message, len(msgs))
-			for i, m := range msgs {
-				m = m.Clone()
-				m.Parts = []contexty.ContentPart{contexty.TextPart{Text: "<memory>" + m.TextContent() + "</memory>"}}
-				out[i] = m
-			}
-			return out
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
+				out := make([]contexty.Message, len(msgs))
+				for i, m := range msgs {
+					m = m.Clone()
+					m.Parts = []contexty.ContentPart{
+						contexty.TextPart{Text: "<memory>" + m.TextContent() + "</memory>"},
+					}
+					out[i] = m
+				}
+				return out, nil
+			},
+		),
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -160,7 +199,10 @@ func TestDoD_BudgetPreflightReservesPendingAndSystem(t *testing.T) {
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{TokenLimit: 40, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+				contexty.BudgetConfig{
+					TokenLimit: 40,
+					DropHead:   contexty.DropHeadConfig{MinMessages: 1},
+				},
 				&contexty.FixedEstimator{TokensPerMessage: 10},
 			),
 		),
@@ -199,26 +241,44 @@ func TestDoD_FormatterAffectsTokenBudget(t *testing.T) {
 	req := contexty.CompileRequest{
 		Memory: []contexty.Message{memMsg},
 		History: []contexty.Message{
-			{ID: "h1", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "1"}}},
-			{ID: "h2", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "2"}}},
-			{ID: "h3", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "3"}}},
+			{
+				ID:    "h1",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "1"}},
+			},
+			{
+				ID:    "h2",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "2"}},
+			},
+			{
+				ID:    "h3",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "3"}},
+			},
 		},
 	}
 	without, err := contexty.NewEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(basePipe, est)),
+		contexty.WithBudgetPipeline(
+			contexty.SegmentHistory,
+			contexty.NewBudgetPipeline(basePipe, est),
+		),
 	).CompileSnapshot(ctx, req)
 	require.NoError(t, err)
 
-	expandFormatter := func(msgs []contexty.Message) []contexty.Message {
+	expandFormatter := func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
 		extra := contexty.Message{
 			ID:    "mem-extra",
 			Role:  contexty.RoleSystem,
 			Parts: []contexty.ContentPart{contexty.TextPart{Text: "extra reserved tokens"}},
 		}
-		return append(cloneMsgs(msgs), extra)
+		return append(cloneMsgs(msgs), extra), nil
 	}
 	with, err := contexty.NewEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(basePipe, est)),
+		contexty.WithBudgetPipeline(
+			contexty.SegmentHistory,
+			contexty.NewBudgetPipeline(basePipe, est),
+		),
 		contexty.WithSegmentFormatter(contexty.SegmentMemory, expandFormatter),
 	).CompileSnapshot(ctx, req)
 	require.NoError(t, err)
@@ -228,11 +288,14 @@ func TestDoD_FormatterAffectsTokenBudget(t *testing.T) {
 func TestDoD_FormatterSameIDRecordsFormatted(t *testing.T) {
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func(msgs []contexty.Message) []contexty.Message {
-			m := msgs[0].Clone()
-			m.Parts = []contexty.ContentPart{contexty.TextPart{Text: "rewritten"}}
-			return []contexty.Message{m}
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
+				m := msgs[0].Clone()
+				m.Parts = []contexty.ContentPart{contexty.TextPart{Text: "rewritten"}}
+				return []contexty.Message{m}, nil
+			},
+		),
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -250,10 +313,10 @@ func TestDoD_FormatterSameIDRecordsFormatted(t *testing.T) {
 
 func TestDoD_CompileSnapshotSelfContained(t *testing.T) {
 	ctx := context.Background()
-	store := contexty.NewMemoryConversationStore()
-	_, _ = store.Load(ctx, "ignored")
+	store := contexty.NewMemoryConversationStateStore()
+	_, _ = loadState(ctx, store, "ignored")
 	engine := contexty.NewEngine(
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithConversationID("ignored"),
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
@@ -332,8 +395,16 @@ func TestDoD_DuplicateMessageIDWithinHistory(t *testing.T) {
 	engine := contexty.NewEngine()
 	_, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "dup", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "dup", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
+			{
+				ID:    "dup",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "dup",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
 		},
 	})
 	require.ErrorIs(t, err, contexty.ErrDuplicateMessageID)
@@ -380,13 +451,16 @@ func TestDoD_RedactionRecordsTransformation(t *testing.T) {
 func TestDoD_FormatterReplacedByFormatter(t *testing.T) {
 	ctx := context.Background()
 	engine := contexty.NewEngine(
-		contexty.WithSegmentFormatter(contexty.SegmentMemory, func([]contexty.Message) []contexty.Message {
-			return []contexty.Message{{
-				ID:    "mem-new",
-				Role:  contexty.RoleSystem,
-				Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
-			}}
-		}),
+		contexty.WithSegmentFormatter(
+			contexty.SegmentMemory,
+			func(context.Context, []contexty.Message) ([]contexty.Message, error) {
+				return []contexty.Message{{
+					ID:    "mem-new",
+					Role:  contexty.RoleSystem,
+					Parts: []contexty.ContentPart{contexty.TextPart{Text: "new"}},
+				}}, nil
+			},
+		),
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -410,13 +484,15 @@ func TestDoD_SummarizeTransformationByMessageID(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{
 			TokenLimit: 25,
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-				return contexty.Message{
-					ID:    "summary-1",
-					Role:  contexty.RoleSystem,
-					Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
-				}, nil
-			}),
+			Summarizer: stubSummarizer(
+				func(context.Context, []contexty.Message) (contexty.Message, error) {
+					return contexty.Message{
+						ID:    "summary-1",
+						Role:  contexty.RoleSystem,
+						Parts: []contexty.ContentPart{contexty.TextPart{Text: "sum"}},
+					}, nil
+				},
+			),
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
@@ -425,9 +501,21 @@ func TestDoD_SummarizeTransformationByMessageID(t *testing.T) {
 	)
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
-			{ID: "h-a", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}}},
-			{ID: "h-b", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}}},
-			{ID: "h-c", Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}}},
+			{
+				ID:    "h-a",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "a"}},
+			},
+			{
+				ID:    "h-b",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "b"}},
+			},
+			{
+				ID:    "h-c",
+				Role:  contexty.RoleUser,
+				Parts: []contexty.ContentPart{contexty.TextPart{Text: "c"}},
+			},
 		},
 	})
 	require.NoError(t, err)

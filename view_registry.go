@@ -44,7 +44,11 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 		return "", fmt.Errorf("contexty: render view: %w", err)
 	}
 	if f, ok := builtinViewFormatter(name); ok {
-		return f.Format(ctx, snap)
+		projected, err := e.applyRoleProjection(ctx, snap)
+		if err != nil {
+			return "", err
+		}
+		return f.Format(ctx, projected)
 	}
 	cfg, ok := e.resolveView(name)
 	if !ok {
@@ -56,6 +60,15 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 	}
 	msgs := snap.Segment(seg)
 	working := cloneMessageSlice(msgs)
+	if e.roleProjection != nil {
+		for i := range working {
+			role, err := e.roleProjection.ProjectRole(working[i])
+			if err != nil {
+				return "", fmt.Errorf("contexty: render view role projection: %w", err)
+			}
+			working[i].Role = role
+		}
+	}
 	if cfg.Budget != nil {
 		trimmed, err := cfg.Budget.Apply(ctx, working)
 		if err != nil {
@@ -64,7 +77,11 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 		working = trimmed
 	}
 	if cfg.Formatter != nil {
-		working = cfg.Formatter(working)
+		formatted, err := cfg.Formatter(ctx, working)
+		if err != nil {
+			return "", fmt.Errorf("contexty: render view formatter: %w", err)
+		}
+		working = formatted
 	}
 	var b strings.Builder
 	for _, m := range working {

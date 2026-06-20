@@ -2,10 +2,10 @@ package testutil
 
 import "github.com/skosovsky/contexty"
 
-// MemoryConversationStore is an alias for the in-memory ConversationStore.
-type MemoryConversationStore = contexty.MemoryConversationStore
+// MemoryConversationStateStore is an alias for the in-memory ConversationStateStore.
+type MemoryConversationStateStore = contexty.MemoryConversationStateStore
 
-// NewMemoryConversationStore returns an empty in-memory ConversationStore.
-func NewMemoryConversationStore() *MemoryConversationStore {
-	return contexty.NewMemoryConversationStore()
+// NewMemoryConversationStateStore returns an empty in-memory ConversationStateStore.
+func NewMemoryConversationStateStore() *MemoryConversationStateStore {
+	return contexty.NewMemoryConversationStateStore()
 }

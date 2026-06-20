@@ -39,7 +39,7 @@ func (r *ProvenanceRegistry) Register(typeID string, decode func([]byte) (Proven
 
 // Decode restores a concrete Provenance from wire JSON.
 func (r *ProvenanceRegistry) Decode(data []byte) (Provenance, error) {
-	if len(data) == 0 || string(data) == "null" {
+	if len(data) == 0 || string(data) == jsonNullLiteral {
 		return nil, errProvenanceNil
 	}
 	var wire provenanceWire
@@ -68,7 +68,7 @@ var errProvenanceNil = errors.New("contexty: provenance nil")
 // EncodeProvenance serializes provenance with type discriminator.
 func EncodeProvenance(p Provenance) ([]byte, error) {
 	if p == nil {
-		return []byte("null"), nil
+		return []byte(jsonNullLiteral), nil
 	}
 	payload, err := json.Marshal(p)
 	if err != nil {

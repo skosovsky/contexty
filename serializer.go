@@ -13,11 +13,12 @@ type MessageSerializer interface {
 // JSONSerializer uses the polymorphic semantic codec.
 type JSONSerializer struct {
 	Provenance *ProvenanceRegistry
+	Extensions *ExtensionRegistry
 }
 
 // DefaultJSONSerializer returns a serializer with the default provenance registry.
 func DefaultJSONSerializer() JSONSerializer {
-	return JSONSerializer{Provenance: DefaultProvenanceRegistry()}
+	return JSONSerializer{Provenance: DefaultProvenanceRegistry(), Extensions: NewExtensionRegistry()}
 }
 
 // Marshal serializes msg into JSON.
@@ -26,7 +27,7 @@ func (s JSONSerializer) Marshal(msg Message) ([]byte, error) {
 	if reg == nil {
 		reg = DefaultProvenanceRegistry()
 	}
-	return MarshalMessageJSON(msg, reg)
+	return marshalMessageJSONWithRegistries(msg, reg, s.Extensions)
 }
 
 // Unmarshal deserializes a JSON-encoded message into msg.
@@ -35,7 +36,7 @@ func (s JSONSerializer) Unmarshal(data []byte, msg *Message) error {
 	if reg == nil {
 		reg = DefaultProvenanceRegistry()
 	}
-	m, err := UnmarshalMessageJSON(data, reg)
+	m, err := unmarshalMessageJSONWithRegistries(data, reg, s.Extensions)
 	if err != nil {
 		return err
 	}
@@ -46,12 +47,14 @@ func (s JSONSerializer) Unmarshal(data []byte, msg *Message) error {
 // ConversationCodec serializes full conversation snapshots for storage adapters.
 type ConversationCodec struct {
 	Provenance *ProvenanceRegistry
+	Extensions *ExtensionRegistry
 }
 
 // conversationWire is the storage envelope for a thread.
 type conversationWire struct {
-	Version  int64                      `json:"version"`
-	Segments map[string]json.RawMessage `json:"segments"`
+	Version   int64                      `json:"version"`
+	Segments  map[string]json.RawMessage `json:"segments"`
+	Artifacts []ContextArtifact          `json:"artifacts,omitempty"`
 }
 
 // Encode serializes a snapshot to JSON bytes.
@@ -61,11 +64,12 @@ func (c ConversationCodec) Encode(snap ConversationSnapshot) ([]byte, error) {
 		reg = DefaultProvenanceRegistry()
 	}
 	wire := conversationWire{
-		Version:  snap.Version(),
-		Segments: make(map[string]json.RawMessage, len(snap.segments)),
+		Version:   snap.Version(),
+		Segments:  make(map[string]json.RawMessage, len(snap.segments)),
+		Artifacts: persistentArtifacts(snap.Artifacts()),
 	}
 	for name, msgs := range snap.segments {
-		b, err := MarshalMessages(msgs, reg)
+		b, err := marshalMessagesWithRegistries(msgs, reg, c.Extensions)
 		if err != nil {
 			return nil, err
 		}
@@ -86,13 +90,17 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 	}
 	segments := make(map[SegmentName][]Message, len(wire.Segments))
 	for name, raw := range wire.Segments {
-		msgs, err := UnmarshalMessages(raw, reg)
+		msgs, err := unmarshalMessagesWithRegistries(raw, reg, c.Extensions)
 		if err != nil {
 			return ConversationSnapshot{}, err
 		}
 		segments[SegmentName(name)] = msgs
 	}
-	return ConversationSnapshot{segments: segments, version: wire.Version}, nil
+	return ConversationSnapshot{
+		segments:  segments,
+		artifacts: mergeArtifactMaps(nil, wire.Artifacts),
+		version:   wire.Version,
+	}, nil
 }
 
-var _ MessageSerializer = JSONSerializer{Provenance: nil}
+var _ MessageSerializer = JSONSerializer{Provenance: nil, Extensions: nil}

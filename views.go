@@ -86,7 +86,7 @@ func formatPartsPlain(parts []ContentPart) string {
 			b.WriteString("]")
 		case ToolResultPart:
 			b.WriteString("[tool_result:")
-			b.WriteString(v.Content)
+			b.WriteString(v.Payload.PlainText())
 			b.WriteString("]")
 		}
 	}

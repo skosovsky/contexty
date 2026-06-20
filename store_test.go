@@ -16,10 +16,14 @@ func TestJSONSerializer_RoundTrip(t *testing.T) {
 		Parts: []contexty.ContentPart{
 			contexty.TextPart{Text: "summary"},
 			contexty.ImagePart{URL: "https://example.com/image.png", Detail: "low"},
-			contexty.ToolCallPart{ID: "tc1", Name: "fn", Arguments: `{"a":1}`},
+			contexty.ToolCallPart{ID: "tc1", Name: "fn", Arguments: contexty.JSONPayload(`{"a":1}`)},
 		},
-		Annotations: contexty.Annotations{RefID: "ref-1"},
-		Provenance:  contexty.SystemProvenance{Component: "test"},
+		SourceRefs: []contexty.SourceRef{{
+			Namespace: "messages",
+			Kind:      "external",
+			ID:        "ref-1",
+		}},
+		Provenance: contexty.SystemProvenance{Component: "test"},
 	}
 	data, err := serializer.Marshal(msg)
 	require.NoError(t, err)

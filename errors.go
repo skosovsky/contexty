@@ -27,10 +27,9 @@ var (
 
 	// ErrConversationVersionConflict is returned when a store write is rejected because
 	// the conversation was modified concurrently (optimistic concurrency).
-	// Do not retry the same write without a fresh Load: merge against the returned
-	// Version, then call UpdateSegment/AppendSegment/Clear again. This is not a
-	// transient outage and must not be conflated with [ErrUnavailable] or with
-	// context cancellation.
+	// Do not retry the same write without a fresh LoadState: merge against the
+	// returned Version, then call ApplyDelta or ClearState again. This is not a
+	// transient outage and must not be conflated with [ErrUnavailable] or with context cancellation.
 	ErrConversationVersionConflict = errors.New("contexty: conversation version conflict")
 
 	// ErrUnavailable indicates a transient storage failure (network I/O, client-side

@@ -1,2 +1,2 @@
-// Package postgres provides a PostgreSQL-backed ConversationStore for contexty.
+// Package postgres provides a PostgreSQL-backed ConversationStateStore for contexty.
 package postgres

@@ -16,7 +16,7 @@ func TestDoD_OriginAndLLMCacheRoundTrip(t *testing.T) {
 	msg.Origin = &contexty.MessageOrigin{TemplateID: "agents/sales", LayerID: "persona"}
 	msg.LLMCache = &contexty.CachePolicyRef{Type: "ephemeral"}
 
-	raw, err := contexty.MarshalMessageJSON(msg, reg)
+	raw, err := contexty.MarshalMessageJSON(msg, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
 	require.Contains(t, string(raw), `"origin"`)
 	require.Contains(t, string(raw), `"template_id"`)
@@ -24,7 +24,7 @@ func TestDoD_OriginAndLLMCacheRoundTrip(t *testing.T) {
 	require.NotContains(t, string(raw), `"prompt_origin"`)
 	require.NotContains(t, string(raw), `"prompty.layer_ref"`)
 
-	restored, err := contexty.UnmarshalMessageJSON(raw, reg)
+	restored, err := contexty.UnmarshalMessageJSON(raw, contexty.MessageCodec{Provenance: reg})
 	require.NoError(t, err)
 	require.NotNil(t, restored.Origin)
 	require.Equal(t, "agents/sales", restored.Origin.TemplateID)

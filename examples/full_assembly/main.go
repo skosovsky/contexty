@@ -1,4 +1,4 @@
-// Full-assembly example: Engine + ConversationStore + budget pipeline + Compile.
+// Full-assembly example: Engine + ConversationStateStore + budget pipeline + Compile.
 // Run with: go run .
 package main
 
@@ -13,8 +13,9 @@ import (
 
 const (
 	fixedTokensPerMsg  = 25
-	exampleTokenLimit  = 200
+	exampleTokenLimit  = 260
 	conversationMinMsg = 2
+	toolRoundVersion   = 3
 )
 
 func main() {
@@ -34,15 +35,42 @@ func main() {
 }
 
 func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine, error) {
-	store := contexty.NewMemoryConversationStore()
-	s0, _ := store.Load(ctx, "demo")
-	_ = store.UpdateSegment(ctx, "demo", s0.Version(), contexty.SegmentSystem, []contexty.Message{
-		withOrigin(contexty.TextMessage(contexty.RoleSystem, "You are a medical assistant."), "agents/medical", "base"),
+	store := contexty.NewMemoryConversationStateStore()
+	//nolint:exhaustruct // zero-value fields omitted in example
+	_ = store.ApplyDelta(ctx, "demo", 0, contexty.ConversationDelta{
+		Operation: contexty.DeltaReplaceSegment,
+		Segment:   contexty.SegmentSystem,
+		Messages: []contexty.Message{
+			withOrigin(
+				contexty.TextMessage(contexty.RoleSystem, "Assemble concise project context."),
+				"context/defaults",
+				"base",
+			),
+		},
 	})
-	_ = store.UpdateSegment(ctx, "demo", 1, contexty.SegmentMemory, []contexty.Message{
-		contexty.TextMessage(contexty.RoleSystem, "Patient Name: Anna. Age: 30."),
+	//nolint:exhaustruct // zero-value fields omitted in example
+	_ = store.ApplyDelta(ctx, "demo", 1, contexty.ConversationDelta{
+		Operation: contexty.DeltaReplaceSegment,
+		Segment:   contexty.SegmentMemory,
+		Messages: []contexty.Message{
+			contexty.TextMessage(contexty.RoleSystem, "Project boundary: keep the library universal."),
+		},
 	})
-	_ = store.UpdateSegment(ctx, "demo", 2, contexty.SegmentHistory, fetchConversation())
+	//nolint:exhaustruct // zero-value fields omitted in example
+	_ = store.ApplyDelta(ctx, "demo", 2, contexty.ConversationDelta{
+		Operation: contexty.DeltaReplaceSegment,
+		Segment:   contexty.SegmentHistory,
+		Messages:  fetchConversation(),
+	})
+	toolRound, err := projectLookupRound()
+	if err != nil {
+		return contexty.CompileResult{}, nil, err
+	}
+	//nolint:exhaustruct // zero-value fields omitted in example
+	_ = store.ApplyDelta(ctx, "demo", toolRoundVersion, contexty.ConversationDelta{
+		Operation: contexty.DeltaAppendToolRound,
+		ToolRound: &toolRound,
+	})
 
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{ //nolint:exhaustruct // optional Summarizer/TruncateStrategy omitted
@@ -52,7 +80,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine,
 
 	engine := contexty.NewEngine(
 		contexty.WithConversationID("demo"),
-		contexty.WithStore(store),
+		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(compileObserver{}),
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
@@ -69,17 +97,23 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine,
 					}
 					return []contexty.Message{
 						withOrigin(
-							contexty.TextMessage(contexty.RoleSystem, "Session locale: "+locale),
-							"agents/medical", "session",
+							contexty.TextMessage(contexty.RoleSystem, "Request locale: "+locale),
+							"context/defaults", "session",
 						),
 					}, nil
 				},
 			},
 		),
 	)
-	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // only Pending for this example
+	retrieved := contexty.NewRetrievalDocument(
+		"decision-note",
+		contexty.TextPayload("Current decision: preserve public contracts at package boundaries."),
+	).ContextArtifact.WithTurn("turn-1")
+	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // optional fields omitted
+		TurnID:    "turn-1",
+		Artifacts: []contexty.ContextArtifact{retrieved},
 		Pending: []contexty.Message{
-			contexty.TextMessage(contexty.RoleUser, "What should I recommend for Anna?"),
+			contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary."),
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithResolveVar("locale", "en-US"),
@@ -132,14 +166,80 @@ func (compileObserver) OnPipelineCompiled(_ context.Context, totalCost int, dura
 }
 
 func fetchConversation() []contexty.Message {
-	return []contexty.Message{
-		contexty.TextMessage(contexty.RoleUser, "What supplements should I take?"),
-		contexty.TextMessage(contexty.RoleAssistant, "Consider vitamin D and calcium based on your profile."),
-		contexty.TextMessage(contexty.RoleUser, "Any side effects?"),
-		contexty.TextMessage(contexty.RoleAssistant, "Generally well tolerated. Discuss with your doctor."),
-		contexty.TextMessage(contexty.RoleUser, "Thanks."),
-		contexty.TextMessage(contexty.RoleAssistant, "You're welcome."),
+	hostQuestion := contexty.TextMessage(contexty.RoleUser, "Can this package import our app types?")
+	hostQuestion.Actor = &contexty.Actor{
+		Kind:        "workspace-user",
+		ID:          "user-42",
+		DisplayName: "Workspace user",
+		SourceRefs: []contexty.SourceRef{{
+			Namespace:    "host",
+			Kind:         "ticket",
+			ID:           "ticket-17",
+			CheckpointID: "ticket-17:v1",
+			URI:          "",
+		}},
 	}
+	hostQuestion.SourceRefs = []contexty.SourceRef{{
+		Namespace:    "host",
+		Kind:         "message",
+		ID:           "msg-1",
+		CheckpointID: "msg-1:v1",
+		URI:          "",
+	}}
+	return []contexty.Message{
+		hostQuestion,
+		contexty.TextMessage(contexty.RoleAssistant, "No. Keep host identity in SourceRefs and Extensions."),
+		contexty.TextMessage(contexty.RoleUser, "Where should retrieval snippets live?"),
+		contexty.TextMessage(contexty.RoleAssistant, "Use ContextArtifact with an explicit lifecycle."),
+		contexty.TextMessage(contexty.RoleUser, "Thanks."),
+		contexty.TextMessage(contexty.RoleAssistant, "Persist the resulting state through deltas."),
+	}
+}
+
+func projectLookupRound() (contexty.ToolRound, error) {
+	args, err := contexty.StructuredPayload(struct {
+		Query string `json:"query"`
+	}{Query: "boundary decision"})
+	if err != nil {
+		return contexty.ToolRound{}, err
+	}
+	payload, err := contexty.StructuredPayload(struct {
+		Decision string `json:"decision"`
+		Scope    string `json:"scope"`
+	}{
+		Decision: "keep host types outside the package contract",
+		Scope:    "source refs and artifacts only",
+	})
+	if err != nil {
+		return contexty.ToolRound{}, err
+	}
+	return contexty.ToolRound{
+		Assistant: contexty.Message{
+			ID:   "assistant-tool-call",
+			Role: contexty.RoleAssistant,
+			Parts: []contexty.ContentPart{
+				contexty.ToolCallPart{
+					ID:        "lookup-1",
+					Name:      "lookup_project_note",
+					Arguments: args,
+				},
+			},
+		},
+		Results: []contexty.Message{
+			{
+				ID:   "tool-lookup-result",
+				Role: contexty.RoleTool,
+				Parts: []contexty.ContentPart{
+					contexty.ToolResultPart{
+						ToolCallID: "lookup-1",
+						Name:       "lookup_project_note",
+						Payload:    payload,
+						IsError:    false,
+					},
+				},
+			},
+		},
+	}, nil
 }
 
 func withOrigin(msg contexty.Message, templateID, layerID string) contexty.Message {

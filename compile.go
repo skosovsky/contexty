@@ -24,12 +24,13 @@ type AbstractPayload struct {
 
 // Engine compiles conversation snapshots into CompileResult.
 type Engine struct {
-	store          ConversationStore
+	stateStore     ConversationStateStore
 	hooks          []TransformHook
 	budget         *BudgetPipeline
 	deferred       []DeferredBlock
 	formatters     map[SegmentName]SegmentFormatter
 	views          map[string]ViewConfiguration
+	roleProjection RoleProjectionPolicy
 	conversationID string
 	observer       Observer
 }
@@ -42,9 +43,9 @@ func WithConversationID(id string) EngineOption {
 	return func(e *Engine) { e.conversationID = id }
 }
 
-// WithStore sets the conversation store.
-func WithStore(store ConversationStore) EngineOption {
-	return func(e *Engine) { e.store = store }
+// WithStateStore sets the immutable conversation state store.
+func WithStateStore(store ConversationStateStore) EngineOption {
+	return func(e *Engine) { e.stateStore = store }
 }
 
 // WithTransformHooks adds transform hooks applied before formatting and budgeting.
@@ -74,15 +75,21 @@ func WithSegmentFormatter(seg SegmentName, fn SegmentFormatter) EngineOption {
 	}
 }
 
+// WithRoleProjectionPolicy configures provider-role projection for actor-aware messages.
+func WithRoleProjectionPolicy(policy RoleProjectionPolicy) EngineOption {
+	return func(e *Engine) { e.roleProjection = policy }
+}
+
 // NewEngine creates a compile engine.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
-		store:          nil,
+		stateStore:     nil,
 		hooks:          nil,
 		budget:         nil,
 		deferred:       nil,
 		formatters:     nil,
 		views:          defaultViewRegistry(),
+		roleProjection: nil,
 		conversationID: "",
 		observer:       nil,
 	}
@@ -97,7 +104,7 @@ func (e *Engine) Compile(ctx context.Context, req CompileRequest) (CompileResult
 	if err := ctx.Err(); err != nil {
 		return CompileResult{}, fmt.Errorf("contexty: compile: %w", err)
 	}
-	merged, err := e.mergeWithStore(ctx, req)
+	merged, err := e.mergeWithStateStore(ctx, req)
 	if err != nil {
 		return CompileResult{}, err
 	}
@@ -112,7 +119,7 @@ func (e *Engine) CompileSnapshot(ctx context.Context, req CompileRequest) (Compi
 	return e.compileRequest(ctx, req, time.Now())
 }
 
-func (e *Engine) mergeWithStore(ctx context.Context, req CompileRequest) (CompileRequest, error) {
+func (e *Engine) mergeWithStateStore(ctx context.Context, req CompileRequest) (CompileRequest, error) {
 	snap, err := e.loadSnapshot(ctx)
 	if err != nil {
 		return CompileRequest{}, err
@@ -133,12 +140,14 @@ func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) Com
 		return storeMsgs
 	}
 	return CompileRequest{
-		System:  pick(req.System, storeSnap.Segment(SegmentSystem)),
-		History: pick(req.History, storeSnap.Segment(SegmentHistory)),
-		Memory:  pick(req.Memory, storeSnap.Segment(SegmentMemory)),
-		Tools:   req.Tools,
-		Pending: req.Pending,
-		Options: req.Options,
+		TurnID:    req.TurnID,
+		System:    pick(req.System, storeSnap.Segment(SegmentSystem)),
+		History:   pick(req.History, storeSnap.Segment(SegmentHistory)),
+		Memory:    pick(req.Memory, storeSnap.Segment(SegmentMemory)),
+		Tools:     req.Tools,
+		Pending:   req.Pending,
+		Artifacts: append(storeSnap.Artifacts(), cloneArtifacts(req.Artifacts)...),
+		Options:   req.Options,
 	}
 }
 
@@ -156,7 +165,7 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 	recorder := newTransformRecorder(req.AllMessages())
 	ctx = withTransformRecorder(ctx, recorder)
 
-	snap := req.ToSnapshot()
+	snap, activeArtifacts := req.snapshotWithActiveArtifacts()
 	var err error
 
 	beforeDeferred := snap
@@ -180,7 +189,14 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		return CompileResult{}, err
 	}
 	recordSnapshotHookTransforms(ctx, beforeHooks, snap)
-	snap = e.applySegmentFormatters(ctx, snap)
+	snap, err = e.applyRoleProjection(ctx, snap)
+	if err != nil {
+		return CompileResult{}, err
+	}
+	snap, err = e.applySegmentFormatters(ctx, snap)
+	if err != nil {
+		return CompileResult{}, err
+	}
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
 		return CompileResult{}, fmt.Errorf("contexty: compile formatters: %w", idErr)
 	}
@@ -209,7 +225,20 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		Transformations: recorder.snapshot(),
 		Source:          frozenSource,
 		Introduced:      recorder.introducedSnapshot(),
+		Artifacts:       cloneArtifacts(activeArtifacts),
 	}, nil
+}
+
+func (r CompileRequest) snapshotWithActiveArtifacts() (ConversationSnapshot, []ContextArtifact) {
+	snap := r.ToSnapshot()
+	activeArtifacts := activeArtifactsForTurn(r.TurnID, r.Artifacts)
+	snap = snap.WithArtifacts(activeArtifacts)
+	if artifactMsgs := artifactMessages(activeArtifacts); len(artifactMsgs) > 0 {
+		memory := snap.Segment(SegmentMemory)
+		memory = append(memory, artifactMsgs...)
+		snap = snap.WithSegment(SegmentMemory, memory)
+	}
+	return snap, activeArtifacts
 }
 
 func (e *Engine) estimateSegments(
@@ -286,9 +315,35 @@ func budgetReservedOverflow(
 	return ErrBudgetExceeded
 }
 
-func (e *Engine) applySegmentFormatters(ctx context.Context, snap ConversationSnapshot) ConversationSnapshot {
+func (e *Engine) applyRoleProjection(ctx context.Context, snap ConversationSnapshot) (ConversationSnapshot, error) {
+	if e.roleProjection == nil {
+		return snap, nil
+	}
+	next := snap
+	for _, seg := range snapshotSegmentOrder() {
+		msgs := next.Segment(seg)
+		if len(msgs) == 0 {
+			continue
+		}
+		projected := cloneMessageSlice(msgs)
+		for i := range projected {
+			role, err := e.roleProjection.ProjectRole(projected[i])
+			if err != nil {
+				return ConversationSnapshot{}, fmt.Errorf("contexty: role projection: %w", err)
+			}
+			projected[i].Role = role
+		}
+		next = next.WithSegment(seg, projected)
+	}
+	if err := ctx.Err(); err != nil {
+		return ConversationSnapshot{}, fmt.Errorf("contexty: role projection: %w", err)
+	}
+	return next, nil
+}
+
+func (e *Engine) applySegmentFormatters(ctx context.Context, snap ConversationSnapshot) (ConversationSnapshot, error) {
 	if len(e.formatters) == 0 {
-		return snap
+		return snap, nil
 	}
 	next := snap
 	for _, seg := range snapshotSegmentOrder() {
@@ -300,11 +355,15 @@ func (e *Engine) applySegmentFormatters(ctx context.Context, snap ConversationSn
 		if len(before) == 0 {
 			continue
 		}
-		after := EnsureMessageIDs(fn(cloneMessageSlice(before)))
+		after, err := fn(ctx, cloneMessageSlice(before))
+		if err != nil {
+			return ConversationSnapshot{}, fmt.Errorf("contexty: segment formatter %q: %w", seg, err)
+		}
+		after = EnsureMessageIDs(after)
 		recordFormatterTransformCtx(ctx, before, after)
 		next = next.WithSegment(seg, after)
 	}
-	return next
+	return next, nil
 }
 
 func (e *Engine) resolveCompileObserver() Observer {
@@ -327,12 +386,12 @@ func (e *Engine) estimatePayloadTokens(ctx context.Context, payload AbstractPayl
 }
 
 func (e *Engine) loadSnapshot(ctx context.Context) (ConversationSnapshot, error) {
-	if e.store != nil && e.conversationID != "" {
-		snap, err := e.store.Load(ctx, e.conversationID)
+	if e.stateStore != nil && e.conversationID != "" {
+		state, err := e.stateStore.LoadState(ctx, e.conversationID)
 		if err != nil {
-			return ConversationSnapshot{}, fmt.Errorf("contexty: compile load: %w", err)
+			return ConversationSnapshot{}, fmt.Errorf("contexty: compile load state: %w", err)
 		}
-		return snap, nil
+		return state.AllSegmentsSnapshot(), nil
 	}
 	return EmptySnapshot(), nil
 }
