@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/skosovsky/contexty)](https://goreportcard.com/report/github.com/skosovsky/contexty)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`contexty` is a **semantic context engine** for LLM applications: typed message AST, actor-aware provider-role projection, typed tool payloads, context artifacts, immutable conversation deltas, named views (`RenderView`), unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `Introduced` + `DerivePersistenceProjection`).
+`contexty` is a **semantic context engine** for LLM applications: typed message AST, actor-aware provider-role projection, typed current turns, durable identity policies, typed tool payloads, typed context artifacts, immutable conversation deltas, named compile targets, unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `NormalizedSnapshot` + `Writeback` + `Projections` + `DerivePersistenceProjection`).
 
 ## Installation
 
@@ -44,13 +44,24 @@ engine := contexty.NewEngine(
     )),
 )
 
+turn := contexty.NewCurrentTurn(
+    contexty.TextMessage(contexty.RoleUser, "Current turn"),
+).WithPromptSafe(contexty.TextMessage(contexty.RoleUser, "Current turn, redacted for prompt"))
+
 result, err := engine.Compile(ctx, contexty.CompileRequest{
-    Pending: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "Current turn")},
+    CurrentTurn:            &turn,
+    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("chat"),
+    RequireDurableIdentity: true,
     Options: []contexty.CompileOption{
         contexty.WithResolveVar("locale", "en-US"),
     },
+    Targets: []contexty.CompileTarget{{
+        Name:          "classifier_history",
+        SourceSegment: contexty.SegmentHistory,
+    }},
 })
 toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
+_ = result.Writeback // assigned durable IDs and normalized snapshot
 _ = store.ApplyDelta(ctx, "chat-1", 2, contexty.ConversationDelta{
     Operation: contexty.DeltaReplaceSegment,
     Segment:   contexty.SegmentHistory,
@@ -62,33 +73,36 @@ _ = store.ApplyDelta(ctx, "chat-1", 2, contexty.ConversationDelta{
 
 ```go
 result, err := engine.Compile(ctx, contexty.CompileRequest{
-    System:  systemMsgs,
-    History: historyMsgs,
-    Memory:  memoryMsgs,
-    Tools:   toolMsgs,
-    Pending: pendingMsgs,
-    Options: []contexty.CompileOption{
-        contexty.WithEphemeralPatch(contexty.MessageSelector{
-            Segment: contexty.SegmentHistory, Role: contexty.RoleUser, Position: contexty.PositionLast,
-        }, "REDACTED"),
-        contexty.WithResolveVar("locale", "ru-RU"),
-    },
+    System:                 systemMsgs,
+    History:                historyMsgs,
+    Memory:                 memoryMsgs,
+    Tools:                  toolMsgs,
+    CurrentTurn:            &currentTurn,
+    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("chat"),
+    RequireDurableIdentity: true,
+    Targets: []contexty.CompileTarget{{
+        Name:          "classifier_history",
+        SourceSegment: contexty.SegmentHistory,
+        Budget:        classifierBudgetPipe,
+    }},
+    Options: []contexty.CompileOption{contexty.WithResolveVar("locale", "ru-RU")},
 })
 payload := result.Payload
 toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
+classifier := result.Projections["classifier_history"]
 ```
 
-`CompileResult.Source` is an immutable freeze of input messages (before pipeline mutations). `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceProjection` for checkpoint persistence instead of parsing `Transformations`.
+`CompileResult.Source` is an immutable freeze of normalized input messages (before pipeline mutations). `CompileResult.NormalizedSnapshot` and `CompileResult.Writeback` expose durable ID normalization and checkpoint writeback intent. `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceProjection` for checkpoint persistence instead of parsing `Transformations`.
 
-**Pipeline order:** freeze Source → deferred → ephemeral patches (pre-budget) → hooks → segment formatters → budget preflight → budget(history) → ephemeral patches (post-budget, history + Pending) → payload.
+**Pipeline order:** normalize IDs/current turn → freeze Source → deferred → low-level ephemeral patches (pre-budget) → hooks → segment formatters → budget preflight → budget(history + protected current turn) → low-level ephemeral patches (post-budget) → payload → named compile targets.
 
-The current clear-break contract is summarized below; the task-level implementation spec is `.cursor/docs/task15.md`.
+The current clear-break contract is summarized below; the task-level implementation spec is `.cursor/docs/task16.md`.
 
 ### Migrating from Task13
 
 1. Removed prompt-origin aliases now map to `Origin` / `TemplateID`.
-2. Replace `WithOverlay` with `CompileRequest.Options` (`WithResolveVar`, `WithEphemeralPatch`).
-3. Use `RenderView` + `WithNamedView` for classifier projections.
+2. Replace `WithOverlay` with `CompileRequest.Options` for resolve vars and `CompileRequest.CurrentTurn` for prompt-only current-turn projection.
+3. Use `CompileRequest.Targets` and `CompileResult.Projections` for classifier projections built from the same compile pass.
 4. Set `DeferredBlock.MergePolicy` for origin/layer collision handling.
 5. Persist with `DerivePersistenceProjection`.
 
@@ -96,7 +110,7 @@ The current clear-break contract is summarized below; the task-level implementat
 
 1. Use `CompileRequest` / `CompileResult` instead of snapshot-only compile and `AbstractPayload`.
 2. Set `Message.ID` as the semantic node ID; use `SourceRefs` for external identity and typed `Extensions` for host metadata.
-3. Put the current turn in `Pending`, not post-compile append.
+3. Put the active user input in `CurrentTurn`; reserve `Pending` for low-level protected pending messages.
 4. Pass `Tools` explicitly when needed.
 5. Inspect `result.Transformations[msgID]` instead of string diffs on payload.
 
@@ -108,39 +122,47 @@ engine := contexty.NewEngine(
     contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 )
 result, _ := engine.CompileSnapshot(ctx, contexty.CompileRequest{
-    History: msgs,
-    Pending: []contexty.Message{currentTurn},
+    History:                msgs,
+    CurrentTurn:            &currentTurn,
+    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("snapshot"),
+    RequireDurableIdentity: true,
 })
 ```
 
 Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves the same on `Compile` and `CompileSnapshot`.
 
+## Named Compile Targets
+
+Use compile targets when a classifier, router, evaluator, or secondary provider needs a projection from the same normalized snapshot, current turn, artifacts, transforms, and budgeted history:
+
+```go
+result, _ := engine.Compile(ctx, contexty.CompileRequest{
+    CurrentTurn: &currentTurn,
+    Targets: []contexty.CompileTarget{{
+        Name:          "classifier_history",
+        SourceSegment: contexty.SegmentHistory,
+        Budget:        classifierBudgetPipe,
+    }},
+})
+classifier := result.Projections["classifier_history"]
+_ = classifier.Text
+```
+
+`CompileProjection` includes rendered `Text`, typed `Messages`, transform records, participating artifact IDs, frozen `Source` (normalized request before pipeline mutations), and `InputSnapshot` (the compiled snapshot used as the target input). A target `View` is a built-in rendered view and is mutually exclusive with `SourceSegment`, `Budget`, and `Formatter`; use segment targets when target-local budget or formatting is required.
+
 ## Views (non-mutating render)
 
-Built-in views render all segments (system → history → tools → memory):
+`Render` / `RenderView` remain available for read-only snapshot inspection. They do not run the compile pipeline, do not apply transform hooks, and do not see `CurrentTurn`.
+
+Built-in views render all stored segments (system → history → tools → memory):
 
 ```go
 snap, _ := store.LoadState(ctx, "chat-1")
-engine := contexty.NewEngine()
-xml, _ := engine.RenderView(ctx, snap, string(contexty.ViewLLMXML))
-flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier) // shortcut: NewEngine() + builtin RenderView only
+xml, _ := contexty.Render(ctx, snap, contexty.ViewLLMXML)
+flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier)
 ```
 
-Custom named views with budget/formatter:
-
-```go
-engine := contexty.NewEngine(
-    contexty.WithNamedView("classifier", contexty.ViewConfiguration{
-        SourceSegment: contexty.SegmentHistory,
-        Budget:        classifierBudgetPipe,
-    }),
-)
-out, _ := engine.RenderView(ctx, snap, "classifier")
-```
-
-`Render` / `RenderView` never mutate the input snapshot. They do **not** apply transform hooks — use `Engine.Compile()` when you need redaction or truncation before sending to an LLM.
-
-Built-in view names (`llm_xml`, `flat_classifier`) are resolved before the custom registry; `WithNamedView("llm_xml", …)` does not override the built-in formatter. Custom views join segment messages as plain text (not LLMXML).
+For classifier/router/evaluator projections, prefer named compile targets. `RenderView` is for already-materialized snapshot inspection and legacy callers.
 
 ## Messages, Actors, and Source Refs
 
@@ -248,22 +270,32 @@ _ = result.Introduced // pre-transform baselines for payload-born IDs
 
 Patches and `Pending` are compile-only. `DerivePersistenceProjection` excludes evicted/truncated messages and returns Source originals for formatted messages. If `Pending` alone exceeds `TokenLimit`, compile returns `ErrPendingExceedsBudget`.
 
-## Ephemeral patches
+## Current Turn and Identity
+
+Use `CurrentTurn` for active input that needs different provider-facing and checkpoint-facing representations:
 
 ```go
-result, _ := engine.Compile(ctx, contexty.CompileRequest{
-    Pending: []contexty.Message{currentUserTurn},
-    Options: []contexty.CompileOption{
-        contexty.WithEphemeralPatch(contexty.MessageSelector{
-            Segment:  contexty.SegmentHistory,
-            Role:     contexty.RoleUser,
-            Position: contexty.PositionLast,
-        }, "REDACTED"),
-    },
+turn := contexty.NewCurrentTurn(contexty.TextMessage(contexty.RoleUser, "raw input")).
+    WithPromptSafe(contexty.TextMessage(contexty.RoleUser, "redacted input")).
+    WithPersistence(contexty.CurrentTurnPersistRaw)
+
+result, err := engine.Compile(ctx, contexty.CompileRequest{
+    CurrentTurn:            &turn,
+    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("chat"),
+    RequireDurableIdentity: true,
 })
+_ = result.Writeback.Snapshot
+_ = result.Writeback.Messages
+_ = err
 ```
 
-`MessageSelector.Position`: zero value is `PositionFirst`; an unrecognized value defaults to `PositionLast`. Pre-budget patches apply to non-history segments; post-budget patches apply to history (including merged `Pending`).
+`CurrentTurnPersistRaw` stores the original input, `CurrentTurnPersistPromptSafe` stores the prompt-safe representation, and `CurrentTurnPersistNone` skips current-turn checkpoint persistence. When `RequireDurableIdentity` is true, missing message IDs require an explicit `IdentityPolicy`; otherwise compile fails with `ErrMissingIdentityPolicy`.
+
+## Low-Level Ephemeral Patches
+
+Prefer `CurrentTurn` for prompt-only current-turn redaction. `WithEphemeralPatch` remains a low-level escape hatch for compile-only replacement of already-addressable messages in internal pipelines. It is not the durable current-turn contract.
+
+Pre-budget patches apply to non-history segments; post-budget patches apply to history.
 
 ## Segment formatters
 
@@ -308,7 +340,7 @@ engine := contexty.NewEngine(
 
 Tool-call turns are truncated atomically by default (`KeepTurnAtomicity` defaults to `true`). Setting `KeepTurnAtomicity` to `false` enables fast-path index truncation at the strategy level; `BudgetPipeline` still repairs orphan tool pairs via `enforceToolPairAtomicity`.
 
-When using a custom `Summarizer`, return a summary with a **new** `Message.ID`. Reusing a truncated message ID prevents the summary from appearing in `DerivePersistenceProjection`.
+When using a custom `Summarizer`, do not reuse a truncated message ID for the summary. In durable compile flows, leave the summary ID empty and let `IdentityPolicy` assign it.
 
 **Canonical tool-turn layout** for atomic truncation: `RoleAssistant` with `ToolCallPart`(s), then `RoleTool` message(s) with matching `ToolResultPart.ToolCallID`. Use `ToolRoundFromMessages` / `ToolRound.Validate` for first-class validation. `ToolTurnUsesCanonicalLayout` remains a lightweight layout predicate.
 
@@ -335,7 +367,33 @@ _ = result
 _ = err
 ```
 
-Turn-bound retrieval artifacts are visible only when `CompileRequest.TurnID` matches `BoundTurnID`. Ownership is `OwnerRef`, a typed `SourceRef` owned by the host application. Ephemeral artifacts and `ArtifactPersistenceSkip` are omitted from checkpoints; `ArtifactPersistenceStore` forces checkpoint persistence.
+Turn-bound retrieval artifacts are visible only when `CompileRequest.TurnID` matches `BoundTurnID`. Ownership is `OwnerRef`, a typed `SourceRef` owned by the host application. Ephemeral artifacts and `ArtifactPersistenceSkip` are omitted from checkpoints; `ArtifactPersistenceStore` forces checkpoint persistence. For artifacts, `PolicyReplaceByOrigin` replaces stale artifacts with the same kind/type plus owner/source refs even when the new artifact uses a different `ID`.
+
+Use typed artifact codecs when the host needs structured values to round-trip without manually packing domain data into a raw payload container:
+
+```go
+type Fact struct {
+    Title string `json:"title"`
+    Body  string `json:"body"`
+}
+
+desc := contexty.ArtifactCodecDescriptor[Fact]{
+    TypeID:      "example.fact",
+    Kind:        contexty.ArtifactKindRetrievalDocument,
+    Lifecycle:   contexty.ArtifactLifecyclePersistent,
+    SourceRefs:  []contexty.SourceRef{{Namespace: "kb", Kind: "document", ID: "doc-1"}},
+    MergePolicy: contexty.PolicyReplaceByOrigin,
+    Budget:      &contexty.ArtifactBudgetPolicy{Group: "retrieval", TokenLimit: 2000},
+    Persistence: contexty.ArtifactPersistenceStore,
+    Render:      func(v Fact) string { return v.Title + ": " + v.Body },
+}
+artifact, _ := contexty.NewTypedArtifact("fact-1", desc, Fact{
+    Title: "Boundary",
+    Body:  "Artifacts carry lifecycle and typed source data.",
+})
+decoded, _ := contexty.DecodeTypedArtifact[Fact](artifact, desc)
+_ = decoded
+```
 
 Use deltas for immutable state transitions:
 

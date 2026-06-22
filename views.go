@@ -20,7 +20,8 @@ type ViewFormatter interface {
 }
 
 // Render projects a snapshot through the given view.
-// Prefer Engine.RenderView for named views and custom registry entries.
+// Render is a read-only snapshot inspection helper. Use CompileRequest.Targets
+// for projections that must share the compile pipeline.
 func Render(ctx context.Context, snap ConversationSnapshot, view ViewType) (string, error) {
 	return NewEngine().RenderView(ctx, snap, string(view))
 }

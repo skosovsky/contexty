@@ -34,7 +34,8 @@ type ephemeralPatch struct {
 	text     string
 }
 
-// WithEphemeralPatch applies text replacement to messages matching sel during compile only.
+// WithEphemeralPatch applies low-level compile-only text replacement to messages
+// matching sel. Prefer CurrentTurn for prompt-safe active input.
 func WithEphemeralPatch(sel MessageSelector, text string) CompileOption {
 	return func(o *compileOptions) {
 		o.patches = append(o.patches, ephemeralPatch{selector: sel, text: text})

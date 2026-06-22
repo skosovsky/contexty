@@ -2,13 +2,17 @@
 //
 // Core concepts:
 //   - Typed message AST (ContentPart, Actor, SourceRef, Provenance)
+//   - CurrentTurn for prompt-safe active input with explicit persistence policy
+//   - MessageIdentityPolicy and CompileWritebackIntent for durable normalization
 //   - Typed tool payloads and canonical ToolRound validation
-//   - ContextArtifact lifecycle and ownership for retrieval and memory context
+//   - ContextArtifact lifecycle, ownership, and typed artifact codecs
 //   - ConversationState and ConversationDelta for immutable transitions
 //   - ConversationStateStore with optimistic concurrency
-//   - Non-mutating Render(ViewType) and Engine.RenderView named projections
-//   - CompileRequest.Options (ephemeral patches, resolve vars)
-//   - CompileResult.Source + Introduced + DerivePersistenceProjection for persistence
+//   - CompileTarget and CompileProjection for named outputs from one compile pass
+//   - CompileRequest.Options for resolve vars and low-level compile options
+//   - CompileResult.Source + NormalizedSnapshot + Writeback + Projections + Introduced
+//   - CompileProjection.Source + InputSnapshot for target traceability
+//   - DerivePersistenceProjection for persistence
 //   - BudgetPipeline (summarize + truncate) and Engine.Compile → CompileResult
 //
 // Example:
@@ -24,7 +28,9 @@
 //	    contexty.WithStateStore(store),
 //	)
 //	result, err := engine.Compile(ctx, contexty.CompileRequest{
-//	    Pending: pendingTurn,
+//	    CurrentTurn:            &currentTurn,
+//	    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("chat"),
+//	    RequireDurableIdentity: true,
 //	})
 //	_, _ = result.Payload, err
 package contexty

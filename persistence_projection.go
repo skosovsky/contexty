@@ -27,6 +27,7 @@ func (r CompileResult) DerivePersistenceProjection(seg SegmentName) []Message {
 		}
 	}
 	out = append(out, r.payloadAddsForSegment(seg, sourceMsgs)...)
+	out = append(out, r.currentTurnPersistenceMessages(seg)...)
 	if len(out) == 0 {
 		return nil
 	}
@@ -68,6 +69,17 @@ func isInPlaceFormatReason(reason string) bool {
 	}
 }
 
+func (r CompileResult) currentTurnPersistenceMessages(seg SegmentName) []Message {
+	if seg != SegmentHistory || r.Source.CurrentTurn == nil {
+		return nil
+	}
+	msg, ok := r.Source.CurrentTurn.persistedMessage()
+	if !ok || msg.ID == "" {
+		return nil
+	}
+	return []Message{msg}
+}
+
 func (r CompileResult) sourceSegment(seg SegmentName) []Message {
 	switch seg {
 	case SegmentSystem:
@@ -104,6 +116,9 @@ func (r CompileResult) pendingIDSet() map[string]struct{} {
 		if m.ID != "" {
 			out[m.ID] = struct{}{}
 		}
+	}
+	if r.Source.CurrentTurn != nil && r.Source.CurrentTurn.Raw.ID != "" {
+		out[r.Source.CurrentTurn.Raw.ID] = struct{}{}
 	}
 	return out
 }

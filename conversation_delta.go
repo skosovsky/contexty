@@ -250,6 +250,7 @@ func mergeArtifactMaps(base map[string]ContextArtifact, artifacts []ContextArtif
 		next = make(map[string]ContextArtifact, len(artifacts))
 	}
 	for _, artifact := range artifacts {
+		dropArtifactsReplacedByOrigin(next, artifact)
 		if existing, ok := next[artifact.ID]; ok {
 			next[artifact.ID] = mergeArtifact(existing, artifact)
 			continue
@@ -257,6 +258,24 @@ func mergeArtifactMaps(base map[string]ContextArtifact, artifacts []ContextArtif
 		next[artifact.ID] = artifact.Clone()
 	}
 	return next
+}
+
+func dropArtifactsReplacedByOrigin(artifacts map[string]ContextArtifact, incoming ContextArtifact) {
+	if incoming.MergePolicy != PolicyReplaceByOrigin {
+		return
+	}
+	replaceKey := artifactOriginKey(incoming)
+	if replaceKey == "" {
+		return
+	}
+	for id, existing := range artifacts {
+		if id == incoming.ID {
+			continue
+		}
+		if artifactOriginKey(existing) == replaceKey {
+			delete(artifacts, id)
+		}
+	}
 }
 
 func artifactMapValues(in map[string]ContextArtifact) []ContextArtifact {

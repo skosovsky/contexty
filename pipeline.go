@@ -74,7 +74,11 @@ func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, msgs []Message, tok
 		if sumErr != nil {
 			return nil, fmt.Errorf("contexty: budget summarize: %w", sumErr)
 		}
-		summary = EnsureMessageID(summary)
+		seg := budgetIdentitySegmentFrom(ctx)
+		summary, err = ensureMessageIDFromContext(ctx, seg, 0, summary)
+		if err != nil {
+			return nil, fmt.Errorf("contexty: budget summarize identity: %w", err)
+		}
 		recordSummarizeReplaceCtx(ctx, beforeSum, summary)
 		sumTokens, estErr := p.estimator.Estimate(ctx, []Message{summary})
 		if estErr != nil {

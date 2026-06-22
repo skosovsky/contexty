@@ -20,7 +20,7 @@ const (
 
 func main() {
 	ctx := context.Background()
-	result, engine, err := buildPrompt(ctx)
+	result, err := buildPrompt(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -29,12 +29,10 @@ func main() {
 	for i, m := range msgs {
 		fmt.Printf("  [%d] %s: %q\n", i, m.Role, m.TextContent())
 	}
-	if err := logCompileArtifacts(ctx, engine, result); err != nil {
-		log.Fatal(err)
-	}
+	logCompileArtifacts(result)
 }
 
-func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine, error) {
+func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	store := contexty.NewMemoryConversationStateStore()
 	//nolint:exhaustruct // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", 0, contexty.ConversationDelta{
@@ -64,7 +62,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine,
 	})
 	toolRound, err := projectLookupRound()
 	if err != nil {
-		return contexty.CompileResult{}, nil, err
+		return contexty.CompileResult{}, err
 	}
 	//nolint:exhaustruct // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", toolRoundVersion, contexty.ConversationDelta{
@@ -109,42 +107,43 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, *contexty.Engine,
 		"decision-note",
 		contexty.TextPayload("Current decision: preserve public contracts at package boundaries."),
 	).ContextArtifact.WithTurn("turn-1")
+	turn := contexty.NewCurrentTurn(
+		contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary including sensitive host details."),
+	).WithPromptSafe(
+		contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary."),
+	)
 	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // optional fields omitted
-		TurnID:    "turn-1",
-		Artifacts: []contexty.ContextArtifact{retrieved},
-		Pending: []contexty.Message{
-			contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary."),
+		TurnID:                 "turn-1",
+		Artifacts:              []contexty.ContextArtifact{retrieved},
+		CurrentTurn:            &turn,
+		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("demo"),
+		RequireDurableIdentity: true,
+		Targets: []contexty.CompileTarget{
+			{
+				Name:          "flat_classifier",
+				View:          "",
+				SourceSegment: contexty.SegmentHistory,
+				Budget:        nil,
+				Formatter:     nil,
+			},
 		},
 		Options: []contexty.CompileOption{
 			contexty.WithResolveVar("locale", "en-US"),
-			contexty.WithEphemeralPatch(contexty.MessageSelector{
-				Segment:  contexty.SegmentHistory,
-				Role:     contexty.RoleUser,
-				Position: contexty.PositionLast,
-			}, "REDACTED"),
 		},
 	})
-	return result, engine, err
+	return result, err
 }
 
-func logCompileArtifacts(ctx context.Context, engine *contexty.Engine, result contexty.CompileResult) error {
-	snap := contexty.EmptySnapshot().
-		WithSegment(contexty.SegmentSystem, result.Payload.System).
-		WithSegment(contexty.SegmentHistory, result.Payload.History).
-		WithSegment(contexty.SegmentTools, result.Payload.Tools).
-		WithSegment(contexty.SegmentMemory, result.Payload.Memory)
-	view, err := engine.RenderView(ctx, snap, string(contexty.ViewFlatClassifier))
-	if err != nil {
-		return err
+func logCompileArtifacts(result contexty.CompileResult) {
+	if view, ok := result.Projections["flat_classifier"]; ok {
+		log.Printf("flat classifier projection:\n%s", view.Text)
 	}
-	log.Printf("flat classifier view:\n%s", view)
 	for _, seg := range []contexty.SegmentName{
 		contexty.SegmentSystem, contexty.SegmentHistory, contexty.SegmentMemory,
 	} {
 		proj := result.DerivePersistenceProjection(seg)
 		log.Printf("persistence projection %s: %d messages", seg, len(proj))
 	}
-	return nil
 }
 
 type compileObserver struct{}

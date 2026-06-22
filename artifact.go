@@ -1,5 +1,10 @@
 package contexty
 
+import (
+	"slices"
+	"strings"
+)
+
 // ArtifactKind classifies context artifacts without binding them to host domains.
 type ArtifactKind string
 
@@ -34,16 +39,17 @@ type ArtifactBudgetPolicy struct {
 
 // ContextArtifact is the common contract for retrieval and memory context.
 type ContextArtifact struct {
-	ID          string                    `json:"id"`
-	Kind        ArtifactKind              `json:"kind"`
-	Payload     ToolPayload               `json:"payload"`
-	Lifecycle   ArtifactLifecycle         `json:"lifecycle,omitempty"`
-	BoundTurnID string                    `json:"bound_turn_id,omitempty"`
-	OwnerRef    *SourceRef                `json:"owner_ref,omitempty"`
-	SourceRefs  []SourceRef               `json:"source_refs,omitempty"`
-	MergePolicy MergePolicy               `json:"merge_policy,omitempty"`
-	Budget      *ArtifactBudgetPolicy     `json:"budget,omitempty"`
-	Persistence ArtifactPersistencePolicy `json:"persistence,omitempty"`
+	ID           string                    `json:"id"`
+	Kind         ArtifactKind              `json:"kind"`
+	ArtifactType string                    `json:"artifact_type,omitempty"`
+	Payload      ToolPayload               `json:"payload"`
+	Lifecycle    ArtifactLifecycle         `json:"lifecycle,omitempty"`
+	BoundTurnID  string                    `json:"bound_turn_id,omitempty"`
+	OwnerRef     *SourceRef                `json:"owner_ref,omitempty"`
+	SourceRefs   []SourceRef               `json:"source_refs,omitempty"`
+	MergePolicy  MergePolicy               `json:"merge_policy,omitempty"`
+	Budget       *ArtifactBudgetPolicy     `json:"budget,omitempty"`
+	Persistence  ArtifactPersistencePolicy `json:"persistence,omitempty"`
 }
 
 // RetrievalDocument is a source-backed retrieved context artifact.
@@ -59,32 +65,34 @@ type MemoryBlock struct {
 // NewRetrievalDocument builds a retrieval artifact.
 func NewRetrievalDocument(id string, payload ToolPayload) RetrievalDocument {
 	return RetrievalDocument{ContextArtifact: ContextArtifact{
-		ID:          id,
-		Kind:        ArtifactKindRetrievalDocument,
-		Payload:     payload.Clone(),
-		Lifecycle:   ArtifactLifecycleTurnBound,
-		BoundTurnID: "",
-		OwnerRef:    nil,
-		SourceRefs:  nil,
-		MergePolicy: "",
-		Budget:      nil,
-		Persistence: "",
+		ID:           id,
+		Kind:         ArtifactKindRetrievalDocument,
+		ArtifactType: "",
+		Payload:      payload.Clone(),
+		Lifecycle:    ArtifactLifecycleTurnBound,
+		BoundTurnID:  "",
+		OwnerRef:     nil,
+		SourceRefs:   nil,
+		MergePolicy:  "",
+		Budget:       nil,
+		Persistence:  "",
 	}}
 }
 
 // NewMemoryBlock builds a memory artifact.
 func NewMemoryBlock(id string, payload ToolPayload) MemoryBlock {
 	return MemoryBlock{ContextArtifact: ContextArtifact{
-		ID:          id,
-		Kind:        ArtifactKindMemoryBlock,
-		Payload:     payload.Clone(),
-		Lifecycle:   ArtifactLifecyclePersistent,
-		BoundTurnID: "",
-		OwnerRef:    nil,
-		SourceRefs:  nil,
-		MergePolicy: "",
-		Budget:      nil,
-		Persistence: "",
+		ID:           id,
+		Kind:         ArtifactKindMemoryBlock,
+		ArtifactType: "",
+		Payload:      payload.Clone(),
+		Lifecycle:    ArtifactLifecyclePersistent,
+		BoundTurnID:  "",
+		OwnerRef:     nil,
+		SourceRefs:   nil,
+		MergePolicy:  "",
+		Budget:       nil,
+		Persistence:  "",
 	}}
 }
 
@@ -141,6 +149,14 @@ func cloneArtifacts(artifacts []ContextArtifact) []ContextArtifact {
 	return out
 }
 
+func mergeArtifacts(artifacts []ContextArtifact) []ContextArtifact {
+	out := make([]ContextArtifact, 0, len(artifacts))
+	for _, artifact := range artifacts {
+		out = upsertArtifact(out, artifact)
+	}
+	return out
+}
+
 func activeArtifactsForTurn(turnID string, artifacts []ContextArtifact) []ContextArtifact {
 	out := make([]ContextArtifact, 0, len(artifacts))
 	for _, artifact := range artifacts {
@@ -185,6 +201,17 @@ func artifactPayloadTokens(artifact ContextArtifact) int {
 }
 
 func upsertArtifact(artifacts []ContextArtifact, incoming ContextArtifact) []ContextArtifact {
+	if incoming.MergePolicy == PolicyReplaceByOrigin {
+		if replaceKey := artifactOriginKey(incoming); replaceKey != "" {
+			filtered := artifacts[:0]
+			for _, existing := range artifacts {
+				if existing.ID == incoming.ID || artifactOriginKey(existing) != replaceKey {
+					filtered = append(filtered, existing)
+				}
+			}
+			artifacts = filtered
+		}
+	}
 	if incoming.ID == "" {
 		return append(artifacts, incoming.Clone())
 	}
@@ -244,12 +271,38 @@ func deduplicateArtifactBySourceLayer(existing, incoming ContextArtifact) Contex
 func sourceRefSet(refs []SourceRef) map[string]bool {
 	out := make(map[string]bool)
 	for _, ref := range refs {
-		key := ref.Namespace + "\x00" + ref.Kind + "\x00" + ref.ID + "\x00" + ref.CheckpointID + "\x00" + ref.URI
+		key := sourceRefKey(ref)
 		if key != "\x00\x00\x00\x00" {
 			out[key] = true
 		}
 	}
 	return out
+}
+
+func artifactOriginKey(artifact ContextArtifact) string {
+	ownerKey := ""
+	if artifact.OwnerRef != nil {
+		ownerKey = sourceRefKey(*artifact.OwnerRef)
+	}
+	sourceKeys := make([]string, 0, len(artifact.SourceRefs))
+	for _, ref := range artifact.SourceRefs {
+		key := sourceRefKey(ref)
+		if key != "\x00\x00\x00\x00" {
+			sourceKeys = append(sourceKeys, key)
+		}
+	}
+	if ownerKey == "" && len(sourceKeys) == 0 {
+		return ""
+	}
+	slices.Sort(sourceKeys)
+	return string(artifact.Kind) +
+		"\x00" + artifact.ArtifactType +
+		"\x00" + ownerKey +
+		"\x00" + strings.Join(sourceKeys, "\x1f")
+}
+
+func sourceRefKey(ref SourceRef) string {
+	return ref.Namespace + "\x00" + ref.Kind + "\x00" + ref.ID + "\x00" + ref.CheckpointID + "\x00" + ref.URI
 }
 
 func persistentArtifacts(artifacts []ContextArtifact) []ContextArtifact {
@@ -261,7 +314,7 @@ func persistentArtifacts(artifacts []ContextArtifact) []ContextArtifact {
 		if !artifactShouldPersist(artifact) {
 			continue
 		}
-		out = append(out, artifact.Clone())
+		out = upsertArtifact(out, artifact)
 	}
 	if len(out) == 0 {
 		return nil

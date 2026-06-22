@@ -157,11 +157,11 @@ func snapshotAllMessages(snap ConversationSnapshot) []Message {
 }
 
 func recordFormatterTransformCtx(ctx context.Context, before, after []Message) {
-	recordContentTransformCtx(ctx, before, after, ReasonSegmentFormatter, ReasonReplacedByFormatter)
+	recordContentTransformCtx(ctx, before, after, ReasonSegmentFormatter, ReasonReplacedByFormatter, "")
 }
 
 func recordHookTransformCtx(ctx context.Context, before, after []Message) {
-	recordContentTransformCtx(ctx, before, after, ReasonTransformHook, ReasonReplacedByHook)
+	recordContentTransformCtx(ctx, before, after, ReasonTransformHook, ReasonReplacedByHook, ReasonTransformHook)
 }
 
 func recordSnapshotHookTransforms(ctx context.Context, before, after ConversationSnapshot) {
@@ -181,7 +181,7 @@ func recordSnapshotHookTransforms(ctx context.Context, before, after Conversatio
 func recordContentTransformCtx(
 	ctx context.Context,
 	before, after []Message,
-	sameIDReason, replacedReason string,
+	sameIDReason, replacedReason, introducedReason string,
 ) {
 	rec := transformRecorderFrom(ctx)
 	if rec == nil {
@@ -203,6 +203,10 @@ func recordContentTransformCtx(
 	for id := range afterSet {
 		if _, ok := beforeSet[id]; !ok {
 			rec.introduceIfAbsent(findMessageByID(after, id))
+			if introducedReason != "" {
+				rec.setUnlessFinal(id, ActionFormatted, introducedReason)
+				continue
+			}
 			rec.setUnlessFinal(id, ActionPassed, "")
 		}
 	}

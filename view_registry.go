@@ -13,7 +13,8 @@ type ViewConfiguration struct {
 	Formatter     SegmentFormatter
 }
 
-// WithNamedView registers a named view on the engine.
+// WithNamedView registers a read-only snapshot view on the engine.
+// Prefer CompileRequest.Targets for projections that must share the compile pipeline.
 func WithNamedView(name string, cfg ViewConfiguration) EngineOption {
 	return func(e *Engine) {
 		if e.views == nil {
@@ -38,7 +39,8 @@ func builtinViewFormatter(name string) (ViewFormatter, bool) {
 	}
 }
 
-// RenderView projects snap through a registered named view without mutating snap.
+// RenderView projects an already-materialized snapshot without mutating snap.
+// It does not run compile hooks, current-turn projection, or compile targets.
 func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("contexty: render view: %w", err)

@@ -124,12 +124,7 @@ func (e *Engine) mergeWithStateStore(ctx context.Context, req CompileRequest) (C
 	if err != nil {
 		return CompileRequest{}, err
 	}
-	merged := mergeCompileRequest(snap, req)
-	merged = merged.Normalize()
-	if err := merged.Validate(); err != nil {
-		return CompileRequest{}, fmt.Errorf("contexty: compile merge: %w", err)
-	}
-	return merged, nil
+	return mergeCompileRequest(snap, req), nil
 }
 
 func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) CompileRequest {
@@ -140,23 +135,81 @@ func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) Com
 		return storeMsgs
 	}
 	return CompileRequest{
-		TurnID:    req.TurnID,
-		System:    pick(req.System, storeSnap.Segment(SegmentSystem)),
-		History:   pick(req.History, storeSnap.Segment(SegmentHistory)),
-		Memory:    pick(req.Memory, storeSnap.Segment(SegmentMemory)),
-		Tools:     req.Tools,
-		Pending:   req.Pending,
-		Artifacts: append(storeSnap.Artifacts(), cloneArtifacts(req.Artifacts)...),
-		Options:   req.Options,
+		TurnID:                 req.TurnID,
+		System:                 pick(req.System, storeSnap.Segment(SegmentSystem)),
+		History:                pick(req.History, storeSnap.Segment(SegmentHistory)),
+		Memory:                 pick(req.Memory, storeSnap.Segment(SegmentMemory)),
+		Tools:                  req.Tools,
+		Pending:                req.Pending,
+		CurrentTurn:            cloneCurrentTurnPtr(req.CurrentTurn),
+		Artifacts:              append(storeSnap.Artifacts(), cloneArtifacts(req.Artifacts)...),
+		Options:                req.Options,
+		IdentityPolicy:         req.IdentityPolicy,
+		RequireDurableIdentity: req.RequireDurableIdentity,
+		Targets:                append([]CompileTarget(nil), req.Targets...),
 	}
 }
 
 func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start time.Time) (CompileResult, error) {
-	req = req.Normalize()
-	if err := req.Validate(); err != nil {
-		return CompileResult{}, fmt.Errorf("contexty: compile request: %w", err)
+	var identityWritebacks []MessageIdentityWriteback
+	var err error
+	req, identityWritebacks, err = normalizeCompileRequest(req)
+	if err != nil {
+		return CompileResult{}, fmt.Errorf("contexty: compile normalize: %w", err)
 	}
+	if validationErr := req.Validate(); validationErr != nil {
+		return CompileResult{}, fmt.Errorf("contexty: compile request: %w", validationErr)
+	}
+
 	frozenSource := req.Freeze()
+	normalizedSnapshot := req.ToSnapshot()
+	writebackSnapshot := req.WritebackSnapshot()
+	compiled, err := e.runCompilePipeline(ctx, req)
+	if err != nil {
+		return CompileResult{}, err
+	}
+	projections, err := e.compileTargets(
+		compiled.Context,
+		compiled.Snapshot,
+		req.Targets,
+		frozenSource,
+		compiled.Transformations,
+		compiled.ActiveArtifacts,
+	)
+	if err != nil {
+		return CompileResult{}, err
+	}
+	if obs := e.resolveCompileObserver(); obs != nil {
+		if total, estErr := e.estimatePayloadTokens(compiled.Context, compiled.Payload); estErr == nil {
+			obs.OnPipelineCompiled(compiled.Context, total, time.Since(start))
+		}
+	}
+	return CompileResult{
+		Payload:            compiled.Payload,
+		Transformations:    compiled.Transformations,
+		Source:             frozenSource,
+		Introduced:         compiled.Introduced,
+		Artifacts:          cloneArtifacts(compiled.ActiveArtifacts),
+		NormalizedSnapshot: normalizedSnapshot.AllSegmentsSnapshot(),
+		Writeback: CompileWritebackIntent{
+			Snapshot: writebackSnapshot,
+			Messages: identityWritebacks,
+		}.clone(),
+		Projections: cloneCompileProjections(projections),
+	}, nil
+}
+
+type compilePipelineResult struct {
+	Context         context.Context
+	Snapshot        ConversationSnapshot
+	Payload         AbstractPayload
+	Transformations map[string]TransformRecord
+	Introduced      map[string]Message
+	ActiveArtifacts []ContextArtifact
+}
+
+func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (compilePipelineResult, error) {
+	ctx = withCompileIdentity(ctx, req.IdentityPolicy, req.RequireDurableIdentity, req.TurnID, "")
 	compileOpts := applyCompileOptions(req.Options)
 	if len(compileOpts.resolveVars) > 0 {
 		ctx = withCompileResolveVars(ctx, compileOpts.resolveVars)
@@ -164,69 +217,98 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 
 	recorder := newTransformRecorder(req.AllMessages())
 	ctx = withTransformRecorder(ctx, recorder)
-
+	compilePending := req.compilePendingMessages()
 	snap, activeArtifacts := req.snapshotWithActiveArtifacts()
 	var err error
 
 	beforeDeferred := snap
 	snap, err = e.applyDeferredBlocks(ctx, snap)
 	if err != nil {
-		return CompileResult{}, err
+		return compilePipelineResult{}, err
 	}
 	recorder.registerDeferredMessageIDs(beforeDeferred, snap)
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
-		return CompileResult{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
+		return compilePipelineResult{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
 	}
 
 	snap = applyEphemeralPatches(ctx, snap, compileOpts, patchPhasePreBudget)
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
-		return CompileResult{}, fmt.Errorf("contexty: compile patches: %w", idErr)
+		return compilePipelineResult{}, fmt.Errorf("contexty: compile patches: %w", idErr)
 	}
 
-	beforeHooks := snap
-	snap, err = e.applyCompileHooks(ctx, snap)
+	snap, err = e.applyTransformsAndBudget(ctx, req, snap, compilePending, recorder)
 	if err != nil {
-		return CompileResult{}, err
+		return compilePipelineResult{}, err
+	}
+	payload := e.payloadFromSnapshot(snap, compilePending)
+	return compilePipelineResult{
+		Context:         ctx,
+		Snapshot:        snap,
+		Payload:         payload,
+		Transformations: recorder.snapshot(),
+		Introduced:      recorder.introducedSnapshot(),
+		ActiveArtifacts: cloneArtifacts(activeArtifacts),
+	}, nil
+}
+
+func (e *Engine) applyTransformsAndBudget(
+	ctx context.Context,
+	req CompileRequest,
+	snap ConversationSnapshot,
+	compilePending []Message,
+	recorder *transformRecorder,
+) (ConversationSnapshot, error) {
+	beforeHooks := snap
+	snap, err := e.applyCompileHooks(ctx, snap)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	snap, err = normalizeSnapshotMessageIDs(ctx, snap)
+	if err != nil {
+		return ConversationSnapshot{}, fmt.Errorf("contexty: compile hooks identity: %w", err)
 	}
 	recordSnapshotHookTransforms(ctx, beforeHooks, snap)
 	snap, err = e.applyRoleProjection(ctx, snap)
 	if err != nil {
-		return CompileResult{}, err
+		return ConversationSnapshot{}, err
 	}
 	snap, err = e.applySegmentFormatters(ctx, snap)
 	if err != nil {
-		return CompileResult{}, err
+		return ConversationSnapshot{}, err
 	}
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
-		return CompileResult{}, fmt.Errorf("contexty: compile formatters: %w", idErr)
+		return ConversationSnapshot{}, fmt.Errorf("contexty: compile formatters: %w", idErr)
 	}
 
-	snap, err = e.applyBudgetHistory(ctx, snap, req.Pending)
+	snap, err = e.applyBudgetHistory(ctx, snap, compilePending)
 	if err != nil {
-		return CompileResult{}, err
+		return ConversationSnapshot{}, err
 	}
-
-	snap = applyEphemeralPatches(ctx, snap, compileOpts, patchPhasePostBudget)
+	snap = applyEphemeralPatches(ctx, snap, applyCompileOptions(req.Options), patchPhasePostBudget)
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
-		return CompileResult{}, fmt.Errorf("contexty: compile post-budget patches: %w", idErr)
+		return ConversationSnapshot{}, fmt.Errorf("contexty: compile post-budget patches: %w", idErr)
 	}
+	if req.CurrentTurn != nil {
+		recordCurrentTurnProjectionCtx(ctx, *req.CurrentTurn)
+	}
+	recorder.markProtectedPending(messageIDs(compilePending))
+	return snap, nil
+}
 
-	pendingIDs := messageIDs(req.Pending)
-	recorder.markProtectedPending(pendingIDs)
-
-	payload := e.payloadFromSnapshot(snap, req.Pending)
-	if obs := e.resolveCompileObserver(); obs != nil {
-		if total, estErr := e.estimatePayloadTokens(ctx, payload); estErr == nil {
-			obs.OnPipelineCompiled(ctx, total, time.Since(start))
+func normalizeSnapshotMessageIDs(ctx context.Context, snap ConversationSnapshot) (ConversationSnapshot, error) {
+	next := snap
+	for _, seg := range snapshotSegmentOrder() {
+		msgs := next.Segment(seg)
+		if len(msgs) == 0 {
+			continue
 		}
+		normalized, err := ensureMessageIDsFromContext(ctx, seg, 0, msgs)
+		if err != nil {
+			return ConversationSnapshot{}, err
+		}
+		next = next.WithSegment(seg, normalized)
 	}
-	return CompileResult{
-		Payload:         payload,
-		Transformations: recorder.snapshot(),
-		Source:          frozenSource,
-		Introduced:      recorder.introducedSnapshot(),
-		Artifacts:       cloneArtifacts(activeArtifacts),
-	}, nil
+	return next, nil
 }
 
 func (r CompileRequest) snapshotWithActiveArtifacts() (ConversationSnapshot, []ContextArtifact) {
@@ -239,6 +321,18 @@ func (r CompileRequest) snapshotWithActiveArtifacts() (ConversationSnapshot, []C
 		snap = snap.WithSegment(SegmentMemory, memory)
 	}
 	return snap, activeArtifacts
+}
+
+func (r CompileRequest) compilePendingMessages() []Message {
+	pending := cloneMessageSlice(r.Pending)
+	if r.CurrentTurn == nil {
+		return pending
+	}
+	msg, ok := r.CurrentTurn.promptMessage()
+	if !ok {
+		return pending
+	}
+	return append(pending, msg)
 }
 
 func (e *Engine) estimateSegments(
@@ -283,6 +377,7 @@ func (e *Engine) applyBudgetHistory(
 	available := totalLimit - reserved
 
 	history := snap.Segment(SegmentHistory)
+	ctx = withBudgetIdentitySegment(ctx, SegmentHistory)
 	ctx = withBudgetObservation(ctx, e.resolveBudgetObserver(), string(SegmentHistory))
 	trimmed, err := e.budget.ApplyWithLimit(ctx, history, available)
 	if err != nil {
@@ -359,7 +454,10 @@ func (e *Engine) applySegmentFormatters(ctx context.Context, snap ConversationSn
 		if err != nil {
 			return ConversationSnapshot{}, fmt.Errorf("contexty: segment formatter %q: %w", seg, err)
 		}
-		after = EnsureMessageIDs(after)
+		after, err = ensureMessageIDsFromContext(ctx, seg, 0, after)
+		if err != nil {
+			return ConversationSnapshot{}, fmt.Errorf("contexty: segment formatter %q identity: %w", seg, err)
+		}
 		recordFormatterTransformCtx(ctx, before, after)
 		next = next.WithSegment(seg, after)
 	}
@@ -416,12 +514,15 @@ func (e *Engine) applyDeferredBlocks(ctx context.Context, snap ConversationSnaps
 		if err != nil {
 			return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q: %w", block.Name, err)
 		}
-		msgs = EnsureMessageIDs(msgs)
 		seg := block.Segment
 		if seg == "" {
 			seg = SegmentMemory
 		}
 		existing := snap.Segment(seg)
+		msgs, err = ensureMessageIDsFromContext(ctx, seg, len(existing), msgs)
+		if err != nil {
+			return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q identity: %w", block.Name, err)
+		}
 		combined := applyMergePolicy(existing, msgs, block.MergePolicy)
 		recordMergeRemovalsCtx(ctx, existing, combined)
 		snap = snap.WithSegment(seg, combined)
