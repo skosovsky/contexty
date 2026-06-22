@@ -54,7 +54,7 @@ type ConversationCodec struct {
 type conversationWire struct {
 	Version   int64                      `json:"version"`
 	Segments  map[string]json.RawMessage `json:"segments"`
-	Artifacts []ContextArtifact          `json:"artifacts,omitempty"`
+	Artifacts []json.RawMessage          `json:"artifacts,omitempty"`
 }
 
 // Encode serializes a snapshot to JSON bytes.
@@ -63,10 +63,14 @@ func (c ConversationCodec) Encode(snap ConversationSnapshot) ([]byte, error) {
 	if reg == nil {
 		reg = DefaultProvenanceRegistry()
 	}
+	artifacts, err := marshalArtifactList(persistentArtifacts(snap.Artifacts()), c.Extensions)
+	if err != nil {
+		return nil, err
+	}
 	wire := conversationWire{
 		Version:   snap.Version(),
 		Segments:  make(map[string]json.RawMessage, len(snap.segments)),
-		Artifacts: persistentArtifacts(snap.Artifacts()),
+		Artifacts: artifacts,
 	}
 	for name, msgs := range snap.segments {
 		b, err := marshalMessagesWithRegistries(msgs, reg, c.Extensions)
@@ -88,6 +92,10 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return ConversationSnapshot{}, err
 	}
+	artifacts, err := unmarshalArtifactList(wire.Artifacts, c.Extensions)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
 	segments := make(map[SegmentName][]Message, len(wire.Segments))
 	for name, raw := range wire.Segments {
 		msgs, err := unmarshalMessagesWithRegistries(raw, reg, c.Extensions)
@@ -96,11 +104,15 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 		}
 		segments[SegmentName(name)] = msgs
 	}
-	return ConversationSnapshot{
+	snapshot := ConversationSnapshot{
 		segments:  segments,
-		artifacts: mergeArtifactMaps(nil, wire.Artifacts),
+		artifacts: mergeArtifactMaps(nil, artifacts),
 		version:   wire.Version,
-	}, nil
+	}
+	if err := validateArtifactBlobs(snapshot.Artifacts()); err != nil {
+		return ConversationSnapshot{}, err
+	}
+	return snapshot, nil
 }
 
 var _ MessageSerializer = JSONSerializer{Provenance: nil, Extensions: nil}

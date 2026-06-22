@@ -12,6 +12,7 @@ import (
 	tcredis "github.com/testcontainers/testcontainers-go/modules/redis"
 
 	"github.com/skosovsky/contexty"
+	"github.com/skosovsky/contexty/testutil"
 )
 
 func TestStoreIntegration(t *testing.T) {
@@ -30,6 +31,55 @@ func TestStoreIntegration(t *testing.T) {
 	client := goredis.NewClient(&goredis.Options{Addr: endpoint})
 	t.Cleanup(func() {
 		require.NoError(t, client.Close())
+	})
+
+	t.Run("fixture OCC conformance", func(t *testing.T) {
+		testutil.CheckStateStore(t, New(client), "fixture-conformance")
+	})
+	t.Run("fixture expiry conformance", func(t *testing.T) {
+		// Arrange: a live writer holds the token before payload expiration.
+		store := New(client, WithTTL(time.Hour))
+		id := "fixture-expiry"
+		delta := contexty.ConversationDelta{Operation: contexty.DeltaAppendMessages, Segment: contexty.SegmentHistory,
+			Messages: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "old private data")}}
+		require.NoError(t, store.ApplyDelta(ctx, id, 0, delta))
+		stale, err := store.LoadState(ctx, id)
+		require.NoError(t, err)
+		// Act: actual Redis expiry, deterministically triggered without sleeping.
+		require.NoError(t, client.PExpire(ctx, store.dataKey(id), -time.Millisecond).Err())
+		// Assert: CAS itself notices expiry, even without a preceding LoadState.
+		require.ErrorIs(t, store.ApplyDelta(ctx, id, stale.Version(), delta), contexty.ErrConversationVersionConflict)
+		require.ErrorIs(t, store.ClearState(ctx, id, stale.Version()), contexty.ErrConversationVersionConflict)
+		empty, err := store.LoadState(ctx, id)
+		require.NoError(t, err)
+		require.Greater(t, empty.Version(), stale.Version())
+		require.Empty(t, empty.Segment(contexty.SegmentHistory))
+		repeated, err := store.LoadState(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, empty.Version(), repeated.Version())
+		require.NoError(t, store.ApplyDelta(ctx, id, empty.Version(), delta))
+		ttl, err := client.TTL(ctx, store.verKey(id)).Result()
+		require.NoError(t, err)
+		require.Equal(t, -time.Nanosecond, ttl)
+	})
+
+	t.Run("fixture exact large OCC revision", func(t *testing.T) {
+		// Arrange: integers beyond Lua's exact floating-point range.
+		store := New(client)
+		id := "fixture-large-revision"
+		const version = int64(9007199254740993)
+		snapshot := contexty.EmptySnapshot().WithVersion(version)
+		wire, err := store.codec.Encode(snapshot)
+		require.NoError(t, err)
+		require.NoError(t, client.Set(ctx, store.verKey(id), version, 0).Err())
+		require.NoError(t, client.Set(ctx, store.dataKey(id), wire, 0).Err())
+		// Act: adjacent tokens must still be distinct to CAS.
+		require.ErrorIs(t, store.ClearState(ctx, id, version-1), contexty.ErrConversationVersionConflict)
+		require.NoError(t, store.ClearState(ctx, id, version))
+		current, err := store.LoadState(ctx, id)
+		// Assert: no float rounding and no loss of monotonicity.
+		require.NoError(t, err)
+		require.Equal(t, version+1, current.Version())
 	})
 
 	t.Run("empty load", func(t *testing.T) {
@@ -140,12 +190,12 @@ func TestStoreIntegration(t *testing.T) {
 		assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
 	})
 
-	t.Run("clear no-op on missing thread", func(t *testing.T) {
+	t.Run("clear creates empty OCC tombstone on missing thread", func(t *testing.T) {
 		store := New(client)
 		require.NoError(t, store.ClearState(ctx, "missing-thread", 0))
 		snap, err := store.LoadState(ctx, "missing-thread")
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), snap.Version())
+		assert.Equal(t, int64(1), snap.Version())
 	})
 
 	t.Run("clear stale version conflict", func(t *testing.T) {
@@ -186,7 +236,7 @@ func TestStoreIntegration(t *testing.T) {
 
 		emptyA, err := store.LoadState(ctx, "thread-a")
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), emptyA.Version())
+		assert.Equal(t, sa2.Version()+1, emptyA.Version())
 		assert.Empty(t, emptyA.Segment(contexty.SegmentHistory))
 
 		msgsB, err := store.LoadState(ctx, "thread-b")

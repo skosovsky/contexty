@@ -2,6 +2,9 @@ package contexty
 
 import "errors"
 
+// ErrConversationVersionExhausted prevents OCC identity reuse through overflow.
+var ErrConversationVersionExhausted = errors.New("contexty: conversation version exhausted")
+
 // Sentinel errors for typical contexty failure modes.
 // Use [errors.Is] to check for these in calling code.
 var (
@@ -24,6 +27,30 @@ var (
 
 	// ErrDuplicateMessageID is returned when the same Message.ID appears more than once in CompileRequest.
 	ErrDuplicateMessageID = errors.New("contexty: duplicate message id in compile request")
+
+	// ErrMissingIdentityPolicy is returned when durable normalization is required
+	// but a message without ID cannot be resolved by an explicit policy.
+	ErrMissingIdentityPolicy = errors.New("contexty: missing message identity policy")
+
+	// ErrCurrentTurnIDMismatch is returned when raw and prompt-safe current-turn
+	// messages use different IDs.
+	ErrCurrentTurnIDMismatch = errors.New("contexty: current turn raw and prompt-safe IDs differ")
+
+	// ErrInvalidCurrentTurnPersistencePolicy is returned when CurrentTurn uses
+	// an unknown persistence policy.
+	ErrInvalidCurrentTurnPersistencePolicy = errors.New("contexty: invalid current turn persistence policy")
+
+	// ErrDuplicateCompileTarget is returned when CompileRequest targets reuse a name.
+	ErrDuplicateCompileTarget = errors.New("contexty: duplicate compile target")
+
+	// ErrUnknownCompileTargetView is returned when a compile target references an unknown view.
+	ErrUnknownCompileTargetView = errors.New("contexty: unknown compile target view")
+
+	// ErrInvalidCompileTargetSegment is returned when a compile target references an unknown source segment.
+	ErrInvalidCompileTargetSegment = errors.New("contexty: invalid compile target source segment")
+
+	// ErrConflictingCompileTargetFields is returned when a view target also sets segment/budget/formatter fields.
+	ErrConflictingCompileTargetFields = errors.New("contexty: conflicting compile target fields")
 
 	// ErrConversationVersionConflict is returned when a store write is rejected because
 	// the conversation was modified concurrently (optimistic concurrency).

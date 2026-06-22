@@ -15,6 +15,7 @@ func reqHistory(msgs []contexty.Message) contexty.CompileRequest {
 }
 
 func TestStatelessCompile(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	msgs := []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "hello"),
@@ -24,20 +25,26 @@ func TestStatelessCompile(t *testing.T) {
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{TokenLimit: 1000},
+				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
 				&contexty.FixedEstimator{TokensPerMessage: 10},
 			),
 		),
 	)
+	// Act.
 	result, err := engine.CompileSnapshot(ctx, reqHistory(msgs))
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, result.Payload.History, 2)
 }
 
 func TestStatelessCompile_RedactionAndBudget(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	pipe := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		contexty.BudgetConfig{
+			Budget:   contexty.EffectiveInputBudget(15),
+			DropHead: contexty.DropHeadConfig{MinMessages: 1},
+		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := contexty.NewEngine(
@@ -49,13 +56,16 @@ func TestStatelessCompile_RedactionAndBudget(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "more"),
 		contexty.TextMessage(contexty.RoleUser, "tail"),
 	})
+	// Act.
 	result, err := engine.CompileSnapshot(ctx, req)
+	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Payload.History)
 	assert.NotContains(t, result.Payload.History[0].TextContent(), "user@example.com")
 }
 
 func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
 	msgs := []contexty.Message{
@@ -64,7 +74,10 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
 	pipe := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		contexty.BudgetConfig{
+			Budget:   contexty.EffectiveInputBudget(15),
+			DropHead: contexty.DropHeadConfig{MinMessages: 1},
+		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 		contexty.WithBudgetObserver(rec),
 	)
@@ -72,7 +85,9 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
+	// Act.
 	result, err := engine.CompileSnapshot(ctx, reqHistory(msgs))
+	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, result.Payload.History)
 	require.Len(t, rec.Tokens, 1)
@@ -81,25 +96,29 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 }
 
 func TestStatelessCompile_DeferredBlocks(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	engine := contexty.NewEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "hint",
 			Segment: contexty.SegmentSystem,
-			Resolve: func(context.Context) ([]contexty.Message, error) {
-				return []contexty.Message{
+			Resolve: func(context.Context) (contexty.DeferredResult, error) {
+				return contexty.DeferredResult{Messages: []contexty.Message{
 					contexty.TextMessage(contexty.RoleSystem, "dynamic"),
-				}, nil
+				}}, nil
 			},
 		}),
 	)
+	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{})
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, result.Payload.System, 1)
 	assert.Equal(t, "dynamic", result.Payload.System[0].TextContent())
 }
 
 func TestStatelessCompile_IgnoresStoreAndConversationID(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	const convID = "stored-conv"
 	store := contexty.NewMemoryConversationStateStore()
@@ -114,15 +133,18 @@ func TestStatelessCompile_IgnoresStoreAndConversationID(t *testing.T) {
 		contexty.WithStateStore(store),
 		contexty.WithConversationID(convID),
 	)
+	// Act.
 	result, err := engine.CompileSnapshot(ctx, reqHistory([]contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "from-snapshot"),
 	}))
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, result.Payload.History, 1)
 	assert.Equal(t, "from-snapshot", result.Payload.History[0].TextContent())
 }
 
 func TestStatelessCompile_ContextPropagation(t *testing.T) {
+	// Arrange.
 	ctx := context.WithValue(context.Background(), traceContextKey{}, "trace-stateless")
 	rec := &contexty.RecordingObserver{}
 	msgs := []contexty.Message{
@@ -131,7 +153,10 @@ func TestStatelessCompile_ContextPropagation(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "c"),
 	}
 	pipe := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{TokenLimit: 15, DropHead: contexty.DropHeadConfig{MinMessages: 1}},
+		contexty.BudgetConfig{
+			Budget:   contexty.EffectiveInputBudget(15),
+			DropHead: contexty.DropHeadConfig{MinMessages: 1},
+		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 		contexty.WithBudgetObserver(rec),
 	)
@@ -139,7 +164,9 @@ func TestStatelessCompile_ContextPropagation(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
+	// Act.
 	_, err := engine.CompileSnapshot(ctx, reqHistory(msgs))
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, rec.Tokens, 1)
 	assert.Equal(t, "trace-stateless", rec.Tokens[0].Ctx.Value(traceContextKey{}))

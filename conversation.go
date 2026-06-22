@@ -3,6 +3,7 @@ package contexty
 import (
 	"context"
 	"maps"
+	"math"
 	"sync"
 )
 
@@ -174,7 +175,7 @@ type MemoryConversationStateStore struct {
 
 // NewMemoryConversationStateStore returns an empty store.
 func NewMemoryConversationStateStore() *MemoryConversationStateStore {
-	//nolint:exhaustruct // sync.RWMutex zero-initializes
+	//nolint:exhaustruct_v5 // sync.RWMutex zero-initializes
 	return &MemoryConversationStateStore{conversations: make(map[string]ConversationSnapshot)}
 }
 
@@ -211,12 +212,17 @@ func (s *MemoryConversationStateStore) ApplyDelta(
 	if err != nil {
 		return err
 	}
-	next.version = cur.version + 1
+	next.version, err = NextConversationVersion(cur.version)
+	if err != nil {
+		return err
+	}
 	s.conversations[conversationID] = next
 	return nil
 }
 
-// ClearState removes all state for a thread.
+// ClearState deletes payload while advancing the durable OCC tombstone.
+// LoadState after clear returns empty content with the new version. Callers must
+// reload this token before recreating the same conversation ID.
 func (s *MemoryConversationStateStore) ClearState(
 	_ context.Context,
 	conversationID string,
@@ -229,13 +235,26 @@ func (s *MemoryConversationStateStore) ClearState(
 		if expectedVersion != 0 {
 			return ErrConversationVersionConflict
 		}
-		return nil
+		cur = EmptyState()
 	}
 	if cur.version != expectedVersion {
 		return ErrConversationVersionConflict
 	}
-	delete(s.conversations, conversationID)
+	nextVersion, err := NextConversationVersion(cur.version)
+	if err != nil {
+		return err
+	}
+	s.conversations[conversationID] = EmptyState().WithVersion(nextVersion)
 	return nil
+}
+
+// NextConversationVersion advances an OCC token without wrapping or resetting.
+// Stores must retain this identity across clear and content expiry.
+func NextConversationVersion(current int64) (int64, error) {
+	if current < 0 || current == math.MaxInt64 {
+		return 0, ErrConversationVersionExhausted
+	}
+	return current + 1, nil
 }
 
 var _ ConversationStateStore = (*MemoryConversationStateStore)(nil)

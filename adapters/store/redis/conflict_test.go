@@ -10,6 +10,7 @@ import (
 )
 
 func TestIsRedisConflict(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	assert.False(t, isRedisConflict(nil))
@@ -18,6 +19,7 @@ func TestIsRedisConflict(t *testing.T) {
 	assert.False(t, isRedisConflict(errors.New("WRONGTYPE")))
 
 	err := evalConflictMap(errors.New("ERR CONFLICT"))
+	// Act / Assert: exercise the contract and check its result.
 	assert.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
 }
 

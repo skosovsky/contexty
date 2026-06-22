@@ -43,7 +43,7 @@ func BenchmarkBudgetPipeline_Truncate(b *testing.B) {
 		msgs[i] = contexty.TextMessage(contexty.RoleUser, "token heavy message body")
 	}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
-		TokenLimit:       500,
+		Budget:           contexty.EffectiveInputBudget(500),
 		TruncateStrategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{}),
 	}, contexty.CharTokenEstimator{})
 	b.ReportAllocs()

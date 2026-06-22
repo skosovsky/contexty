@@ -20,7 +20,8 @@ type ViewFormatter interface {
 }
 
 // Render projects a snapshot through the given view.
-// Prefer Engine.RenderView for named views and custom registry entries.
+// Render is a read-only snapshot inspection helper. Use CompileRequest.Targets
+// for projections that must share the compile pipeline.
 func Render(ctx context.Context, snap ConversationSnapshot, view ViewType) (string, error) {
 	return NewEngine().RenderView(ctx, snap, string(view))
 }
@@ -28,15 +29,18 @@ func Render(ctx context.Context, snap ConversationSnapshot, view ViewType) (stri
 // LLMXMLFormatter wraps messages in XML-like tags per role.
 type LLMXMLFormatter struct{}
 
-// Format renders segments in registration order: system, history, tools, memory.
+// Format renders segments in fixed wire order: system, history, tools, memory.
 func (LLMXMLFormatter) Format(ctx context.Context, snap ConversationSnapshot) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("contexty: llm xml format: %w", err)
 	}
-	order := []SegmentName{SegmentSystem, SegmentHistory, SegmentTools, SegmentMemory}
+	order := viewSegmentOrder()
 	var b strings.Builder
 	for _, seg := range order {
 		for _, msg := range snap.Segment(seg) {
+			if err := rejectMediaMessage(msg); err != nil {
+				return "", err
+			}
 			b.WriteString("<")
 			b.WriteString(string(msg.Role))
 			b.WriteString(">")
@@ -57,10 +61,13 @@ func (FlatClassifierFormatter) Format(ctx context.Context, snap ConversationSnap
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("contexty: flat format: %w", err)
 	}
-	order := []SegmentName{SegmentSystem, SegmentHistory, SegmentTools, SegmentMemory}
+	order := viewSegmentOrder()
 	var b strings.Builder
 	for _, seg := range order {
 		for _, msg := range snap.Segment(seg) {
+			if err := rejectMediaMessage(msg); err != nil {
+				return "", err
+			}
 			b.WriteString(string(msg.Role))
 			b.WriteString(": ")
 			b.WriteString(formatPartsPlain(msg.Parts))
@@ -68,6 +75,10 @@ func (FlatClassifierFormatter) Format(ctx context.Context, snap ConversationSnap
 		}
 	}
 	return b.String(), nil
+}
+
+func viewSegmentOrder() []SegmentName {
+	return []SegmentName{SegmentSystem, SegmentHistory, SegmentTools, SegmentMemory}
 }
 
 func formatPartsPlain(parts []ContentPart) string {
@@ -80,6 +91,10 @@ func formatPartsPlain(parts []ContentPart) string {
 			b.WriteString("[image:")
 			b.WriteString(v.URL)
 			b.WriteString("]")
+		case MediaPart:
+			b.WriteString("[media:")
+			b.WriteString(v.MIMEType)
+			b.WriteString("]")
 		case ToolCallPart:
 			b.WriteString("[tool_call:")
 			b.WriteString(v.Name)
@@ -91,4 +106,13 @@ func formatPartsPlain(parts []ContentPart) string {
 		}
 	}
 	return b.String()
+}
+
+func rejectMediaMessage(message Message) error {
+	for _, part := range message.Parts {
+		if part != nil && part.partKind() == PartKindMedia {
+			return ErrUnsupportedMediaRendering
+		}
+	}
+	return nil
 }

@@ -16,8 +16,6 @@ const (
 	EvictionReasonBudget EvictionReason = "budget"
 	// EvictionReasonTruncate indicates truncation removed the node to fit the limit.
 	EvictionReasonTruncate EvictionReason = "truncate"
-	// EvictionReasonOrphanRepair indicates post-truncation tool-pair repair removed the node.
-	EvictionReasonOrphanRepair EvictionReason = "orphan_repair"
 )
 
 // Observer receives compile-time telemetry without coupling to external metrics SDKs.

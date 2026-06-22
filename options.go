@@ -6,9 +6,9 @@ import "slices"
 type DropHeadConfig struct {
 	// KeepTurnAtomicity enables atomic removal of assistant tool-call turns.
 	// Nil means true (default).
-	KeepTurnAtomicity *bool
-	MinMessages       int
-	ProtectedRoles    []string
+	KeepTurnAtomicity *bool    `json:"keep_turn_atomicity"`
+	MinMessages       int      `json:"min_messages"`
+	ProtectedRoles    []string `json:"protected_roles"`
 }
 
 func (cfg DropHeadConfig) keepTurnAtomicity() bool {
@@ -20,8 +20,11 @@ func (cfg DropHeadConfig) keepTurnAtomicity() bool {
 
 func (cfg DropHeadConfig) normalized() DropHeadConfig {
 	normalized := DropHeadConfig{
-		KeepTurnAtomicity: cfg.KeepTurnAtomicity,
+		KeepTurnAtomicity: BoolPtr(cfg.keepTurnAtomicity()),
 		MinMessages:       cfg.MinMessages,
+	}
+	if normalized.MinMessages < 0 {
+		normalized.MinMessages = 0
 	}
 	if len(cfg.ProtectedRoles) == 0 {
 		return normalized
@@ -33,6 +36,7 @@ func (cfg DropHeadConfig) normalized() DropHeadConfig {
 		}
 		normalized.ProtectedRoles = append(normalized.ProtectedRoles, role)
 	}
+	slices.Sort(normalized.ProtectedRoles)
 	return normalized
 }
 

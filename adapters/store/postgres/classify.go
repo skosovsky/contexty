@@ -26,12 +26,10 @@ func classifyPostgresErr(op string, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return wrapPostgresUnavailable(op, err)
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return wrapPostgresUnavailable(op, err)
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return wrapPostgresUnavailable(op, err)
 	}
 	return fmt.Errorf("contexty/postgres: %s: %w", op, err)
@@ -42,6 +40,6 @@ func wrapPostgresUnavailable(op string, cause error) error {
 }
 
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	pgErr, ok := errors.AsType[*pgconn.PgError](err)
+	return ok && pgErr.Code == "23505"
 }

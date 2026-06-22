@@ -14,6 +14,7 @@ import (
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
 	"github.com/skosovsky/contexty"
+	"github.com/skosovsky/contexty/testutil"
 )
 
 const schemaTemplate = `
@@ -25,6 +26,7 @@ CREATE TABLE %s (
 `
 
 func TestStoreIntegration(t *testing.T) {
+	// Arrange.
 	requireDocker(t)
 
 	ctx := context.Background()
@@ -49,6 +51,10 @@ func TestStoreIntegration(t *testing.T) {
 
 	createTable(ctx, t, pool, "contexty_conversations")
 	createTable(ctx, t, pool, "custom_contexty_conversations")
+
+	t.Run("fixture OCC conformance", func(t *testing.T) {
+		testutil.CheckStateStore(t, New(pool), "fixture-conformance")
+	})
 
 	t.Run("empty load", func(t *testing.T) {
 		store := New(pool)
@@ -136,12 +142,12 @@ func TestStoreIntegration(t *testing.T) {
 		require.ErrorIs(t, err, contexty.ErrConversationVersionConflict)
 	})
 
-	t.Run("clear no-op on missing thread", func(t *testing.T) {
+	t.Run("clear creates empty OCC tombstone on missing thread", func(t *testing.T) {
 		store := New(pool)
 		require.NoError(t, store.ClearState(ctx, "missing-thread", 0))
 		snap, err := store.LoadState(ctx, "missing-thread")
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), snap.Version())
+		assert.Equal(t, int64(1), snap.Version())
 		assert.Empty(t, snap.Segment(contexty.SegmentHistory))
 	})
 
@@ -206,7 +212,7 @@ func TestStoreIntegration(t *testing.T) {
 
 		emptyA, err := store.LoadState(ctx, "thread-a")
 		require.NoError(t, err)
-		assert.Equal(t, int64(0), emptyA.Version())
+		assert.Equal(t, sa2.Version()+1, emptyA.Version())
 		assert.Empty(t, emptyA.Segment(contexty.SegmentHistory))
 
 		msgsB, err := store.LoadState(ctx, "thread-b")
@@ -246,6 +252,7 @@ func TestStoreIntegration(t *testing.T) {
 		assertExpandedSemanticRoundTrip(t, ctx, store, conversationID)
 	})
 
+	// Act / Assert: exercise the contract and check its result.
 	t.Run("custom table", func(t *testing.T) {
 		store := New(pool, WithTableName("custom_contexty_conversations"))
 		conversationID := "thread-custom"

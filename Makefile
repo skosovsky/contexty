@@ -1,9 +1,12 @@
 GO      := go
 GOLANGCI_LINT_CACHE ?= /private/tmp/contexty-golangci-cache
-GOLANGCI_LINT_RUN := env GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) golangci-lint run --allow-parallel-runners
+GOLANGCI_LINT_VERSION := v2.14.0
+GOLANGCI_LINT ?= $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+GOLANGCI_LINT_RUN := env GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) $(GOLANGCI_LINT) run --allow-parallel-runners
 MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \;)
+ACCEPTANCE_TESTS := ^(TestAcceptance_|TestApplyMergePolicy_|TestDropHeadStrategy_AtomicityOptOut$$|TestBudgetPipeline_RejectsStrategyOrphans$$|TestObserver_|TestArchitecture_|TestStateless)
 
-.PHONY: lint fix test test-dod validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
+.PHONY: lint fix test test-acceptance validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
 
 lint:
 	@for dir in $(MODULES); do \
@@ -25,11 +28,15 @@ test:
 		(cd "$$dir" && $(GO) test -v -race ./...) || exit 1; \
 	done
 
-test-dod:
-	@echo "test-dod - root"
-	@$(GO) test -v -race -run='TestDoD_|TestApplyMergePolicy_|TestDropHeadStrategy_AtomicityOptOut|TestBudgetPipeline_RepairsStrategyOrphans|TestObserver_|TestArchitecture_|TestStateless' ./...
+test-acceptance:
+	@echo "test-acceptance - root"
+	@tests=$$($(GO) test -list '^TestAcceptance_' .) || exit 1; \
+		if ! echo "$$tests" | grep -q '^TestAcceptance_'; then \
+			echo "No acceptance tests found" >&2; exit 1; \
+		fi
+	@$(GO) test -v -race -run='$(ACCEPTANCE_TESTS)' ./...
 
-validate: lint test-dod bench-guardrails test
+validate: lint test-acceptance bench-guardrails test
 
 bench:
 	@for dir in $(MODULES); do \
