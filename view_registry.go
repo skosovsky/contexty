@@ -56,20 +56,22 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 	if !ok {
 		return "", fmt.Errorf("contexty: unknown view %q", name)
 	}
+	return e.renderNamedView(ctx, snap, cfg)
+}
+
+func (e *Engine) renderNamedView(
+	ctx context.Context,
+	snap ConversationSnapshot,
+	cfg ViewConfiguration,
+) (string, error) {
 	seg := cfg.SourceSegment
 	if seg == "" {
 		seg = SegmentHistory
 	}
 	msgs := snap.Segment(seg)
 	working := cloneMessageSlice(msgs)
-	if e.roleProjection != nil {
-		for i := range working {
-			role, err := e.roleProjection.ProjectRole(working[i])
-			if err != nil {
-				return "", fmt.Errorf("contexty: render view role projection: %w", err)
-			}
-			working[i].Role = role
-		}
+	if err := e.projectViewRoles(ctx, working); err != nil {
+		return "", err
 	}
 	if cfg.Budget != nil {
 		trimmed, err := cfg.Budget.Apply(ctx, working)
@@ -79,17 +81,51 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 		working = trimmed
 	}
 	if cfg.Formatter != nil {
-		formatted, err := cfg.Formatter(ctx, working)
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		formatted, err := cfg.Formatter(ctx, cloneMessageSlice(working))
+		if canceled := ctx.Err(); canceled != nil {
+			return "", canceled
+		}
 		if err != nil {
 			return "", fmt.Errorf("contexty: render view formatter: %w", err)
 		}
 		working = formatted
+	}
+	if cfg.Budget != nil {
+		if err := cfg.Budget.validateOutput(ctx, working); err != nil {
+			return "", err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	var b strings.Builder
 	for _, m := range working {
 		b.WriteString(formatPartsPlain(m.Parts))
 	}
 	return b.String(), nil
+}
+
+func (e *Engine) projectViewRoles(ctx context.Context, messages []Message) error {
+	if e.roleProjection == nil {
+		return nil
+	}
+	for i := range messages {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		role, err := e.roleProjection.ProjectRole(messages[i].Clone())
+		if canceled := ctx.Err(); canceled != nil {
+			return canceled
+		}
+		if err != nil {
+			return fmt.Errorf("contexty: render view role projection: %w", err)
+		}
+		messages[i].Role = role
+	}
+	return nil
 }
 
 func (e *Engine) resolveView(name string) (ViewConfiguration, bool) {

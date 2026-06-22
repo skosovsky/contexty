@@ -13,6 +13,8 @@ import (
 
 const defaultTableName = "contexty_conversations"
 
+const threadIDParam = "thread_id"
+
 // Store persists conversation state in PostgreSQL with optimistic concurrency.
 type Store struct {
 	pool      *pgxpool.Pool
@@ -44,7 +46,7 @@ func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.
 	)
 	var version int64
 	var payload []byte
-	err := s.pool.QueryRow(ctx, query, pgx.NamedArgs{"thread_id": conversationID}).Scan(&version, &payload)
+	err := s.pool.QueryRow(ctx, query, pgx.NamedArgs{threadIDParam: conversationID}).Scan(&version, &payload)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return contexty.EmptySnapshot(), nil
@@ -75,35 +77,12 @@ func (s *Store) ApplyDelta(
 	)
 }
 
-// ClearState removes the conversation state.
+// ClearState removes payload and retains an advancing OCC tombstone.
 func (s *Store) ClearState(ctx context.Context, conversationID string, expectedVersion int64) error {
-	if s.pool == nil {
-		return errors.New("contexty/postgres: nil pool")
-	}
-	query := fmt.Sprintf(
-		`DELETE FROM %s WHERE thread_id = @thread_id AND version = @expected_version`,
-		s.tableName,
-	)
-	ct, err := s.pool.Exec(ctx, query, pgx.NamedArgs{
-		"thread_id":        conversationID,
-		"expected_version": expectedVersion,
-	})
-	if err != nil {
-		return classifyPostgresErr("clear", err)
-	}
-	if ct.RowsAffected() == 0 {
-		// Distinguish missing thread (expected 0) from conflict.
-		var exists bool
-		check := fmt.Sprintf(`SELECT EXISTS(SELECT 1 FROM %s WHERE thread_id = @thread_id)`, s.tableName)
-		if qerr := s.pool.QueryRow(ctx, check, pgx.NamedArgs{"thread_id": conversationID}).Scan(&exists); qerr != nil {
-			return classifyPostgresErr("clear check", qerr)
-		}
-		if !exists && expectedVersion == 0 {
-			return nil
-		}
-		return contexty.ErrConversationVersionConflict
-	}
-	return nil
+	return s.mutate(ctx, conversationID, expectedVersion,
+		func(contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
+			return contexty.EmptySnapshot(), nil
+		})
 }
 
 func (s *Store) mutate(
@@ -128,7 +107,7 @@ func (s *Store) mutate(
 		s.tableName,
 	)
 	var payload []byte
-	loadErr := tx.QueryRow(ctx, loadQ, pgx.NamedArgs{"thread_id": conversationID}).Scan(&version, &payload)
+	loadErr := tx.QueryRow(ctx, loadQ, pgx.NamedArgs{threadIDParam: conversationID}).Scan(&version, &payload)
 	switch {
 	case loadErr == nil:
 		cur, err = s.codec.Decode(payload)
@@ -152,7 +131,11 @@ func (s *Store) mutate(
 	if err != nil {
 		return err
 	}
-	next = next.WithVersion(version + 1)
+	nextVersion, err := contexty.NextConversationVersion(version)
+	if err != nil {
+		return err
+	}
+	next = next.WithVersion(nextVersion)
 	encoded, err := s.codec.Encode(next)
 	if err != nil {
 		return fmt.Errorf("contexty/postgres: encode: %w", err)
@@ -184,9 +167,9 @@ func (s *Store) persistSnapshot(
 			s.tableName,
 		)
 		if _, err := tx.Exec(ctx, insertQ, pgx.NamedArgs{
-			"thread_id": conversationID,
-			"version":   nextVersion,
-			"segments":  encoded,
+			threadIDParam: conversationID,
+			"version":     nextVersion,
+			"segments":    encoded,
 		}); err != nil {
 			if isUniqueViolation(err) {
 				return contexty.ErrConversationVersionConflict
@@ -201,7 +184,7 @@ func (s *Store) persistSnapshot(
 		s.tableName,
 	)
 	ct, err := tx.Exec(ctx, updateQ, pgx.NamedArgs{
-		"thread_id":        conversationID,
+		threadIDParam:      conversationID,
 		"version":          nextVersion,
 		"segments":         encoded,
 		"expected_version": expectedVersion,

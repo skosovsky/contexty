@@ -26,12 +26,10 @@ func classifyRedisErr(op string, err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return wrapRedisUnavailable(op, err)
 	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
+	if netErr, ok := errors.AsType[net.Error](err); ok && netErr.Timeout() {
 		return wrapRedisUnavailable(op, err)
 	}
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return wrapRedisUnavailable(op, err)
 	}
 	if errors.Is(err, goredis.ErrClosed) ||

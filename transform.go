@@ -17,15 +17,38 @@ func TransformPipeline(
 	snap ConversationSnapshot,
 	hooks ...TransformHook,
 ) (ConversationSnapshot, error) {
+	if err := ctx.Err(); err != nil {
+		return ConversationSnapshot{}, err
+	}
 	cur := snap
 	for i, hook := range hooks {
 		if hook == nil {
 			continue
 		}
-		next, err := hook.Transform(ctx, cur)
+		stageCtx := withRecordingComponent(ctx, recordingKey(RecordingHook, "", "", i), "hook")
+		if err := ctx.Err(); err != nil {
+			return ConversationSnapshot{}, err
+		}
+		next, err := hook.Transform(stageCtx, cur)
+		if canceled := ctx.Err(); canceled != nil {
+			return ConversationSnapshot{}, canceled
+		}
 		if err != nil {
 			return ConversationSnapshot{}, fmt.Errorf("contexty: transform hook %d: %w", i, err)
 		}
+		if _, compiling := compileIdentityFromContext(ctx); compiling {
+			next, err = normalizeSnapshotMessageIDs(ctx, next)
+			if err != nil {
+				return ConversationSnapshot{}, err
+			}
+		}
+		if traceFromContext(ctx) != nil {
+			next, err = traceSnapshot(stageCtx, "hook", cur, next)
+			if err != nil {
+				return ConversationSnapshot{}, err
+			}
+		}
+		recordSnapshotHookTransforms(ctx, cur, next)
 		cur = next
 	}
 	return cur, nil

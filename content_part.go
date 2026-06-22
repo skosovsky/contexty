@@ -13,6 +13,7 @@ type PartKind string
 const (
 	PartKindText       PartKind = "text"
 	PartKindImage      PartKind = "image"
+	PartKindMedia      PartKind = "media"
 	PartKindToolCall   PartKind = "tool_call"
 	PartKindToolResult PartKind = "tool_result"
 )
@@ -44,8 +45,6 @@ func (p ImagePart) clonePart() ContentPart { return p }
 
 // ToolPayload carries typed tool input/output data without tunneling metadata
 // through TextPart.
-//
-//nolint:recvcheck // UnmarshalJSON must use a pointer; value methods keep payloads immutable.
 type ToolPayload struct {
 	Text     string          `json:"text,omitempty"`
 	Data     json.RawMessage `json:"data,omitempty"`
@@ -271,15 +270,20 @@ func hexToBytes(s string) ([]byte, error) {
 
 // ToolCallPart is a structured tool invocation.
 type ToolCallPart struct {
-	ID        string      `json:"id"`
-	Name      string      `json:"name"`
-	Arguments ToolPayload `json:"arguments"`
+	ID            string          `json:"id"`
+	Name          string          `json:"name"`
+	Arguments     ToolPayload     `json:"arguments"`
+	ArgumentsBlob *BlobDescriptor `json:"arguments_blob,omitempty"`
 }
 
 func (ToolCallPart) partKind() PartKind { return PartKindToolCall }
 
 func (p ToolCallPart) clonePart() ContentPart {
 	p.Arguments = p.Arguments.Clone()
+	if p.ArgumentsBlob != nil {
+		blob := p.ArgumentsBlob.Clone()
+		p.ArgumentsBlob = &blob
+	}
 	return p
 }
 
@@ -346,6 +350,12 @@ func decodePart(wire partWire) (ContentPart, error) {
 		return p, nil
 	case PartKindImage:
 		var p ImagePart
+		if err := json.Unmarshal(wire.Body, &p); err != nil {
+			return nil, err
+		}
+		return p, nil
+	case PartKindMedia:
+		var p MediaPart
 		if err := json.Unmarshal(wire.Body, &p); err != nil {
 			return nil, err
 		}

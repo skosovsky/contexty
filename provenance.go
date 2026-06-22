@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -15,16 +16,27 @@ type Provenance interface {
 
 // ProvenanceRegistry decodes provenance payloads by type_id without map[string]any.
 type ProvenanceRegistry struct {
-	mu       sync.RWMutex
-	decoders map[string]func([]byte) (Provenance, error)
+	mu        sync.RWMutex
+	decoders  map[string]func([]byte) (Provenance, error)
+	intrinsic map[string]Descriptor
 }
 
 // NewProvenanceRegistry returns an empty registry.
 func NewProvenanceRegistry() *ProvenanceRegistry {
 	return &ProvenanceRegistry{
-		mu:       sync.RWMutex{},
-		decoders: make(map[string]func([]byte) (Provenance, error)),
+		mu:        sync.RWMutex{},
+		decoders:  make(map[string]func([]byte) (Provenance, error)),
+		intrinsic: nil,
 	}
+}
+
+func (r *ProvenanceRegistry) snapshot() *ProvenanceRegistry {
+	if r == nil {
+		return DefaultProvenanceRegistry()
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return &ProvenanceRegistry{mu: sync.RWMutex{}, decoders: maps.Clone(r.decoders), intrinsic: maps.Clone(r.intrinsic)}
 }
 
 // Register adds a decoder for typeID. Panics on duplicate registration.
@@ -118,5 +130,9 @@ func DefaultProvenanceRegistry() *ProvenanceRegistry {
 		}
 		return p, nil
 	})
+	r.intrinsic = map[string]Descriptor{
+		"user":   {ID: "contexty/codec/user-provenance", Revision: "contract"},
+		"system": {ID: "contexty/codec/system-provenance", Revision: "contract"},
+	}
 	return r
 }

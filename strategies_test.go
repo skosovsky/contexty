@@ -11,6 +11,7 @@ import (
 )
 
 func TestDropHeadStrategy_ToolTurnAtomicity(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	estimator := &contexty.FixedEstimator{TokensPerMessage: 5}
 	strategy := contexty.NewDropHeadStrategy(contexty.DropHeadConfig{MinMessages: 1})
@@ -46,7 +47,9 @@ func TestDropHeadStrategy_ToolTurnAtomicity(t *testing.T) {
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
+	// Act.
 	out, err := strategy.Apply(ctx, msgs, 30, 15, estimator)
+	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 	for _, m := range out {
@@ -59,6 +62,7 @@ func TestDropHeadStrategy_ToolTurnAtomicity(t *testing.T) {
 }
 
 func TestDropTailStrategy_ToolTurnAtomicity(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	estimator := &contexty.FixedEstimator{TokensPerMessage: 5}
 	strategy := contexty.NewDropTailStrategy()
@@ -77,7 +81,9 @@ func TestDropTailStrategy_ToolTurnAtomicity(t *testing.T) {
 			},
 		},
 	}
+	// Act.
 	out, err := strategy.Apply(ctx, msgs, 30, 5, estimator)
+	// Assert.
 	require.NoError(t, err)
 	if len(out) > 0 && out[len(out)-1].Role == contexty.RoleTool {
 		t.Fatalf("orphan tool result at tail: %+v", out)
@@ -85,23 +91,27 @@ func TestDropTailStrategy_ToolTurnAtomicity(t *testing.T) {
 }
 
 func TestBudgetPipeline_Summarize(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	msgs := []contexty.Message{contexty.TextMessage(contexty.RoleUser, "long message")}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
-		TokenLimit: 10,
+		Budget: contexty.EffectiveInputBudget(10),
 		Summarizer: stubSummarizer(
 			func(context.Context, []contexty.Message) (contexty.Message, error) {
 				return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
 			},
 		),
 	}, contexty.CharTokenEstimator{})
+	// Act.
 	out, err := pipe.Apply(ctx, msgs)
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	assert.Equal(t, "compressed", out[0].TextContent())
 }
 
 func TestDropHeadStrategy_AtomicityOptOut(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	optOut := false
 	strategy := contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
@@ -123,7 +133,9 @@ func TestDropHeadStrategy_AtomicityOptOut(t *testing.T) {
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
+	// Act.
 	out, err := strategy.Apply(ctx, msgs, 20, 12, &contexty.FixedEstimator{TokensPerMessage: 5})
+	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 	hasOrphanTool := false
@@ -138,7 +150,8 @@ func TestDropHeadStrategy_AtomicityOptOut(t *testing.T) {
 	assert.True(t, hasOrphanTool, "opt-out fast path may split tool turns at strategy level")
 }
 
-func TestBudgetPipeline_RepairsStrategyOrphans(t *testing.T) {
+func TestBudgetPipeline_RejectsStrategyOrphans(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	optOut := false
 	msgs := []contexty.Message{
@@ -158,21 +171,20 @@ func TestBudgetPipeline_RepairsStrategyOrphans(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
-		TokenLimit: 12,
+		Budget: contexty.EffectiveInputBudget(12),
 		TruncateStrategy: contexty.NewDropHeadStrategy(contexty.DropHeadConfig{
 			KeepTurnAtomicity: &optOut,
 		}),
 	}, &contexty.FixedEstimator{TokensPerMessage: 5})
+	// Act.
 	out, err := pipe.Apply(ctx, msgs)
-	require.NoError(t, err)
-	for i, m := range out {
-		if m.Role == contexty.RoleTool && (i == 0 || out[i-1].Role != contexty.RoleAssistant) {
-			t.Fatalf("pipeline left orphan tool result at index %d", i)
-		}
-	}
+	// Assert.
+	require.ErrorIs(t, err, contexty.ErrInvalidToolRound)
+	require.Nil(t, out)
 }
 
 func TestDropHeadStrategy_FastPathEmitsObserverEvictions(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
 	ctx = contexty.WithBudgetObservationForTest(ctx, rec, "history")
@@ -187,7 +199,9 @@ func TestDropHeadStrategy_FastPathEmitsObserverEvictions(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "mid"),
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
+	// Act.
 	out, err := strategy.Apply(ctx, msgs, 30, 10, &contexty.FixedEstimator{TokensPerMessage: 10})
+	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)
 	require.Len(t, rec.Evictions, 2)
@@ -197,6 +211,7 @@ func TestDropHeadStrategy_FastPathEmitsObserverEvictions(t *testing.T) {
 }
 
 func TestDropHeadStrategy_SelectivePathEmitsObserverEvictions(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	rec := &contexty.RecordingObserver{}
 	ctx = contexty.WithBudgetObservationForTest(ctx, rec, "history")
@@ -218,7 +233,9 @@ func TestDropHeadStrategy_SelectivePathEmitsObserverEvictions(t *testing.T) {
 		},
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
+	// Act.
 	out, err := strategy.Apply(ctx, msgs, 40, 15, &contexty.FixedEstimator{TokensPerMessage: 10})
+	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 	require.GreaterOrEqual(t, len(rec.Evictions), 2)

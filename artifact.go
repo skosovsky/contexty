@@ -1,6 +1,7 @@
 package contexty
 
 import (
+	"mime"
 	"slices"
 	"strings"
 )
@@ -31,7 +32,9 @@ const (
 	ArtifactPersistenceSkip    ArtifactPersistencePolicy = "skip"
 )
 
-// ArtifactBudgetPolicy describes how an artifact participates in budget preflight.
+// ArtifactBudgetPolicy bounds the materialized message using the main estimator.
+// A nil policy is unlimited locally; TokenLimit zero is zero, not unlimited.
+// Negative limits on active artifacts fail compilation.
 type ArtifactBudgetPolicy struct {
 	Group      string `json:"group,omitempty"`
 	TokenLimit int    `json:"token_limit,omitempty"`
@@ -43,6 +46,8 @@ type ContextArtifact struct {
 	Kind         ArtifactKind              `json:"kind"`
 	ArtifactType string                    `json:"artifact_type,omitempty"`
 	Payload      ToolPayload               `json:"payload"`
+	Blob         *ArtifactBlob             `json:"blob,omitempty"`
+	Extensions   []Extension               `json:"-"`
 	Lifecycle    ArtifactLifecycle         `json:"lifecycle,omitempty"`
 	BoundTurnID  string                    `json:"bound_turn_id,omitempty"`
 	OwnerRef     *SourceRef                `json:"owner_ref,omitempty"`
@@ -64,11 +69,13 @@ type MemoryBlock struct {
 
 // NewRetrievalDocument builds a retrieval artifact.
 func NewRetrievalDocument(id string, payload ToolPayload) RetrievalDocument {
-	return RetrievalDocument{ContextArtifact: ContextArtifact{
+	return RetrievalDocument{
 		ID:           id,
 		Kind:         ArtifactKindRetrievalDocument,
 		ArtifactType: "",
 		Payload:      payload.Clone(),
+		Blob:         nil,
+		Extensions:   nil,
 		Lifecycle:    ArtifactLifecycleTurnBound,
 		BoundTurnID:  "",
 		OwnerRef:     nil,
@@ -76,16 +83,18 @@ func NewRetrievalDocument(id string, payload ToolPayload) RetrievalDocument {
 		MergePolicy:  "",
 		Budget:       nil,
 		Persistence:  "",
-	}}
+	}
 }
 
 // NewMemoryBlock builds a memory artifact.
 func NewMemoryBlock(id string, payload ToolPayload) MemoryBlock {
-	return MemoryBlock{ContextArtifact: ContextArtifact{
+	return MemoryBlock{
 		ID:           id,
 		Kind:         ArtifactKindMemoryBlock,
 		ArtifactType: "",
 		Payload:      payload.Clone(),
+		Blob:         nil,
+		Extensions:   nil,
 		Lifecycle:    ArtifactLifecyclePersistent,
 		BoundTurnID:  "",
 		OwnerRef:     nil,
@@ -93,13 +102,15 @@ func NewMemoryBlock(id string, payload ToolPayload) MemoryBlock {
 		MergePolicy:  "",
 		Budget:       nil,
 		Persistence:  "",
-	}}
+	}
 }
 
 // Clone returns a deep copy.
 func (a ContextArtifact) Clone() ContextArtifact {
 	cp := a
 	cp.Payload = a.Payload.Clone()
+	cp.Blob = a.Blob.clone()
+	cp.Extensions = cloneExtensions(a.Extensions)
 	cp.OwnerRef = cloneSourceRefPtr(a.OwnerRef)
 	cp.SourceRefs = cloneSourceRefs(a.SourceRefs)
 	if a.Budget != nil {
@@ -157,20 +168,6 @@ func mergeArtifacts(artifacts []ContextArtifact) []ContextArtifact {
 	return out
 }
 
-func activeArtifactsForTurn(turnID string, artifacts []ContextArtifact) []ContextArtifact {
-	out := make([]ContextArtifact, 0, len(artifacts))
-	for _, artifact := range artifacts {
-		if !artifactVisibleInTurn(turnID, artifact) {
-			continue
-		}
-		if !artifactFitsBudget(artifact) {
-			continue
-		}
-		out = upsertArtifact(out, artifact)
-	}
-	return out
-}
-
 func artifactVisibleInTurn(turnID string, artifact ContextArtifact) bool {
 	switch artifact.Lifecycle {
 	case ArtifactLifecycleTurnBound:
@@ -180,24 +177,6 @@ func artifactVisibleInTurn(turnID string, artifact ContextArtifact) bool {
 	default:
 		return false
 	}
-}
-
-func artifactFitsBudget(artifact ContextArtifact) bool {
-	if artifact.Budget == nil || artifact.Budget.TokenLimit <= 0 {
-		return true
-	}
-	return artifactPayloadTokens(artifact) <= artifact.Budget.TokenLimit
-}
-
-func artifactPayloadTokens(artifact ContextArtifact) int {
-	text := artifact.Payload.PlainText()
-	if text != "" {
-		return len([]rune(text))
-	}
-	if len(artifact.Payload.Binary) > 0 {
-		return len(artifact.Payload.Binary)
-	}
-	return 0
 }
 
 func upsertArtifact(artifacts []ContextArtifact, incoming ContextArtifact) []ContextArtifact {
@@ -244,6 +223,13 @@ func mergeArtifact(existing, incoming ContextArtifact) ContextArtifact {
 
 func appendArtifactPayload(existing, incoming ContextArtifact) ContextArtifact {
 	merged := incoming.Clone()
+	merged.Extensions = append(cloneExtensions(existing.Extensions), merged.Extensions...)
+	merged.SourceRefs = cloneSourceRefs(existing.SourceRefs)
+	for _, source := range incoming.SourceRefs {
+		if !slices.Contains(merged.SourceRefs, source) {
+			merged.SourceRefs = append(merged.SourceRefs, source)
+		}
+	}
 	left := existing.Payload.PlainText()
 	right := incoming.Payload.PlainText()
 	if left == "" {
@@ -258,14 +244,21 @@ func appendArtifactPayload(existing, incoming ContextArtifact) ContextArtifact {
 }
 
 func deduplicateArtifactBySourceLayer(existing, incoming ContextArtifact) ContextArtifact {
+	if artifactsShareSourceLayer(existing, incoming) {
+		return existing.Clone()
+	}
+	return incoming.Clone()
+}
+
+func artifactsShareSourceLayer(existing, incoming ContextArtifact) bool {
 	existingRefs := sourceRefSet(existing.SourceRefs)
 	incomingRefs := sourceRefSet(incoming.SourceRefs)
 	for ref := range incomingRefs {
 		if existingRefs[ref] {
-			return existing.Clone()
+			return true
 		}
 	}
-	return incoming.Clone()
+	return false
 }
 
 func sourceRefSet(refs []SourceRef) map[string]bool {
@@ -335,22 +328,60 @@ func artifactShouldPersist(artifact ContextArtifact) bool {
 	}
 }
 
-func artifactMessage(artifact ContextArtifact) Message {
+func artifactMessage(artifact ContextArtifact) (Message, error) {
+	if err := validateArtifactBlob(artifact); err != nil {
+		return Message{}, err
+	}
+	parts, err := artifactParts(artifact.Payload)
+	if err != nil {
+		return Message{}, err
+	}
 	return Message{
 		ID:         "artifact:" + artifact.ID,
 		Role:       RoleSystem,
-		Parts:      []ContentPart{TextPart{Text: artifact.Payload.PlainText()}},
+		Parts:      parts,
 		SourceRefs: cloneSourceRefs(artifact.SourceRefs),
-	}
+		Extensions: cloneExtensions(artifact.Extensions),
+	}, nil
 }
 
-func artifactMessages(artifacts []ContextArtifact) []Message {
+func artifactMessages(artifacts []ContextArtifact) ([]Message, error) {
 	if len(artifacts) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]Message, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		out = append(out, artifactMessage(artifact))
+		message, err := artifactMessage(artifact)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, message)
 	}
-	return out
+	return out, nil
+}
+
+func artifactParts(payload ToolPayload) ([]ContentPart, error) {
+	mediaType, _, parseErr := mime.ParseMediaType(payload.MIMEType)
+	major, _, _ := strings.Cut(mediaType, "/")
+	isMedia := len(payload.Binary) > 0 || (payload.MIMEType != "" &&
+		(parseErr != nil || (mediaType != mimeApplicationJSON && major != "text")))
+	if !isMedia {
+		return []ContentPart{TextPart{Text: payload.PlainText()}}, nil
+	}
+	data := payload.Binary
+	if len(data) == 0 {
+		data = payload.Data
+		if len(data) == 0 {
+			data = []byte(payload.Text)
+		}
+	}
+	part := MediaPart{MIMEType: payload.MIMEType, Data: slices.Clone(data)}
+	if err := part.Validate(); err != nil {
+		return nil, err
+	}
+	parts := []ContentPart{part}
+	if len(payload.Binary) > 0 && payload.Text != "" {
+		parts = append([]ContentPart{TextPart{Text: payload.Text}}, parts...)
+	}
+	return parts, nil
 }

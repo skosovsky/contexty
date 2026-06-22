@@ -12,7 +12,7 @@ type Summarizer interface {
 
 // BudgetConfig controls unified summarize + truncate pipeline.
 type BudgetConfig struct {
-	TokenLimit       int
+	Budget           BudgetRequest
 	Summarizer       Summarizer
 	TruncateStrategy EvictionStrategy
 	// DropHead configures drop-head truncation when TruncateStrategy is nil.
@@ -21,9 +21,14 @@ type BudgetConfig struct {
 
 // BudgetPipeline applies semantic compression then mechanical truncation.
 type BudgetPipeline struct {
-	cfg       BudgetConfig
-	estimator TokenEstimator
-	observer  Observer
+	cfg                 BudgetConfig
+	estimator           TokenEstimator
+	observer            Observer
+	compaction          *CompactionProfile
+	rolling             *RollingSummaryPolicy
+	truncation          *Descriptor
+	summarizer          *Descriptor
+	estimatorDescriptor *Descriptor
 }
 
 // NewBudgetPipeline returns a pipeline with the given config and estimator.
@@ -31,80 +36,190 @@ func NewBudgetPipeline(cfg BudgetConfig, estimator TokenEstimator, opts ...Budge
 	if estimator == nil {
 		estimator = CharTokenEstimator{}
 	}
-	p := &BudgetPipeline{cfg: cfg, estimator: estimator, observer: nil}
+	cfg.DropHead = cfg.DropHead.normalized()
+	p := &BudgetPipeline{cfg: cfg, estimator: freezeBuiltinEstimator(estimator), observer: nil, compaction: nil,
+		rolling: nil, truncation: nil, summarizer: nil, estimatorDescriptor: nil}
 	for _, opt := range opts {
 		opt(p)
 	}
 	return p
 }
 
+// validateOutput verifies the final representation without running transforms again.
+func (p *BudgetPipeline) validateOutput(ctx context.Context, msgs []Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	limit, err := p.cfg.Budget.Resolve()
+	if err != nil {
+		return err
+	}
+	n, err := p.estimator.Estimate(ctx, estimatorCallbackInput(p.estimator, msgs))
+	if canceled := ctx.Err(); canceled != nil {
+		return canceled
+	}
+	if err != nil {
+		return fmt.Errorf("contexty: final budget estimate: %w: %w", ErrTokenCountFailed, err)
+	}
+	if n < 0 || n > limit {
+		return ErrBudgetExceeded
+	}
+	recordFinalBudgetEstimate(ctx, n)
+	return nil
+}
+
 // Apply runs summarize (if configured) then truncate until within limit.
 func (p *BudgetPipeline) Apply(ctx context.Context, msgs []Message) ([]Message, error) {
-	return p.ApplyWithLimit(ctx, msgs, p.cfg.TokenLimit)
+	limit, err := p.cfg.Budget.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	return p.ApplyWithLimit(ctx, msgs, limit)
 }
 
 // ApplyWithLimit runs the budget pipeline against an effective token limit (e.g. history slice after preflight).
 func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, msgs []Message, tokenLimit int) ([]Message, error) {
+	limit, err := p.cfg.Budget.Resolve()
+	if err != nil {
+		return nil, err
+	}
+	if tokenLimit < 0 || tokenLimit > limit {
+		return nil, ErrInvalidBudgetRequest
+	}
+	if err = p.validateRollingSummary(); err != nil {
+		return nil, err
+	}
+	if err = p.validateCompactionContext(ctx); err != nil {
+		return nil, err
+	}
 	ctx = ensureBudgetObservation(ctx, p.observer)
-	if err := ctx.Err(); err != nil {
+	if err = ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: budget: %w", err)
 	}
 	if len(msgs) == 0 {
 		return nil, nil
 	}
 	cur := cloneMessageSlice(msgs)
-	tokens, err := p.estimator.Estimate(ctx, cur)
+	rounds, err := InspectToolRoundStates(cur, nil)
 	if err != nil {
-		return nil, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, err)
+		return nil, err
+	}
+	tokens, err := p.estimateBudgetMessages(ctx, cur)
+	if err != nil {
+		return nil, err
 	}
 	if obs := observerFrom(ctx); obs != nil {
 		blockID := budgetBlockIDFrom(ctx)
 		if blockID == "" {
-			blockID = "budget"
+			blockID = string(EvictionReasonBudget)
 		}
 		obs.OnTokensEstimated(ctx, blockID, tokens)
+	}
+	if err = ctx.Err(); err != nil {
+		return nil, err
 	}
 	if tokens <= tokenLimit {
 		return cur, nil
 	}
+	return p.applyOverflowingHistory(ctx, cur, tokens, tokenLimit, rounds)
+}
+
+func (p *BudgetPipeline) applyOverflowingHistory(ctx context.Context, cur []Message,
+	tokens, tokenLimit int, rounds []ToolRoundObservation,
+) ([]Message, error) {
+	if p.rolling != nil {
+		start := rollingTailStart(len(cur), *p.rolling, rounds)
+		return p.applyProtectedSuffix(ctx, cur, start, tokenLimit)
+	}
+	for _, round := range rounds {
+		if round.State == ToolRoundPending {
+			return p.applyProtectedSuffix(ctx, cur, round.Start, tokenLimit)
+		}
+	}
+	return p.applyEvictable(ctx, cur, tokens, tokenLimit)
+}
+
+func (p *BudgetPipeline) applyEvictable(ctx context.Context, cur []Message, tokens, tokenLimit int) ([]Message, error) {
+	var err error
 	if p.cfg.Summarizer != nil {
-		originalTokens := tokens
-		beforeSum := cur
-		summary, sumErr := p.cfg.Summarizer.Summarize(ctx, cur)
-		if sumErr != nil {
-			return nil, fmt.Errorf("contexty: budget summarize: %w", sumErr)
-		}
-		seg := budgetIdentitySegmentFrom(ctx)
-		summary, err = ensureMessageIDFromContext(ctx, seg, 0, summary)
+		cur, tokens, err = p.summarize(ctx, cur, tokens, tokenLimit)
 		if err != nil {
-			return nil, fmt.Errorf("contexty: budget summarize identity: %w", err)
+			return nil, err
 		}
-		recordSummarizeReplaceCtx(ctx, beforeSum, summary)
-		sumTokens, estErr := p.estimator.Estimate(ctx, []Message{summary})
-		if estErr != nil {
-			return nil, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, estErr)
+	}
+	if tokens <= tokenLimit {
+		if err = validateEvictableRounds(cur); err != nil {
+			return nil, err
 		}
-		emitContextSummarized(ctx, originalTokens, sumTokens)
-		if sumTokens <= tokenLimit {
-			return []Message{summary}, nil
-		}
-		cur = []Message{summary}
-		tokens = sumTokens
+		return cur, nil
 	}
 	strategy := p.cfg.TruncateStrategy
 	if strategy == nil {
 		strategy = NewDropHeadStrategy(p.cfg.DropHead)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	out, truncErr := strategy.Apply(ctx, cur, tokens, tokenLimit, p.estimator)
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
 	if truncErr != nil {
 		return nil, truncErr
 	}
-	if out != nil {
-		beforeRepair := out
-		out = enforceToolPairAtomicity(out)
-		reportEvictions(ctx, beforeRepair, out, EvictionReasonOrphanRepair)
+	return p.validateEvictionOutput(ctx, out, tokenLimit)
+}
+
+func (p *BudgetPipeline) validateEvictionOutput(ctx context.Context, output []Message, limit int) ([]Message, error) {
+	owned := cloneMessageSlice(output)
+	if err := validateEvictableRounds(owned); err != nil {
+		return nil, err
 	}
-	return out, nil
+	cost, err := p.estimateBudgetMessages(ctx, owned)
+	if err != nil {
+		return nil, err
+	}
+	if cost > limit {
+		return nil, ErrBudgetExceeded
+	}
+	return owned, nil
+}
+
+func (p *BudgetPipeline) summarize(
+	ctx context.Context,
+	before []Message,
+	originalTokens, tokenLimit int,
+) ([]Message, int, error) {
+	ctx = p.withSummarizerIdentity(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	summary, err := p.cfg.Summarizer.Summarize(ctx, cloneMessageSlice(before))
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, 0, canceled
+	}
+	if err != nil {
+		return nil, 0, fmt.Errorf("contexty: budget summarize: %w", err)
+	}
+	summary = summary.Clone()
+	summary, err = ensureMessageIDFromContext(ctx, budgetIdentitySegmentFrom(ctx), 0, summary)
+	if err != nil {
+		return nil, 0, fmt.Errorf("contexty: budget summarize identity: %w", err)
+	}
+	traced, err := traceStage(ctx, "summarize", before, []Message{summary}, true)
+	if err != nil {
+		return nil, 0, err
+	}
+	recordSummarizeReplaceCtx(ctx, before, traced[0])
+	tokens, err := p.estimateSummary(ctx, traced[0], tokenLimit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, err)
+	}
+	emitContextSummarized(ctx, originalTokens, tokens)
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
+	return traced, tokens, nil
 }
 
 func emitContextSummarized(ctx context.Context, beforeTokens, afterTokens int) {
@@ -113,32 +228,6 @@ func emitContextSummarized(ctx context.Context, beforeTokens, afterTokens int) {
 		return
 	}
 	obs.OnContextSummarized(ctx, float64(beforeTokens)/float64(afterTokens))
-}
-
-// enforceToolPairAtomicity drops orphan tool results or assistant calls without results.
-func enforceToolPairAtomicity(msgs []Message) []Message {
-	if len(msgs) == 0 {
-		return msgs
-	}
-	out := make([]Message, 0, len(msgs))
-	for i := 0; i < len(msgs); {
-		switch {
-		case msgs[i].Role == RoleTool:
-			i++
-		case msgs[i].Role == RoleAssistant && msgs[i].HasToolCalls():
-			round, err := ToolRoundFromMessages(msgs, i)
-			end := contiguousToolBlockEnd(msgs, i)
-			if err == nil {
-				out = append(out, round.Assistant)
-				out = append(out, round.Results...)
-			}
-			i = end + 1
-		default:
-			out = append(out, msgs[i].Clone())
-			i++
-		}
-	}
-	return out
 }
 
 func contiguousToolBlockEnd(msgs []Message, assistantIdx int) int {

@@ -112,7 +112,7 @@ func main() {
 
 	store.attempts = 0
 	store.failLeft = 0
-	//nolint:exhaustruct // zero-value fields omitted in example
+	//nolint:exhaustruct_v5 // zero-value fields omitted in example
 	err = store.ApplyDelta(ctx, "demo", state0.Version(), contexty.ConversationDelta{
 		Operation: contexty.DeltaAppendMessages,
 		Segment:   contexty.SegmentHistory,

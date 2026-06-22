@@ -11,6 +11,7 @@ import (
 )
 
 func TestArchitecture_NoStringHeuristicsForSemantics(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -19,12 +20,51 @@ func TestArchitecture_NoStringHeuristicsForSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf("string heuristics forbidden in semantic core:\n%s", strings.Join(violations, "\n"))
 	}
 }
 
+func TestArchitecture_DeferredResultContract(t *testing.T) {
+	// Arrange: inspect the actual public declaration, not a compatible usage fixture.
+	file, err := parser.ParseFile(token.NewFileSet(), "compile.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := findTypeSpec(file, "DeferredBlock")
+	if spec == nil {
+		t.Fatal("missing DeferredBlock contract")
+	}
+	block, ok := spec.Type.(*ast.StructType)
+	if !ok {
+		t.Fatal("DeferredBlock must be an explicit struct")
+	}
+	// Act / Assert: the callback returns only the new typed result, no slice overload.
+	found := false
+	for _, field := range block.Fields.List {
+		for _, name := range field.Names {
+			if name.Name != "Resolve" {
+				continue
+			}
+			found = true
+			fn, typed := field.Type.(*ast.FuncType)
+			if !typed || fn.Results == nil || fn.Results.NumFields() != 2 {
+				t.Fatal("Resolve must return DeferredResult and error")
+			}
+			if !exprIsIdent(fn.Results.List[0].Type, "DeferredResult") ||
+				!exprIsIdent(fn.Results.List[1].Type, "error") {
+				t.Fatal("legacy deferred callback return is forbidden")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing Resolve callback")
+	}
+}
+
 func TestArchitecture_NoForbiddenExternalImports(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -33,12 +73,14 @@ func TestArchitecture_NoForbiddenExternalImports(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf("forbidden external imports in core:\n%s", strings.Join(violations, "\n"))
 	}
 }
 
 func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -47,6 +89,7 @@ func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf(
 			"json metadata tunneling via TextContent forbidden in semantic core:\n%s",
@@ -56,6 +99,7 @@ func TestArchitecture_NoJSONMetadataInTextParts(t *testing.T) {
 }
 
 func TestArchitecture_NoContractMetadataInAttributes(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -64,6 +108,7 @@ func TestArchitecture_NoContractMetadataInAttributes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf(
 			"contract metadata must use first-class fields, SourceRefs, or Extensions, not Attributes:\n%s",
@@ -73,6 +118,7 @@ func TestArchitecture_NoContractMetadataInAttributes(t *testing.T) {
 }
 
 func TestArchitecture_NoBase64InCore(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -81,26 +127,53 @@ func TestArchitecture_NoBase64InCore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf("base64 encoding forbidden in semantic core:\n%s", strings.Join(violations, "\n"))
 	}
 }
 
 func TestArchitecture_NoRemovedOverlayAPIInCore(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	violations, err := findOverlayAPIViolations(root)
+	violations, err := findRemovedAPIViolations(root, []string{
+		"WithOverlay", "CompileOverlayFromContext", "WithCompileOverlay",
+		"PromptOrigin", "ManifestID", "MessagePromptOrigin", "type Overlay",
+	})
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf("removed Overlay API must not reappear in core:\n%s", strings.Join(violations, "\n"))
 	}
 }
 
+func TestArchitecture_NoPositionalReplacementAPI(t *testing.T) {
+	// Arrange: replaced selectors must not return as aliases or fallback branches.
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	// Act.
+	violations, err := findRemovedAPIViolations(root, []string{
+		"WithEphemeralPatch", "MessageSelector", "MessagePosition", "PositionFirst",
+		"PositionLast", "PositionAll", "resolveSelectorIndices", "ReasonEphemeralPatch",
+	})
+	// Assert.
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(violations) > 0 {
+		t.Fatalf("removed positional replacement API must not reappear:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
 func TestArchitecture_FormattersUseExplicitContext(t *testing.T) {
+	// Arrange.
 	root, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -109,6 +182,7 @@ func TestArchitecture_FormattersUseExplicitContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
+	// Act / Assert: exercise the contract and check its result.
 	if len(violations) > 0 {
 		t.Fatalf(
 			"formatters must receive request context explicitly without package-level context globals:\n%s",
@@ -315,7 +389,7 @@ func exprContainsContextConstructor(expr ast.Expr) bool {
 	return found
 }
 
-func findOverlayAPIViolations(root string) ([]string, error) {
+func findRemovedAPIViolations(root string, forbidden []string) ([]string, error) {
 	var violations []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
@@ -335,10 +409,7 @@ func findOverlayAPIViolations(root string) ([]string, error) {
 			return readErr
 		}
 		content := string(data)
-		for _, needle := range []string{
-			"WithOverlay", "CompileOverlayFromContext", "WithCompileOverlay",
-			"PromptOrigin", "ManifestID", "MessagePromptOrigin", "type Overlay",
-		} {
+		for _, needle := range forbidden {
 			if strings.Contains(content, needle) {
 				violations = append(violations, path+": contains "+needle)
 			}

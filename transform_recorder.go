@@ -2,13 +2,12 @@ package contexty
 
 import (
 	"context"
-	"maps"
 )
 
 type transformRecorderKey struct{}
 
 type transformRecorder struct {
-	records    map[string]TransformRecord
+	records    map[string]TransformChain
 	introduced map[string]Message
 }
 
@@ -49,51 +48,30 @@ func (r *transformRecorder) introducedSnapshot() map[string]Message {
 }
 
 func newTransformRecorder(msgs []Message) *transformRecorder {
-	rec := &transformRecorder{ //nolint:exhaustruct // introduced starts empty
-		records: make(map[string]TransformRecord, len(msgs)),
+	rec := &transformRecorder{ //nolint:exhaustruct_v5 // introduced starts empty
+		records: make(map[string]TransformChain, len(msgs)),
 	}
 	for _, m := range msgs {
 		if m.ID == "" {
 			continue
 		}
-		rec.records[m.ID] = TransformRecord{Action: ActionPassed, Reason: ""}
+		rec.records[m.ID] = TransformChain{{Action: ActionPassed, Reason: ""}}
 	}
 	return rec
 }
 
-func (r *transformRecorder) snapshot() map[string]TransformRecord {
+func (r *transformRecorder) snapshot() map[string]TransformChain {
 	if r == nil {
 		return nil
 	}
-	out := make(map[string]TransformRecord, len(r.records))
-	maps.Copy(out, r.records)
-	return out
+	return cloneTransformRecords(r.records)
 }
 
 func (r *transformRecorder) set(id string, action TransformAction, reason string) {
 	if r == nil || id == "" {
 		return
 	}
-	r.records[id] = TransformRecord{Action: action, Reason: reason}
-}
-
-func (r *transformRecorder) setUnlessFinal(id string, action TransformAction, reason string) {
-	if r == nil || id == "" {
-		return
-	}
-	if existing, ok := r.records[id]; ok {
-		switch existing.Action {
-		case ActionEvicted, ActionTruncated:
-			return
-		case ActionFormatted:
-			if !isInPlaceFormatReason(existing.Reason) {
-				return
-			}
-		case ActionPassed:
-			// allow overwrite for later compile stages (e.g. post-budget patch after passed)
-		}
-	}
-	r.set(id, action, reason)
+	r.records[id] = append(r.records[id], TransformRecord{Action: action, Reason: reason})
 }
 
 func recordMergeRemovalsCtx(ctx context.Context, before, after []Message) {
@@ -109,7 +87,7 @@ func recordMergeRemovalsCtx(ctx context.Context, before, after []Message) {
 		if _, ok := afterSet[m.ID]; ok {
 			continue
 		}
-		rec.setUnlessFinal(m.ID, ActionFormatted, ReasonReplacedByDeferred)
+		rec.set(m.ID, ActionFormatted, ReasonReplacedByDeferred)
 	}
 }
 
@@ -123,7 +101,7 @@ func (r *transformRecorder) markProtectedPending(ids []string) {
 			r.set(id, ActionPassed, ReasonProtectedPending)
 			continue
 		}
-		switch rec.Action {
+		switch rec.Final().Action {
 		case ActionEvicted, ActionTruncated, ActionFormatted:
 			// preserve budget/hook/formatter outcomes (e.g. history copy evicted before pending merge)
 		case ActionPassed:
@@ -143,7 +121,7 @@ func (r *transformRecorder) registerDeferredMessageIDs(before, after Conversatio
 		}
 		r.introduceIfAbsent(m)
 		if _, ok := r.records[m.ID]; !ok {
-			r.records[m.ID] = TransformRecord{Action: ActionPassed, Reason: ""}
+			r.records[m.ID] = TransformChain{{Action: ActionPassed, Reason: ""}}
 		}
 	}
 }
@@ -191,23 +169,23 @@ func recordContentTransformCtx(
 	afterSet := messageIDSet(after)
 	for id := range beforeSet {
 		if _, ok := afterSet[id]; !ok {
-			rec.setUnlessFinal(id, ActionFormatted, replacedReason)
+			rec.set(id, ActionFormatted, replacedReason)
 			continue
 		}
 		bm := findMessageByID(before, id)
 		am := findMessageByID(after, id)
 		if !MessageEqual(bm, am) {
-			rec.setUnlessFinal(id, ActionFormatted, sameIDReason)
+			rec.set(id, ActionFormatted, sameIDReason)
 		}
 	}
 	for id := range afterSet {
 		if _, ok := beforeSet[id]; !ok {
 			rec.introduceIfAbsent(findMessageByID(after, id))
 			if introducedReason != "" {
-				rec.setUnlessFinal(id, ActionFormatted, introducedReason)
+				rec.set(id, ActionFormatted, introducedReason)
 				continue
 			}
-			rec.setUnlessFinal(id, ActionPassed, "")
+			rec.set(id, ActionPassed, "")
 		}
 	}
 }
@@ -222,7 +200,7 @@ func recordEvictionsCtx(ctx context.Context, before, after []Message, reason Evi
 	switch reason {
 	case EvictionReasonTruncate:
 		action = ActionTruncated
-	case EvictionReasonBudget, EvictionReasonOrphanRepair:
+	case EvictionReasonBudget:
 		action = ActionEvicted
 	}
 	beforeSet := messageIDSet(before)
@@ -246,7 +224,7 @@ func recordSummarizeReplaceCtx(ctx context.Context, before []Message, summary Me
 	}
 	if summary.ID != "" {
 		rec.introduceIfAbsent(summary)
-		rec.setUnlessFinal(summary.ID, ActionPassed, "")
+		rec.set(summary.ID, ActionPassed, "")
 	}
 }
 

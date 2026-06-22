@@ -21,6 +21,7 @@ func (timeoutNetError) Timeout() bool   { return true }
 func (timeoutNetError) Temporary() bool { return false }
 
 func TestClassifyRedisErr(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	t.Run("nil", func(t *testing.T) {
@@ -82,6 +83,7 @@ func TestClassifyRedisErr(t *testing.T) {
 		require.ErrorIs(t, err, goredis.ErrPoolTimeout)
 	})
 
+	// Act / Assert: exercise the contract and check its result.
 	t.Run("plain error not unavailable", func(t *testing.T) {
 		t.Parallel()
 		cause := errors.New("WRONGTYPE")

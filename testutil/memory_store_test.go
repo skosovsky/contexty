@@ -12,6 +12,7 @@ import (
 )
 
 func TestMemoryConversationStateStore_AppendAndLoad(t *testing.T) {
+	// Arrange.
 	ctx := context.Background()
 	store := testutil.NewMemoryConversationStateStore()
 	s0, err := store.LoadState(ctx, "t")
@@ -24,5 +25,6 @@ func TestMemoryConversationStateStore_AppendAndLoad(t *testing.T) {
 	s1, err := store.LoadState(ctx, "t")
 	require.NoError(t, err)
 	assert.Equal(t, "hello", s1.Segment(contexty.SegmentHistory)[0].TextContent())
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, int64(1), s1.Version())
 }

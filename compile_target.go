@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"strings"
 )
 
@@ -24,10 +23,27 @@ type CompileProjection struct {
 	Name            string
 	Text            string
 	Messages        []Message
-	Transformations map[string]TransformRecord
+	Transformations map[string]TransformChain
 	Source          CompileRequest       // normalized request before pipeline mutations
 	InputSnapshot   ConversationSnapshot // compiled snapshot used as target input
 	ArtifactIDs     []string
+	Lineage         Lineage
+	Rendered        *RenderedOutput
+}
+
+// RenderedOutput is the typed content/metadata counterpart of a text view.
+// Its role is a representation detail, not a trust or permission decision.
+type RenderedOutput struct {
+	Message  Message
+	Ref      ContentRef
+	Renderer Descriptor
+}
+
+func (r *RenderedOutput) clone() *RenderedOutput {
+	if r == nil {
+		return nil
+	}
+	return &RenderedOutput{Message: r.Message.Clone(), Ref: r.Ref, Renderer: r.Renderer}
 }
 
 func (p CompileProjection) clone() CompileProjection {
@@ -39,6 +55,8 @@ func (p CompileProjection) clone() CompileProjection {
 		Source:          p.Source.Freeze(),
 		InputSnapshot:   p.InputSnapshot.AllSegmentsSnapshot(),
 		ArtifactIDs:     append([]string(nil), p.ArtifactIDs...),
+		Lineage:         p.Lineage.Clone(),
+		Rendered:        p.Rendered.clone(),
 	}
 }
 
@@ -53,12 +71,14 @@ func cloneCompileProjections(in map[string]CompileProjection) map[string]Compile
 	return out
 }
 
-func cloneTransformRecords(in map[string]TransformRecord) map[string]TransformRecord {
+func cloneTransformRecords(in map[string]TransformChain) map[string]TransformChain {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make(map[string]TransformRecord, len(in))
-	maps.Copy(out, in)
+	out := make(map[string]TransformChain, len(in))
+	for id, chain := range in {
+		out[id] = append(TransformChain(nil), chain...)
+	}
 	return out
 }
 
@@ -105,7 +125,7 @@ func (e *Engine) compileTargets(
 	snap ConversationSnapshot,
 	targets []CompileTarget,
 	source CompileRequest,
-	transforms map[string]TransformRecord,
+	transforms map[string]TransformChain,
 	artifacts []ContextArtifact,
 ) (map[string]CompileProjection, error) {
 	if len(targets) == 0 {
@@ -135,29 +155,21 @@ func (e *Engine) compileTarget(
 	snap ConversationSnapshot,
 	target CompileTarget,
 	source CompileRequest,
-	transforms map[string]TransformRecord,
+	transforms map[string]TransformChain,
 ) (CompileProjection, error) {
 	if err := ctx.Err(); err != nil {
 		return CompileProjection{}, fmt.Errorf("contexty: compile target %q: %w", target.Name, err)
 	}
 	name := strings.TrimSpace(target.Name)
 	ctx = withCompileIdentity(ctx, source.IdentityPolicy, source.RequireDurableIdentity, source.TurnID, name)
+	if trace := traceFromContext(ctx); trace != nil {
+		ctx = context.WithValue(ctx, compileTraceKey{}, trace.branch(name))
+	}
+	// Target-local pipeline events cannot mutate the recorder of the shared pass.
+	ctx = withTransformRecorder(ctx, newTransformRecorder(snapshotAllMessages(snap)))
 	localTransforms := cloneTransformRecords(transforms)
 	if target.View != "" {
-		f, _ := builtinViewFormatter(target.View)
-		text, err := f.Format(ctx, snap)
-		if err != nil {
-			return CompileProjection{}, fmt.Errorf("contexty: compile target %q: %w", name, err)
-		}
-		return CompileProjection{
-			Name:            name,
-			Text:            text,
-			Messages:        nil,
-			Transformations: localTransforms,
-			Source:          emptyCompileRequest(),
-			InputSnapshot:   snap.AllSegmentsSnapshot(),
-			ArtifactIDs:     nil,
-		}, nil
+		return compileTextViewTarget(ctx, snap, target, localTransforms)
 	}
 	seg := target.SourceSegment
 	if seg == "" {
@@ -172,19 +184,33 @@ func (e *Engine) compileTarget(
 			return CompileProjection{}, fmt.Errorf("contexty: compile target %q budget: %w", name, err)
 		}
 		working = trimmed
+		working, err = traceStage(ctx, "budget", before, working, false)
+		if err != nil {
+			return CompileProjection{}, err
+		}
 		recordProjectionBudgetTransforms(localTransforms, before, working)
 	}
 	if target.Formatter != nil {
 		before := cloneMessageSlice(working)
-		formatted, err := target.Formatter(ctx, cloneMessageSlice(working))
+		formatted, err := formatTargetMessages(ctx, target, seg, working)
 		if err != nil {
-			return CompileProjection{}, fmt.Errorf("contexty: compile target %q formatter: %w", name, err)
+			return CompileProjection{}, err
 		}
-		working, err = ensureMessageIDsFromContext(ctx, seg, 0, formatted)
-		if err != nil {
-			return CompileProjection{}, fmt.Errorf("contexty: compile target %q identity: %w", name, err)
-		}
+		working = formatted
 		recordProjectionFormatterTransforms(localTransforms, before, working)
+	}
+	projected, err := traceStage(ctx, "project", working, working, false)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	working = projected
+	if target.Budget != nil {
+		if err := target.Budget.validateSegments(
+			ctx,
+			[]EstimateSegment{{Name: manifestMessagesSegment, Messages: working}},
+		); err != nil {
+			return CompileProjection{}, fmt.Errorf("contexty: compile target %q final budget: %w", name, err)
+		}
 	}
 	if err := validateUniqueMessageIDs(working); err != nil {
 		return CompileProjection{}, fmt.Errorf("contexty: compile target %q identity: %w", name, err)
@@ -197,11 +223,68 @@ func (e *Engine) compileTarget(
 		Source:          emptyCompileRequest(),
 		InputSnapshot:   snap.AllSegmentsSnapshot(),
 		ArtifactIDs:     nil,
+		Lineage:         traceGraph(ctx),
+		Rendered:        nil,
 	}, nil
+}
+
+func compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, target CompileTarget,
+	transforms map[string]TransformChain,
+) (CompileProjection, error) {
+	ctx = withRecordingComponent(
+		ctx,
+		recordingKey(RecordingViewRenderer, strings.TrimSpace(target.Name), "", 0),
+		"render",
+	)
+	f, _ := builtinViewFormatter(target.View)
+	text, err := f.Format(ctx, snap)
+	if err != nil {
+		return CompileProjection{}, fmt.Errorf("contexty: compile target %q: %w", target.Name, err)
+	}
+	var rendered *RenderedOutput
+	if trace := traceFromContext(ctx); trace != nil {
+		output, renderErr := trace.captureRendering(ctx, snap, text)
+		if renderErr != nil {
+			return CompileProjection{}, renderErr
+		}
+		rendered = &output
+	}
+	return CompileProjection{
+		Name: strings.TrimSpace(target.Name), Text: text, Messages: nil,
+		Transformations: transforms, Source: emptyCompileRequest(),
+		InputSnapshot: snap.AllSegmentsSnapshot(), ArtifactIDs: nil,
+		Lineage: traceGraph(ctx), Rendered: rendered,
+	}, nil
+}
+
+func formatTargetMessages(ctx context.Context, target CompileTarget, seg SegmentName,
+	working []Message,
+) ([]Message, error) {
+	ctx = withRecordingComponent(
+		ctx,
+		recordingKey(RecordingTargetFormatter, strings.TrimSpace(target.Name), "", 0),
+		"format",
+	)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	formatted, err := target.Formatter(ctx, cloneMessageSlice(working))
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
+	if err != nil {
+		return nil, fmt.Errorf("contexty: compile target %q formatter: %w", target.Name, err)
+	}
+	formatted, err = ensureMessageIDsFromContext(ctx, seg, 0, formatted)
+	if err != nil {
+		return nil, fmt.Errorf("contexty: compile target %q identity: %w", target.Name, err)
+	}
+	return traceStage(ctx, "format", working, formatted, false)
 }
 
 func emptyCompileRequest() CompileRequest {
 	return CompileRequest{
+		DeferredResources:      nil,
 		TurnID:                 "",
 		System:                 nil,
 		History:                nil,
@@ -214,6 +297,11 @@ func emptyCompileRequest() CompileRequest {
 		IdentityPolicy:         nil,
 		RequireDurableIdentity: false,
 		Targets:                nil,
+		CompilationID:          "",
+		Lineage:                Lineage{Records: nil, Unresolved: nil},
+		Origins:                nil,
+		SourceRevision:         0,
+		PreviousRecord:         nil,
 	}
 }
 
@@ -225,7 +313,7 @@ func plainMessagesText(msgs []Message) string {
 	return b.String()
 }
 
-func recordProjectionBudgetTransforms(records map[string]TransformRecord, before, after []Message) {
+func recordProjectionBudgetTransforms(records map[string]TransformChain, before, after []Message) {
 	beforeSet := messageIDSet(before)
 	afterSet := messageIDSet(after)
 	for _, msg := range before {
@@ -233,7 +321,10 @@ func recordProjectionBudgetTransforms(records map[string]TransformRecord, before
 			continue
 		}
 		if _, kept := afterSet[msg.ID]; !kept {
-			records[msg.ID] = TransformRecord{Action: ActionTruncated, Reason: ReasonTokenBudgetExceeded}
+			records[msg.ID] = append(
+				records[msg.ID],
+				TransformRecord{Action: ActionTruncated, Reason: ReasonTokenBudgetExceeded},
+			)
 		}
 	}
 	for _, msg := range after {
@@ -241,12 +332,12 @@ func recordProjectionBudgetTransforms(records map[string]TransformRecord, before
 			continue
 		}
 		if _, existed := beforeSet[msg.ID]; !existed {
-			records[msg.ID] = TransformRecord{Action: ActionPassed, Reason: ""}
+			records[msg.ID] = append(records[msg.ID], TransformRecord{Action: ActionPassed, Reason: ""})
 		}
 	}
 }
 
-func recordProjectionFormatterTransforms(records map[string]TransformRecord, before, after []Message) {
+func recordProjectionFormatterTransforms(records map[string]TransformChain, before, after []Message) {
 	beforeSet := messageIDSet(before)
 	afterSet := messageIDSet(after)
 	for _, msg := range before {
@@ -254,12 +345,18 @@ func recordProjectionFormatterTransforms(records map[string]TransformRecord, bef
 			continue
 		}
 		if _, kept := afterSet[msg.ID]; !kept {
-			records[msg.ID] = TransformRecord{Action: ActionFormatted, Reason: ReasonReplacedByFormatter}
+			records[msg.ID] = append(
+				records[msg.ID],
+				TransformRecord{Action: ActionFormatted, Reason: ReasonReplacedByFormatter},
+			)
 			continue
 		}
 		formatted := findMessageByID(after, msg.ID)
 		if !MessageEqual(msg, formatted) {
-			records[msg.ID] = TransformRecord{Action: ActionFormatted, Reason: ReasonSegmentFormatter}
+			records[msg.ID] = append(
+				records[msg.ID],
+				TransformRecord{Action: ActionFormatted, Reason: ReasonSegmentFormatter},
+			)
 		}
 	}
 	for _, msg := range after {
@@ -267,7 +364,10 @@ func recordProjectionFormatterTransforms(records map[string]TransformRecord, bef
 			continue
 		}
 		if _, existed := beforeSet[msg.ID]; !existed {
-			records[msg.ID] = TransformRecord{Action: ActionFormatted, Reason: ReasonSegmentFormatter}
+			records[msg.ID] = append(
+				records[msg.ID],
+				TransformRecord{Action: ActionFormatted, Reason: ReasonSegmentFormatter},
+			)
 		}
 	}
 }

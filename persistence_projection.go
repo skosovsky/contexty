@@ -22,14 +22,36 @@ func (r CompileResult) DerivePersistenceProjection(seg SegmentName) []Message {
 			out = append(out, m.Clone())
 			continue
 		}
-		if shouldPersistSourceMessage(rec) {
+		if shouldPersistSourceMessage(rec.Final()) {
 			out = append(out, m.Clone())
 		}
 	}
 	out = append(out, r.payloadAddsForSegment(seg, sourceMsgs)...)
+	out = orderPersistenceMessages(out, r.payloadSegment(seg))
 	out = append(out, r.currentTurnPersistenceMessages(seg)...)
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+func orderPersistenceMessages(selected, payload []Message) []Message {
+	byID := make(map[string]Message, len(selected))
+	for _, message := range selected {
+		byID[message.ID] = message
+	}
+	out := make([]Message, 0, len(selected))
+	for _, message := range payload {
+		if original, exists := byID[message.ID]; exists {
+			out = append(out, original)
+			delete(byID, message.ID)
+		}
+	}
+	for _, message := range selected {
+		if _, exists := byID[message.ID]; exists {
+			out = append(out, message)
+			delete(byID, message.ID)
+		}
 	}
 	return out
 }
@@ -128,6 +150,9 @@ func (r CompileResult) payloadAddsForSegment(seg SegmentName, sourceMsgs []Messa
 	pendingIDs := r.pendingIDSet()
 	var out []Message
 	for _, m := range r.payloadSegment(seg) {
+		if r.isArtifactMessage(m.ID) {
+			continue
+		}
 		if m.ID == "" {
 			continue
 		}
@@ -138,17 +163,26 @@ func (r CompileResult) payloadAddsForSegment(seg SegmentName, sourceMsgs []Messa
 			continue
 		}
 		rec, ok := r.Transformations[m.ID]
-		if !ok || !shouldPersistPayloadAdd(rec) {
+		if !ok || !shouldPersistPayloadAdd(rec.Final()) {
 			continue
 		}
 		if intro, hasIntro := r.Introduced[m.ID]; hasIntro {
 			out = append(out, intro.Clone())
 			continue
 		}
-		if rec.Action == ActionFormatted && isInPlaceFormatReason(rec.Reason) {
+		if rec.Final().Action == ActionFormatted && isInPlaceFormatReason(rec.Final().Reason) {
 			continue
 		}
 		out = append(out, m.Clone())
 	}
 	return out
+}
+
+func (r CompileResult) isArtifactMessage(id string) bool {
+	for _, artifact := range r.Artifacts {
+		if id == "artifact:"+artifact.ID {
+			return true
+		}
+	}
+	return false
 }

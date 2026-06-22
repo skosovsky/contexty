@@ -8,11 +8,19 @@
 
 ## Installation
 
+This contract makes a clear break in budget configuration, compile-only selectors,
+deferred callback results and transformation status. See the
+[consumer migration guide](docs/migration.md) before updating stored state
+or callers; old checkpoint/OCC namespaces may need explicit host migration.
+
 ```bash
 go get github.com/skosovsky/contexty
 ```
 
-Requires Go 1.26+.
+Requires Go 1.27.1+.
+
+`make lint` runs the pinned golangci-lint release through Go; no separate global
+linter installation is required. CI uses the same release.
 
 ## Quick Start
 
@@ -39,7 +47,7 @@ engine := contexty.NewEngine(
     contexty.WithConversationID("chat-1"),
     contexty.WithStateStore(store),
     contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
-        contexty.BudgetConfig{TokenLimit: 4000},
+        contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4000)},
         contexty.CharTokenEstimator{},
     )),
 )
@@ -96,9 +104,9 @@ classifier := result.Projections["classifier_history"]
 
 **Pipeline order:** normalize IDs/current turn → freeze Source → deferred → low-level ephemeral patches (pre-budget) → hooks → segment formatters → budget preflight → budget(history + protected current turn) → low-level ephemeral patches (post-budget) → payload → named compile targets.
 
-The current clear-break contract is summarized below; the task-level implementation spec is `.cursor/docs/task16.md`.
+The current clear-break contract is summarized below and in the [migration guide](docs/migration.md).
 
-### Migrating from Task13
+### Migrating origin, projection and persistence APIs
 
 1. Removed prompt-origin aliases now map to `Origin` / `TemplateID`.
 2. Replace `WithOverlay` with `CompileRequest.Options` for resolve vars and `CompileRequest.CurrentTurn` for prompt-only current-turn projection.
@@ -106,7 +114,7 @@ The current clear-break contract is summarized below; the task-level implementat
 4. Set `DeferredBlock.MergePolicy` for origin/layer collision handling.
 5. Persist with `DerivePersistenceProjection`.
 
-### Migrating from Task12
+### Migrating snapshot-only compilation
 
 1. Use `CompileRequest` / `CompileResult` instead of snapshot-only compile and `AbstractPayload`.
 2. Set `Message.ID` as the semantic node ID; use `SourceRefs` for external identity and typed `Extensions` for host metadata.
@@ -162,7 +170,8 @@ xml, _ := contexty.Render(ctx, snap, contexty.ViewLLMXML)
 flat, _ := contexty.Render(ctx, snap, contexty.ViewFlatClassifier)
 ```
 
-For classifier/router/evaluator projections, prefer named compile targets. `RenderView` is for already-materialized snapshot inspection and legacy callers.
+For classifier/router/evaluator projections, prefer named compile targets.
+`RenderView` is for already-materialized snapshot inspection, not compilation.
 
 ## Messages, Actors, and Source Refs
 
@@ -243,8 +252,8 @@ engine := contexty.NewEngine(
         Name:        "persona",
         Segment:     contexty.SegmentSystem,
         MergePolicy: contexty.PolicyReplaceByOrigin,
-        Resolve: func(ctx context.Context) ([]contexty.Message, error) {
-            return []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "dynamic")}, nil
+        Resolve: func(ctx context.Context) (contexty.DeferredResult, error) {
+            return contexty.DeferredResult{Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "dynamic")}}, nil
         },
     }),
 )
@@ -268,7 +277,7 @@ toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
 _ = result.Introduced // pre-transform baselines for payload-born IDs
 ```
 
-Patches and `Pending` are compile-only. `DerivePersistenceProjection` excludes evicted/truncated messages and returns Source originals for formatted messages. If `Pending` alone exceeds `TokenLimit`, compile returns `ErrPendingExceedsBudget`.
+Patches and `Pending` are compile-only. `DerivePersistenceProjection` excludes evicted/truncated messages and returns Source originals for formatted messages. If `Pending` alone exceeds the effective input limit, compile returns `ErrPendingExceedsBudget`.
 
 ## Current Turn and Identity
 
@@ -291,11 +300,60 @@ _ = err
 
 `CurrentTurnPersistRaw` stores the original input, `CurrentTurnPersistPromptSafe` stores the prompt-safe representation, and `CurrentTurnPersistNone` skips current-turn checkpoint persistence. When `RequireDurableIdentity` is true, missing message IDs require an explicit `IdentityPolicy`; otherwise compile fails with `ErrMissingIdentityPolicy`.
 
-## Low-Level Ephemeral Patches
+## Host blob storage
 
-Prefer `CurrentTurn` for prompt-only current-turn redaction. `WithEphemeralPatch` remains a low-level escape hatch for compile-only replacement of already-addressable messages in internal pipelines. It is not the durable current-turn contract.
+`BlobStore` is an application-provided Put/Get port. `PutBlob` validates immutable object metadata (revision, SHA-256, byte length, MIME, sources and opaque scope/retention refs) before publishing a ref. Failed/unvalidated writes with a known object ID return a cleanup intent; the application reconciles it under retention claims and checkpoint state, rather than deleting automatically.
 
-Pre-budget patches apply to non-history segments; post-budget patches apply to history.
+`ResolveBlob` requires a fresh read scope, explicit byte bound and MIME allowlist. The adapter enforces authorization and bounded retrieval; core verifies the returned bytes. A descriptor is not permission. Descriptor codecs contain metadata only and never fetch bytes.
+
+`adapters/blob/memory` provides an ephemeral reference host backend with provisional and checkpoint claims, atomic commit/release, exact-source retirement and claim-safe cleanup. It requires host authorization for every action; `CheckBlob` checks availability without fetching bytes. Follow the [retention handoff protocol](docs/blob-retention.md) and executable example. Durable deployments must persist this state in their own backend.
+
+For blob-bearing exact replay pass `WithReplayBlobAvailability(freshScope, backend)` explicitly. Replay validates live dependency metadata before returning any output, without Get/refetch. Missing/expired/denied/mismatched dependencies wrap `ErrMissingReplayDependency` while retaining the original host error; absent availability capability fails closed. Keep retention claims active through consumption of returned refs. Records without blob references need no backend.
+
+`BlobResolver.Resolve` additionally uses an explicit host decoder, pinned decoder identity and `EstimateReporter` to enforce the requested input budget/reservations on all decoded messages. It returns cost and lineage evidence, not silent trimming or fallback. Estimated counts remain estimates, not provider-exact guarantees.
+
+`BlobOffloader.ProjectArtifact` explicitly prepares an artifact before compile. A host policy selects inline/offload/reject; `NewBlobThresholdPolicy` supplies a byte-threshold recipe with a host preview renderer. Offload stores the complete immutable ToolPayload JSON contract, returns a bounded preview with `ArtifactBlob` metadata, and preserves identity/source/lifecycle/budget/persistence fields. Pass the prepared artifact and its lineage into `CompileRequest`; merge that graph with existing lineage when present. Artifact admission and final prompt budgets count the preview, not the original bytes. Checkpoint/resume and exact replay preserve metadata without fetching storage. Altered previews fail digest validation; isolated export does not disclose storage handles. The host still owns authorization, checkpoint commit and retention reconciliation; no automatic offload, Get or deletion occurs.
+
+Artifacts can carry host-owned `Extensions`. Supply matching extension decoders in `BlobArtifactRequest.Extensions` before offload and in conversation/replay codecs. Labels are retained in preview messages and checkpoint artifacts; unknown or lossy codecs fail explicitly. For standalone restoration use `UnmarshalArtifactJSON(data, registry)`; plain JSON decoding cannot restore host-owned labeled artifacts. Export discloses artifact labels only for explicitly allowed `ExtensionTypes`.
+
+## Selected resources
+
+Deferred callbacks now return `DeferredResult`, not a message slice. Migrate `return messages, err` to `return DeferredResult{Messages: messages}, err`; error outcomes must not be used as partial content. No legacy callback overload is retained. Compile freezes returned messages and checks cancellation before consuming them. Structured resource evidence belongs in `DeferredResult.Resources`, matched against declared selections and codecs before admission.
+
+Resource resolution pins an independent `LabelPolicyIdentity` and explicit custom `Codecs` bindings alongside reader/projection identities. `ResourceResolver.Configuration()` and each result's `Configuration` capture the exact estimator/encoding/codec/label intent; configuration refs change even when text does not. Lineage separates host projection from label reconciliation and its upgrade decision. Configured but unused codecs also require identity bindings.
+
+`DescribeResource` pins an opaque host reference/revision, display name, full typed artifact digest and serialized byte length. `ResourceResolver.Resolve` requires an explicit `ResourceReader`, fresh scope, pinned projection, byte bound and estimate budget. It validates the actual body before projection and retains host labels/source ancestry. Declare selections/codecs in `DeferredBlock.Resources`/`ResourceCodec`, then return actual evidence in `DeferredResult.Resources`. Source keeps pre-resolution metadata; manifest and privacy-controlled saved records retain actual resolution dependencies. Resource-bearing accepted replay requires explicit `WithReplayResourceCodecs`; it never invokes a reader or refetches missing bodies. Missing/changed/oversized/unsupported content and cancellation fail without partial output or implicit fallback. Core does not discover resources, parse paths, install capabilities or execute body text. See the [selected resource contract](docs/resource-content.md), [host-owned reference reader](adapters/resource/memory/reader.go) and runnable [progressive disclosure example](examples/progressive_disclosure/main.go).
+
+Resolved artifacts follow normal lifecycle, local-budget and merge admission. Same-ID replacement and source-layer deduplication select one intact revision; append creates separate `ResourceResolution.Merge` evidence and checks the actual merged local budget before replacing the active artifact. Main and targets use the final admitted projection without additional reads. Incoming resolution evidence stays immutable even when excluded. Append labels require the compile host label policy; media and blob-bound previews fail explicitly rather than being flattened. Save the final artifact set through its checkpoint policy, not as additional ordinary messages from `DerivePersistenceProjection`. Replay requires saved old/incoming/derived content for every append, including excluded derivations, and never re-executes the host label policy or estimator.
+
+## Prefix diagnostics
+
+After final compilation and host freshness/budget/privacy checks, optionally call
+`DiagnosePrefix(ctx, result.Payload.FlattenMessages(), recipe, previousManifest)`.
+Use the actual adapter-facing order if it differs from the payload order.
+`PrefixRecipe` pins renderer, semantic encoding and host admission policy; its
+mandatory `Authorize` callback rechecks every hashed message on each invocation.
+Caller-owned boundaries terminate after exact message IDs. Variable tail content
+does not participate in the prefix digest; the report returns its separate
+`TailDigest`. Both identities use owned input captured before callbacks; private
+or stale tail content is not encoded if host admission rejects it.
+
+The metadata-only report identifies the first affected boundary and content,
+order, policy, codec, compaction or offload changes. Invalid boundaries,
+incompatible previous rendering and unsupported required hints fail explicitly.
+The adapter checks actual wire prefix bytes and hint support, then may attach a
+separate `PrefixWireConfirmation`; semantic equality never means authorization,
+cache availability, TTL or savings. No content, role or order is changed for reuse.
+See [the contract](docs/prefix-diagnostics.md) and the runnable
+[local adapter example](examples/prefix_diagnostics/main.go).
+
+## Compile-only text replacements
+
+`BlobOffloader.ProjectHistoricalArguments` validates an exact completed message/call and prepares independent Source/Prompt projections with immutable argument storage references. For a confirmed offload, pass `WithHistoricalArgumentProjection(prepared)` in compile options and keep `CompileRequest.History` original. Compile verifies the source/approval digest, complete round and preview-only change before applying it to prompt history before budget. Persistence retains original arguments; accepted replay preserves the projected prompt without fetching bytes, after explicit live availability checks. Pending rounds, other calls/results and host operation/approval metadata are untouched. `ArgumentsBlob` is not execution permission and is stripped from isolated export. Never replace authoritative persisted history or executable arguments with the shortened prompt projection.
+
+Prefer `CurrentTurn` for prompt-only active-turn redaction. To replace text on an existing message, use `WithTextReplacement(TextReplacement{Segment: SegmentHistory, MessageID: "message-id", Text: "safe text"})`. Assign the ID explicitly; role or position never chooses a target. Non-text parts and metadata are preserved, and source/persistence bytes remain unchanged.
+
+Non-history replacements run before hooks/budget; history replacements run after history budget and still undergo final budget validation. Unknown segments or empty IDs return `ErrInvalidTextReplacement`; a missing target (including one removed by compaction/truncation) returns `ErrMissingReplacementTarget`. Multiple replacements run in request order. The positional selector API was removed without aliases or compatibility fallback; migrate multiple selections to explicit IDs or use a host-owned transform hook.
 
 ## Segment formatters
 
@@ -325,9 +383,48 @@ Hooks run after deferred resolution and before segment formatters and budgeting.
 
 ## Budget pipeline and truncation
 
+When using `WithCompileRecording`, `RecordProfile.Components` must explicitly bind
+each configured host callback to its `RecordingComponentKey` and descriptor.
+Kinds cover hook/resolver indexes, segment and target formatters, role/label
+policies, trace mapping, request identity policy and requested view renderers.
+Indexes address the configured slots, including skipped nil slots; nil callbacks
+do not need bindings. Missing, extra, duplicate or mis-scoped bindings fail before
+execution. Aggregate pipeline/target descriptors no longer substitute for these
+callback identities. Binding order is canonical, and changing an individual
+descriptor invalidates replay even if the aggregate descriptor is unchanged.
+Actual hook/formatter/resolver/role/render edges retain their intrinsic stage name
+and the bound component descriptor. See [recording contracts](docs/contracts.md)
+for scope and remaining recording-component work.
+
+Recorded budget pipelines with a summarizer require
+`WithSummarizerDescriptor(Descriptor{ID: "host/summary", Revision: "pinned"})`.
+An explicit `WithCompactionCapture` profile supplies that binding as well; when
+both are specified they must agree. Bind each main/target pipeline independently.
+Saved budgets and actual summary lineage retain the local identity, and replay
+rejects changed bindings even when no summary was needed. Custom truncation
+strategies likewise require `WithTruncationDescriptor`; built-in strategies pin
+their own identities and effective parameters.
+Custom integer estimators and custom tool-cost callbacks require
+`WithEstimatorDescriptor`; an `EstimateReporter` already supplies an explicit
+binding. Recorded budgets include effective built-in fixed/character parameters.
+Pipelines and reporters copy built-in counters at construction, so subsequent
+caller mutation cannot change the saved configuration or its execution.
+For recording with custom decoder registries, explicitly bind each configured
+decoder in `TraceProfile.Codecs` by kind (`CodecExtension`, `CodecLabel`, or
+`CodecProvenance`), type ID and descriptor. Message and label registries are
+separate scopes. Default provenance codecs have intrinsic identities. Engine and
+reporter construction snapshots registries; register needed decoders first.
+Manifest trace configuration also pins strict origins, durable identity and
+required label types; replay rejects changed configuration.
+`CompileConfiguration` pins evaluated compile options by digest, without storing
+resolve-variable values or replacement text, plus active deferred block slots,
+effective segments and merge policies. Unknown active deferred placement/policy
+is rejected before resolver execution in recording mode. Replay checks this
+configuration even when different resolver inputs produce identical bytes.
+
 ```go
 pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
-    TokenLimit: 4000,
+    Budget: contexty.EffectiveInputBudget(4000),
     DropHead:   contexty.DropHeadConfig{MinMessages: 2},
 }, &contexty.CharFallbackEstimator{CharsPerToken: 4})
 
@@ -338,7 +435,92 @@ engine := contexty.NewEngine(
 
 `TokenEstimator` is passed to `NewBudgetPipeline`, not to `Engine`. Estimator failures surface as `ErrTokenCountFailed`.
 
-Tool-call turns are truncated atomically by default (`KeepTurnAtomicity` defaults to `true`). Setting `KeepTurnAtomicity` to `false` enables fast-path index truncation at the strategy level; `BudgetPipeline` still repairs orphan tool pairs via `enforceToolPairAtomicity`.
+Budget configuration is explicit: use `EffectiveInputBudget(4000)` for an already
+reduced input capacity, or `WindowInputBudget(8000, 3000, 1000)` for a full window
+with output and wire reservations. Both examples provide 4000 input tokens.
+Reservations are subtracted only in window mode; contradictory, negative or
+overflowing reservations return `ErrInvalidBudgetRequest` before transforms run.
+`BudgetConfig.TokenLimit` has been removed. Manifest budget records retain the
+original request as well as the resolved input limit.
+
+For explicit estimate evidence, create an `EstimateReporter` with your pinned
+model/estimator/method/encoding descriptors and capabilities, then pass it as the
+estimator to `NewBudgetPipeline`. Unsupported kinds fail strictly unless you
+configure an explicit positive fallback. `CompileResult.Estimates` contains final
+reports for main and named targets, including post-formatter costs. Recorded
+manifests retain these reports; `manifest.EstimateFor(kind, name)` returns a
+defensive report bound to the manifest digest. Replay restores saved reports
+without calling the estimator. Wire counts and actual usage remain separate
+observations; they do not overwrite semantic estimates.
+
+`CompactionRecord` is a separate host-owned summary lifecycle, not acceptance of
+an entire compilation. `NewCompactionRecord` pins covered revisions, the actual
+summarize edge, output, model/codec/policy identities, saved result and estimate.
+Proposals may omit bytes or estimates; `Accept(decisionRef)` requires both and a
+within-budget result. `Supersede(decisionRef)` retires an accepted record.
+`ReplayCompaction` requires the current accepted digest, profile, coverage and
+budget, and returns saved summary content without fetching or summarizing.
+Storage/privacy decisions remain with the host. Add `WithCompactionCapture(profile)`
+to a reporter-backed BudgetPipeline to return actual summary proposals in
+`CompileResult.Compactions`. This requires trace, recording and content capture;
+summarizer/reporter/privacy descriptors must match. Records capture projected
+labels and the actual sub-budget. A later privacy denial leaves a partial proposal
+without bytes, not an acceptance bypass. Accept/store records explicitly in host
+code. Add `WithRollingSummary(RollingSummaryPolicy{Descriptor: policyID,
+RecentMessages: 2})` to compress only the aged prefix while preserving at least
+two recent messages. Pin the policy descriptor; when capturing compactions it
+must match `CompactionProfile.Policy`. The boundary expands backward for a tool
+round or an earlier pending call. Under-budget input is not summarized; oversized
+tail/summary returns a typed error, without silently deleting either. Whole-block
+compression remains available without this option.
+
+Manifest budgets pin the actual recipe and replay rejects changes to it. Resume
+with an explicitly accepted summary, preserved tail and prior lineage; the next
+proposal covers that summary revision plus newly aged messages and retains old
+ancestry. The core does not load or accept records automatically. Give each new
+summary a fresh identity, not an ID of any covered/preserved message. Main and
+named targets can use independent recent-tail counts and budgets.
+
+Persistence now keeps surviving/introduced messages in compiled chronological
+order: a prefix summary precedes its tail, rather than being appended after it.
+Compile-only formatting still restores original bytes at the retained position;
+current-turn raw/prompt-safe persistence follows its explicit policy. Consumers
+should persist this ordered projection, not manually append summaries on resume.
+
+`InspectToolRoundStates(messages, declarations)` distinguishes locally complete
+rounds from pending ones and explicitly host-declared interruptions. It validates
+call/result identities without inferring remote outcomes from payload metadata.
+`RepairInterruptedToolRounds(ctx, messages, declarations, policy, codec)` is an
+explicit projection-only operation: pin behavior/encoding descriptors and a host
+decision reference for each interrupted assistant. Only missing results receive
+deterministic synthetic markers stating that the external outcome is unknown.
+`Messages`, `Repairs` and `Lineage` are returned together; markers remain in the
+serialized payloads. Pending rounds and source history are not changed. Host
+extensions require round-tripping codecs, and assistant metadata is preserved
+without assigning higher trust. Supply the returned lineage to CompileRequest
+when compiling a repaired projection; recording/replay retain synthetic evidence.
+This operation does not guarantee provider wire validity.
+
+For host extensions, register their decoders in the reporter's serializer and
+declare `EstimateProfile.Extensions[typeID]` with pinned codec/policy descriptors.
+Set `MetadataOnly` only when that value does not participate in the request wire;
+it remains part of request identity, but is removed from counter inputs. Content
+extensions use `EstimateExtension` capabilities. Missing classification or unknown
+cost fails strictly, or adds one explicit positive fallback per value. A generic
+extension capability alone does not classify an unknown type. Reports preserve
+ordered `ExtensionTypes` and participation coverage. Missing decoders return
+`ErrMissingEstimateExtensionCodec`; fallback never removes actual output values.
+
+Tool-call turns are truncated atomically by default (`KeepTurnAtomicity` defaults
+to `true`). `BudgetPipeline` validates round layout before callbacks and protects
+the chronological suffix starting at the earliest pending round. Only preceding
+context can be compressed or evicted. An oversized protected suffix returns
+`ErrPendingExceedsBudget`; combined cost is verified without assuming additivity.
+Setting `KeepTurnAtomicity` to `false` still enables standalone index truncation,
+but a pipeline now rejects split rounds with `ErrInvalidToolRound` instead of
+silently deleting orphan nodes. `EvictionReasonOrphanRepair` and implicit orphan
+repair are removed. Handle typed errors or keep turn atomicity enabled; do not
+depend on automatic deletion to sanitize malformed history.
 
 When using a custom `Summarizer`, do not reuse a truncated message ID for the summary. In durable compile flows, leave the summary ID empty and let `IdentityPolicy` assign it.
 
@@ -366,6 +548,31 @@ result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 _ = result
 _ = err
 ```
+
+Artifact-local limits use the main budget pipeline's estimator on the materialized
+message, or `CharTokenEstimator` when no pipeline is configured. A nil `Budget`
+means no local limit. An explicit `TokenLimit: 0` means zero capacity; callers
+previously using zero as unlimited must omit the policy instead. Negative active
+limits and estimator failures fail compilation. Manifest exclusions preserve the
+actual selection decision without counting again. Final output budgeting still
+applies independently; local admission is not a guarantee of final inclusion.
+`CompileResult.ArtifactEstimates` records each active artifact-local admission:
+input/message refs, limit, tokens, quality, and the full report when configured.
+Manifest `ArtifactBudgets` pins requests; `ArtifactEstimates` preserves evidence
+even for excluded artifacts. Missing/duplicate evidence, mismatched reports and
+contradictory budget exclusions are rejected. Exact replay restores this evidence
+without counting again. Use `ReplayExpectationFor` to pin artifact budgets too.
+Inactive and unbounded artifacts have no local estimate; legacy integer admission
+is explicitly `estimated`, not proof of an exact provider cost.
+Binary/media artifacts materialize as `MediaPart{MIMEType, Data}`; an optional
+text preview is a separate part and does not replace the body. MIME is required
+for binary content. Message cloning/codecs preserve the bytes. Character
+estimators return `ErrUnknownEstimateCost`; configure an `EstimateReporter` with
+a media-capable host estimator or an explicit positive fallback (quality remains
+`unknown`). Text-only built-in views return `ErrUnsupportedMediaRendering`;
+use typed message projections or a host formatter that supports your media.
+Migration: handle `MediaPart` explicitly instead of assuming every artifact is a
+single `TextPart`. Typed target `Text` is diagnostic, not a media transport.
 
 Turn-bound retrieval artifacts are visible only when `CompileRequest.TurnID` matches `BoundTurnID`. Ownership is `OwnerRef`, a typed `SourceRef` owned by the host application. Ephemeral artifacts and `ArtifactPersistenceSkip` are omitted from checkpoints; `ArtifactPersistenceStore` forces checkpoint persistence. For artifacts, `PolicyReplaceByOrigin` replaces stale artifacts with the same kind/type plus owner/source refs even when the new artifact uses a different `ID`.
 
@@ -437,7 +644,7 @@ pipe := contexty.NewBudgetPipeline(cfg, estimator, contexty.WithBudgetObserver(m
 | Callback              | When                                                                                                           |
 | --------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `OnTokensEstimated`   | After initial token estimate for a budget block (`blockID` = segment name)                                     |
-| `OnNodeEvicted`       | Strategy truncation, block drop, or orphan tool-pair repair (`nodeID` = `Message.ID` or fallback hash)         |
+| `OnNodeEvicted`       | Strategy truncation or block drop (`nodeID` = `Message.ID` or fallback hash); events describe attempted work, not an accepted compilation |
 | `OnContextSummarized` | After summarizer runs (`compressionRatio` = tokens before / tokens after)                                      |
 | `OnPipelineCompiled`  | Successful `Compile()` / `CompileSnapshot()` with total payload cost and duration; failures skip callback only |
 
@@ -482,13 +689,34 @@ Postgres and Redis adapters share a minimum integration contract (testcontainers
 | ------------------------------------------- | -------------------------------------------------------------------- |
 | Empty `LoadState`                           | `Version()==0`, empty segments                                       |
 | Delta append / replace / OCC                | Monotonic version, stale write → `ErrConversationVersionConflict`    |
-| `ClearState` missing thread, expected zero  | No-op                                                                |
+| `ClearState` missing thread, expected zero  | Empty tombstone with revision 1                                     |
 | `ClearState` stale version                  | `ErrConversationVersionConflict`                                     |
-| `ClearState` existing thread                | `Version()==0`, segments empty; other threads isolated               |
+| `ClearState` existing thread                | Revision advances, payload erased; reload token before recreate     |
 | Semantic round-trip                         | `ToolCallPart`, `ToolResultPart`, `SourceRefs`, `UserProvenance`     |
 | Expanded round-trip                         | `ImagePart`, `SystemProvenance`, `Origin`, `LLMCache`, `SourceRefs`  |
 | Redis: version without payload              | `ErrUnavailable` (corrupt state)                                     |
 | Postgres: concurrent first insert           | One success, one `ErrConversationVersionConflict`                    |
+
+Clear and payload expiry must never reuse a previous OCC revision. Postgres
+retains an empty row; memory retains an empty state; Redis retains the revision
+key and a payload-free tombstone. These markers contain no deleted messages or
+artifacts. `ClearState` consumes a revision even for a previously absent ID.
+`WithTTL` expires only Redis payload, atomically advancing revision when expiry
+is observed by a read or CAS. Revision markers must not be expired or deleted
+independently while the same conversation ID can be reused. Host cleanup that
+removes the marker must also retire the ID permanently. Integer exhaustion
+returns `ErrConversationVersionExhausted`, never wraps to an earlier token.
+
+Migration: after clear/expiry call `LoadState` and use its returned version for
+recreation; do not assume `expectedVersion=0`. Stale writes and stale clears
+conflict. Old Redis data whose revision key was configured to expire must be
+migrated explicitly before reusing its IDs. There is no transparent compatibility
+path for reset revisions.
+
+Compile validates final main and target output budgets after patches/formatters.
+An expansion beyond the configured limit returns `ErrBudgetExceeded`; protected
+current-turn/pending messages are never silently dropped. Compile-only redaction
+continues to use the original content for persistence when selected by policy.
 
 Run adapter suites locally when Docker is available (also covered by CI `integration` job):
 
@@ -522,7 +750,7 @@ Messages and segments serialize as JSON with explicit discriminators:
 
 ## Architecture guardrails
 
-AST tests in `architecture_test.go` (run via `make test-dod`):
+AST tests in `architecture_test.go` (run via `make test-acceptance`):
 
 - `TestArchitecture_NoStringHeuristicsForSemantics` — no string-prefix heuristics in semantic core
 - `TestArchitecture_NoForbiddenExternalImports` — stdlib + `github.com/skosovsky/contexty/*` only in core
@@ -536,10 +764,10 @@ AST tests in `architecture_test.go` (run via `make test-dod`):
 
 ```bash
 make test              # all modules, race
-make test-dod          # DoD + atomicity acceptance subset
+make test-acceptance   # contract + atomicity acceptance subset
 make lint
 make bench-guardrails  # allocation guardrails (CI gate)
-make validate          # lint + test-dod + bench-guardrails + full test
+make validate          # lint + test-acceptance + bench-guardrails + full test
 ```
 
 Hot-path benchmarks live in `bench_test.go`. Full acceptance gate: `make validate` plus adapter integration tests when Docker is available.
@@ -550,4 +778,4 @@ Do **not** encode transport metadata in message text or use string heuristics (`
 
 ## Architecture Notes
 
-The shipped contract is documented in this README and the package docs. Task-level planning notes live under `.cursor/docs/`; do not treat older task docs as compatibility guarantees.
+The shipped contract is documented in this README, the package docs and [contract reference](docs/contracts.md).

@@ -7,22 +7,27 @@ import (
 )
 
 func TestApplyMergePolicy_AppendDefault(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{{ID: "a"}, {ID: "b"}}
 	incoming := []Message{{ID: "c"}}
 	out := applyMergePolicy(existing, incoming, PolicyAppend)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"a", "b", "c"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_UnknownPolicyFallsBackToAppend(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{{ID: "a"}}
 	incoming := []Message{{ID: "b"}}
 	out := applyMergePolicy(existing, incoming, MergePolicy("unknown"))
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"a", "b"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_ReplaceByOrigin_EmptyOriginIncoming(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{{
 		ID:     "old",
@@ -30,10 +35,12 @@ func TestApplyMergePolicy_ReplaceByOrigin_EmptyOriginIncoming(t *testing.T) {
 	}}
 	incoming := []Message{{ID: "new"}}
 	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"old", "new"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_ReplaceByOrigin_ReplacesTemplate(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{
 		{ID: "keep", Origin: &MessageOrigin{TemplateID: "other", LayerID: "x"}},
@@ -44,10 +51,12 @@ func TestApplyMergePolicy_ReplaceByOrigin_ReplacesTemplate(t *testing.T) {
 		Origin: &MessageOrigin{TemplateID: "agents/sales", LayerID: "v2"},
 	}}
 	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"keep", "new"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_ReplaceByOrigin_DropsMultipleSameTemplate(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{
 		{ID: "drop-a", Origin: &MessageOrigin{TemplateID: "agents/sales", LayerID: "v1"}},
@@ -59,10 +68,12 @@ func TestApplyMergePolicy_ReplaceByOrigin_DropsMultipleSameTemplate(t *testing.T
 		Origin: &MessageOrigin{TemplateID: "agents/sales", LayerID: "v3"},
 	}}
 	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"keep", "new"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_DeduplicateByLayer(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{{
 		ID:     "old",
@@ -73,14 +84,17 @@ func TestApplyMergePolicy_DeduplicateByLayer(t *testing.T) {
 		{ID: "extra", Origin: &MessageOrigin{TemplateID: "t3", LayerID: "other"}},
 	}
 	out := applyMergePolicy(existing, incoming, PolicyDeduplicateByLayer)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"new", "extra"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_MultipleDeferredBlocksSimulated(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	existing := []Message{{ID: "a"}, {ID: "b"}}
 	first := applyMergePolicy(existing, []Message{{ID: "c"}}, PolicyAppend)
 	second := applyMergePolicy(first, []Message{{ID: "d"}}, PolicyAppend)
+	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"a", "b", "c", "d"}, mergePolicyMessageIDs(second))
 }
 

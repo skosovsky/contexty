@@ -88,7 +88,10 @@ func (s *dropTailStrategy) Apply(
 	out := slices.Clone(msgs)
 	for len(out) > 1 {
 		out = dropTailAtomicUnit(out)
-		tokens, err := estimator.Estimate(ctx, out)
+		tokens, err := estimator.Estimate(ctx, estimatorCallbackInput(estimator, out))
+		if canceled := ctx.Err(); canceled != nil {
+			return nil, canceled
+		}
 		if err != nil {
 			return nil, fmt.Errorf("contexty: drop tail: %w: %w", ErrTokenCountFailed, err)
 		}
@@ -190,8 +193,8 @@ func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit in
 	// drop any prefix by index. ProtectedRoles and KeepTurnAtomicity require removing the
 	// first droppable message or atomic tool-turn instead of an arbitrary prefix.
 	suffixSum := make([]int, len(weights)+1)
-	for i := len(weights) - 1; i >= 0; i-- {
-		suffixSum[i] = suffixSum[i+1] + weights[i]
+	for i, weight := range slices.Backward(weights) {
+		suffixSum[i] = suffixSum[i+1] + weight
 	}
 	bestValidIdx := len(msgs)
 	low, high := 0, len(msgs)

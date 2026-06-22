@@ -14,6 +14,24 @@
 //   - CompileProjection.Source + InputSnapshot for target traceability
 //   - DerivePersistenceProjection for persistence
 //   - BudgetPipeline (summarize + truncate) and Engine.Compile → CompileResult
+//   - BudgetRequest for effective input capacity or a window with reservations
+//   - TransformChain and Lineage for ordered transitions and full content identity
+//   - Host LabelProjection and codecs for Bring Your Own Types metadata
+//   - CompileManifest and accepted SavedCompileRecord for exact replay without execution
+//   - CompactionRecord, explicit tool-round state and opt-in rolling summaries
+//   - ExportEnvelope for allowlisted isolated consumers, without local snapshots
+//   - BlobOffloader/BlobResolver with host authorization, retention and cleanup
+//   - Selected ResourceDescriptor/ResourceResolver through typed DeferredResult
+//   - EstimateReporter for actual count quality, coverage and separate wire evidence
+//   - PrefixRecipe for opt-in semantic prefix diagnostics after final admission
+//   - PrefixWireConfirmation for separate adapter-owned wire identity, not cache hits
+//
+// Clear/recreate and payload expiry preserve monotonic OCC identity. Reload the
+// empty state and use its current token before writing; old tokens remain stale.
+// Source, prompt-safe output and persistence projections are separate owned
+// snapshots. Host ports receive owned values and cancellation stops compilation.
+// Remote execution, discovery, permissions, durable record/blob storage and
+// deletion policy are application responsibilities, not inferred from content.
 //
 // Example:
 //

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 )
 
@@ -25,6 +26,15 @@ func NewExtensionRegistry() *ExtensionRegistry {
 		mu:       sync.RWMutex{},
 		decoders: make(map[string]func([]byte) (Extension, error)),
 	}
+}
+
+func (r *ExtensionRegistry) snapshot() *ExtensionRegistry {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return &ExtensionRegistry{mu: sync.RWMutex{}, decoders: maps.Clone(r.decoders)}
 }
 
 // Register adds a decoder for extension typeID. It panics on duplicates.
@@ -52,12 +62,15 @@ func (r *ExtensionRegistry) Decode(data []byte) (Extension, error) {
 	r.mu.RLock()
 	decode, ok := r.decoders[wire.TypeID]
 	r.mu.RUnlock()
-	if !ok {
+	if !ok || decode == nil {
 		return nil, fmt.Errorf("contexty: extension decode: unregistered type_id %q", wire.TypeID)
 	}
 	ext, err := decode(wire.Payload)
 	if err != nil {
 		return nil, fmt.Errorf("contexty: extension decode %q: %w", wire.TypeID, err)
+	}
+	if nilInterfaceValue(ext) || ext.ExtensionType() != wire.TypeID {
+		return nil, fmt.Errorf("contexty: extension decode %q: invalid typed result", wire.TypeID)
 	}
 	return ext, nil
 }
@@ -71,7 +84,7 @@ type extensionWire struct {
 
 // EncodeExtension serializes a typed extension.
 func EncodeExtension(ext Extension) ([]byte, error) {
-	if ext == nil {
+	if nilInterfaceValue(ext) {
 		return []byte(jsonNullLiteral), nil
 	}
 	payload, err := json.Marshal(ext)
@@ -127,7 +140,7 @@ func cloneExtensions(exts []Extension) []Extension {
 	}
 	out := make([]Extension, len(exts))
 	for i, ext := range exts {
-		if ext != nil {
+		if !nilInterfaceValue(ext) {
 			out[i] = ext.CloneExtension()
 		}
 	}

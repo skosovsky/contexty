@@ -8,7 +8,8 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
-func TestDoD_OriginAndLLMCacheRoundTrip(t *testing.T) {
+func TestAcceptance_Origin_AndLLMCacheRoundTrip(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	reg := contexty.DefaultProvenanceRegistry()
@@ -30,17 +31,21 @@ func TestDoD_OriginAndLLMCacheRoundTrip(t *testing.T) {
 	require.Equal(t, "agents/sales", restored.Origin.TemplateID)
 	require.Equal(t, "persona", restored.Origin.LayerID)
 	require.NotNil(t, restored.LLMCache)
+	// Act / Assert: exercise the contract and check its result.
 	require.Equal(t, "ephemeral", restored.LLMCache.Type)
 }
 
-func TestDoD_MessageEqualIncludesOrigin(t *testing.T) {
+func TestAcceptance_Message_EqualIncludesOrigin(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	a := contexty.TextMessage(contexty.RoleSystem, "x")
 	a.Origin = &contexty.MessageOrigin{TemplateID: "t1", LayerID: "l1"}
 	a.LLMCache = &contexty.CachePolicyRef{Type: "ephemeral"}
 
+	// Act.
 	b := a.Clone()
+	// Assert.
 	require.True(t, contexty.MessageEqual(a, b))
 
 	b.Origin.LayerID = "other"
@@ -48,13 +53,16 @@ func TestDoD_MessageEqualIncludesOrigin(t *testing.T) {
 }
 
 func TestMessage_CloneCopiesOriginAndLLMCache(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	msg := contexty.TextMessage(contexty.RoleSystem, "x")
 	msg.Origin = &contexty.MessageOrigin{TemplateID: "m", LayerID: "l"}
 	msg.LLMCache = &contexty.CachePolicyRef{Type: "ephemeral"}
 
+	// Act.
 	cloned := msg.Clone()
+	// Assert.
 	require.NotSame(t, msg.Origin, cloned.Origin)
 	require.Equal(t, msg.Origin.TemplateID, cloned.Origin.TemplateID)
 	require.NotSame(t, msg.LLMCache, cloned.LLMCache)

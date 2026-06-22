@@ -14,6 +14,18 @@ type TokenEstimator interface {
 // CharTokenEstimator uses rune count as a deterministic test estimator.
 type CharTokenEstimator struct{}
 
+func (CharTokenEstimator) EstimateAccuracy() EstimateQuality { return EstimateEstimated }
+
+func (CharTokenEstimator) EstimateCapabilities() map[EstimateKind]EstimateQuality {
+	return legacyEstimateCapabilities()
+}
+
+func legacyEstimateCapabilities() map[EstimateKind]EstimateQuality {
+	return map[EstimateKind]EstimateQuality{EstimateText: EstimateEstimated,
+		EstimateToolCall: EstimateEstimated, EstimateToolResult: EstimateEstimated,
+		EstimateImage: EstimateUnknown, EstimateMedia: EstimateUnknown, EstimateExtension: EstimateUnknown}
+}
+
 // Estimate returns total rune count across text and tool parts.
 func (CharTokenEstimator) Estimate(ctx context.Context, msgs []Message) (int, error) {
 	if err := ctx.Err(); err != nil {
@@ -37,9 +49,21 @@ func (CharTokenEstimator) EstimatePerMessage(ctx context.Context, msgs []Message
 	}
 	weights := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := rejectUnknownMedia(m); err != nil {
+			return nil, err
+		}
 		weights[i] = messageRuneWeight(m)
 	}
 	return weights, nil
+}
+
+func rejectUnknownMedia(message Message) error {
+	for _, part := range message.Parts {
+		if part != nil && part.partKind() == PartKindMedia {
+			return ErrUnknownEstimateCost
+		}
+	}
+	return nil
 }
 
 func messageRuneWeight(m Message) int {

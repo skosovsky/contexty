@@ -34,7 +34,7 @@ func main() {
 
 func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	store := contexty.NewMemoryConversationStateStore()
-	//nolint:exhaustruct // zero-value fields omitted in example
+	//nolint:exhaustruct_v5 // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", 0, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment,
 		Segment:   contexty.SegmentSystem,
@@ -46,7 +46,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 			),
 		},
 	})
-	//nolint:exhaustruct // zero-value fields omitted in example
+	//nolint:exhaustruct_v5 // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", 1, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment,
 		Segment:   contexty.SegmentMemory,
@@ -54,7 +54,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 			contexty.TextMessage(contexty.RoleSystem, "Project boundary: keep the library universal."),
 		},
 	})
-	//nolint:exhaustruct // zero-value fields omitted in example
+	//nolint:exhaustruct_v5 // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", 2, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment,
 		Segment:   contexty.SegmentHistory,
@@ -64,16 +64,16 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	if err != nil {
 		return contexty.CompileResult{}, err
 	}
-	//nolint:exhaustruct // zero-value fields omitted in example
+	//nolint:exhaustruct_v5 // zero-value fields omitted in example
 	_ = store.ApplyDelta(ctx, "demo", toolRoundVersion, contexty.ConversationDelta{
 		Operation: contexty.DeltaAppendToolRound,
 		ToolRound: &toolRound,
 	})
 
 	pipe := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{ //nolint:exhaustruct // optional Summarizer/TruncateStrategy omitted
-			TokenLimit: exampleTokenLimit,
-			DropHead:   contexty.DropHeadConfig{MinMessages: conversationMinMsg},
+		contexty.BudgetConfig{ //nolint:exhaustruct_v5 // optional Summarizer/TruncateStrategy omitted
+			Budget:   contexty.EffectiveInputBudget(exampleTokenLimit),
+			DropHead: contexty.DropHeadConfig{MinMessages: conversationMinMsg},
 		}, &contexty.FixedEstimator{TokensPerMessage: fixedTokensPerMsg})
 
 	engine := contexty.NewEngine(
@@ -84,21 +84,23 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		contexty.WithTransformHooks(contexty.NewRedactionHook()),
 		contexty.WithDeferredBlocks(
 			contexty.DeferredBlock{
-				Name:        "session_hint",
-				Segment:     contexty.SegmentSystem,
-				MergePolicy: contexty.PolicyReplaceByOrigin,
-				Resolve: func(ctx context.Context) ([]contexty.Message, error) {
+				Resources:     nil,
+				ResourceCodec: contexty.ResourceCodec{Messages: contexty.DefaultJSONSerializer(), Labels: nil},
+				Name:          "session_hint",
+				Segment:       contexty.SegmentSystem,
+				MergePolicy:   contexty.PolicyReplaceByOrigin,
+				Resolve: func(ctx context.Context) (contexty.DeferredResult, error) {
 					vars := contexty.CompileResolveVarFromContext(ctx)
 					locale := "en-US"
 					if vars != nil && vars["locale"] != "" {
 						locale = vars["locale"]
 					}
-					return []contexty.Message{
+					return contexty.DeferredResult{Resources: nil, Messages: []contexty.Message{
 						withOrigin(
 							contexty.TextMessage(contexty.RoleSystem, "Request locale: "+locale),
 							"context/defaults", "session",
 						),
-					}, nil
+					}}, nil
 				},
 			},
 		),
@@ -112,7 +114,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	).WithPromptSafe(
 		contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary."),
 	)
-	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct // optional fields omitted
+	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct_v5 // optional fields omitted
 		TurnID:                 "turn-1",
 		Artifacts:              []contexty.ContextArtifact{retrieved},
 		CurrentTurn:            &turn,
@@ -218,9 +220,10 @@ func projectLookupRound() (contexty.ToolRound, error) {
 			Role: contexty.RoleAssistant,
 			Parts: []contexty.ContentPart{
 				contexty.ToolCallPart{
-					ID:        "lookup-1",
-					Name:      "lookup_project_note",
-					Arguments: args,
+					ID:            "lookup-1",
+					Name:          "lookup_project_note",
+					Arguments:     args,
+					ArgumentsBlob: nil,
 				},
 			},
 		},

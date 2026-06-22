@@ -9,6 +9,7 @@ import (
 )
 
 func TestMessageEqual_Parts(t *testing.T) {
+	// Arrange.
 	a := contexty.Message{
 		Role:  contexty.RoleUser,
 		Parts: []contexty.ContentPart{contexty.TextPart{Text: "ok"}},
@@ -19,5 +20,6 @@ func TestMessageEqual_Parts(t *testing.T) {
 	}
 	assert.True(t, contexty.MessageEqual(a, b))
 	b.Parts[0] = contexty.TextPart{Text: "no"}
+	// Act / Assert: exercise the contract and check its result.
 	assert.False(t, contexty.MessageEqual(a, b))
 }

@@ -15,27 +15,44 @@ import (
 
 const defaultKeyPrefix = "contexty:conv:"
 
-// Lua: set conversation blob if version matches, then bump.
-const luaMutate = `
-local expected = tonumber(ARGV[1])
-local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
-if cur ~= expected then return redis.error_reply('CONFLICT') end
-redis.call('SET', KEYS[2], ARGV[2])
+// OCC keys never expire. An empty data value is a payload-free tombstone.
+// Expired payload transitions to a new tombstone atomically before a CAS or read.
+// Versions are compared as strings, avoiding Lua floating-point precision loss.
+const luaState = `
+local cur = redis.call('GET', KEYS[1]) or '0'
+local data = redis.call('GET', KEYS[2])
+if cur == '0' and data then return redis.error_reply('MISSING_REVISION') end
+if cur ~= '0' and not data then
+  if ARGV[1] ~= '1' then return redis.error_reply('MISSING_PAYLOAD') end
+  if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
+  redis.call('INCR', KEYS[1])
+  cur = redis.call('GET', KEYS[1])
+  redis.call('SET', KEYS[2], '')
+  data = ''
+end
+`
+
+const luaLoad = luaState + `
+return {cur, data or ''}
+`
+
+const luaMutate = luaState + `
+if cur ~= ARGV[2] then return redis.error_reply('CONFLICT') end
+if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
 redis.call('INCR', KEYS[1])
+if tonumber(ARGV[4]) > 0 then
+  redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[4])
+else
+  redis.call('SET', KEYS[2], ARGV[3])
+end
 return 1
 `
 
-// Lua: clear conversation when version matches; no-op when thread absent and expected=0.
-const luaClear = `
-local expected = tonumber(ARGV[1])
-local cur = tonumber(redis.call('GET', KEYS[1]) or '0')
-if cur ~= expected then return redis.error_reply('CONFLICT') end
-local hasData = redis.call('EXISTS', KEYS[2])
-if expected == 0 and hasData == 0 then
-  return 1
-end
-redis.call('DEL', KEYS[2])
-redis.call('DEL', KEYS[1])
+const luaClear = luaState + `
+if cur ~= ARGV[2] then return redis.error_reply('CONFLICT') end
+if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
+redis.call('INCR', KEYS[1])
+redis.call('SET', KEYS[2], '')
 return 1
 `
 
@@ -74,43 +91,25 @@ func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.
 	if s.client == nil {
 		return contexty.ConversationState{}, errors.New("contexty/redis: nil client")
 	}
-	vstr, err := s.client.Get(ctx, s.verKey(conversationID)).Result()
-	switch {
-	case err == nil:
-		v, parseErr := strconv.ParseInt(vstr, 10, 64)
-		if parseErr != nil {
-			return contexty.ConversationState{}, fmt.Errorf("contexty/redis: parse version: %w", parseErr)
-		}
-		if v == 0 {
-			return contexty.EmptySnapshot(), nil
-		}
-		return s.loadState(ctx, conversationID, v)
-	case errors.Is(err, goredis.Nil):
-		return contexty.EmptySnapshot(), nil
-	default:
-		return contexty.ConversationState{}, classifyRedisErr("load version", err)
-	}
-}
-
-func (s *Store) loadState(
-	ctx context.Context,
-	conversationID string,
-	version int64,
-) (contexty.ConversationState, error) {
-	raw, err := s.client.Get(ctx, s.dataKey(conversationID)).Result()
-	if errors.Is(err, goredis.Nil) {
-		if version > 0 {
-			return contexty.ConversationState{}, fmt.Errorf(
-				"contexty/redis: version %d without payload for thread %q: %w",
-				version,
-				conversationID,
-				contexty.ErrUnavailable,
-			)
-		}
-		return contexty.EmptySnapshot(), nil
-	}
+	values, err := s.client.Eval(ctx, luaLoad,
+		[]string{s.verKey(conversationID), s.dataKey(conversationID)}, s.expiryMode()).Slice()
 	if err != nil {
-		return contexty.ConversationState{}, classifyRedisErr("load data", err)
+		return contexty.ConversationState{}, stateScriptError("load", err)
+	}
+	if len(values) != 2 {
+		return contexty.ConversationState{}, contexty.ErrUnavailable
+	}
+	vstr, vok := values[0].(string)
+	raw, rok := values[1].(string)
+	if !vok || !rok {
+		return contexty.ConversationState{}, contexty.ErrUnavailable
+	}
+	version, err := strconv.ParseInt(vstr, 10, 64)
+	if err != nil || version < 0 {
+		return contexty.ConversationState{}, fmt.Errorf("contexty/redis: invalid revision: %w", contexty.ErrUnavailable)
+	}
+	if raw == "" {
+		return contexty.EmptySnapshot().WithVersion(version), nil
 	}
 	snap, err := s.codec.Decode([]byte(raw))
 	if err != nil {
@@ -141,11 +140,11 @@ func (s *Store) ClearState(ctx context.Context, conversationID string, expectedV
 		ctx,
 		luaClear,
 		[]string{s.verKey(conversationID), s.dataKey(conversationID)},
+		s.expiryMode(),
 		expectedVersion,
 	); err != nil {
 		return err
 	}
-	s.maybeExpire(ctx, conversationID)
 	return nil
 }
 
@@ -169,7 +168,11 @@ func (s *Store) mutate(
 	if err != nil {
 		return err
 	}
-	next = next.WithVersion(expectedVersion + 1)
+	nextVersion, err := contexty.NextConversationVersion(expectedVersion)
+	if err != nil {
+		return err
+	}
+	next = next.WithVersion(nextVersion)
 	encoded, err := s.codec.Encode(next)
 	if err != nil {
 		return fmt.Errorf("contexty/redis: encode: %w", err)
@@ -178,12 +181,13 @@ func (s *Store) mutate(
 		ctx,
 		luaMutate,
 		[]string{s.verKey(conversationID), s.dataKey(conversationID)},
+		s.expiryMode(),
 		expectedVersion,
 		string(encoded),
+		s.ttl.Milliseconds(),
 	); err != nil {
 		return err
 	}
-	s.maybeExpire(ctx, conversationID)
 	return nil
 }
 
@@ -193,7 +197,7 @@ func (s *Store) evalConflict(ctx context.Context, script string, keys []string, 
 		if isRedisConflict(err) {
 			return contexty.ErrConversationVersionConflict
 		}
-		return classifyRedisErr("eval", err)
+		return stateScriptError("eval", err)
 	}
 	_ = res
 	return nil
@@ -208,15 +212,24 @@ func isRedisConflict(err error) bool {
 	return msg == "CONFLICT" || strings.HasSuffix(msg, " CONFLICT")
 }
 
-func (s *Store) maybeExpire(ctx context.Context, conversationID string) {
-	if s.ttl <= 0 {
-		return
+func (s *Store) expiryMode() string {
+	if s.ttl > 0 {
+		return "1"
 	}
-	vk, dk := s.verKey(conversationID), s.dataKey(conversationID)
-	pipe := s.client.TxPipeline()
-	pipe.Expire(ctx, vk, s.ttl)
-	pipe.Expire(ctx, dk, s.ttl)
-	_, _ = pipe.Exec(ctx)
+	return "0"
+}
+
+func stateScriptError(op string, err error) error {
+	if isRedisConflict(err) {
+		return contexty.ErrConversationVersionConflict
+	}
+	if strings.HasSuffix(err.Error(), "VERSION_EXHAUSTED") {
+		return contexty.ErrConversationVersionExhausted
+	}
+	if strings.HasSuffix(err.Error(), "MISSING_PAYLOAD") || strings.HasSuffix(err.Error(), "MISSING_REVISION") {
+		return contexty.ErrUnavailable
+	}
+	return classifyRedisErr(op, err)
 }
 
 var _ contexty.ConversationStateStore = (*Store)(nil)

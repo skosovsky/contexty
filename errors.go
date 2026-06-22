@@ -2,6 +2,9 @@ package contexty
 
 import "errors"
 
+// ErrConversationVersionExhausted prevents OCC identity reuse through overflow.
+var ErrConversationVersionExhausted = errors.New("contexty: conversation version exhausted")
+
 // Sentinel errors for typical contexty failure modes.
 // Use [errors.Is] to check for these in calling code.
 var (

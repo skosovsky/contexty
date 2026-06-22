@@ -119,5 +119,5 @@ func recordCurrentTurnProjectionCtx(ctx context.Context, turn CurrentTurn) {
 	if MessageEqual(turn.Raw, prompt) {
 		return
 	}
-	rec.setUnlessFinal(turn.Raw.ID, ActionFormatted, ReasonCurrentTurnProjection)
+	rec.set(turn.Raw.ID, ActionFormatted, ReasonCurrentTurnProjection)
 }

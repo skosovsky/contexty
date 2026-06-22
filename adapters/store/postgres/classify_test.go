@@ -21,6 +21,7 @@ func (timeoutNetError) Timeout() bool   { return true }
 func (timeoutNetError) Temporary() bool { return false }
 
 func TestClassifyPostgresErr(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 
 	t.Run("nil", func(t *testing.T) {
@@ -68,6 +69,7 @@ func TestClassifyPostgresErr(t *testing.T) {
 		require.ErrorIs(t, err, syscall.ECONNRESET)
 	})
 
+	// Act / Assert: exercise the contract and check its result.
 	t.Run("plain error not unavailable", func(t *testing.T) {
 		t.Parallel()
 		cause := errors.New("unique constraint violation")
@@ -78,7 +80,9 @@ func TestClassifyPostgresErr(t *testing.T) {
 }
 
 func TestIsUniqueViolation(t *testing.T) {
+	// Arrange.
 	t.Parallel()
 	assert.False(t, isUniqueViolation(errors.New("other")))
+	// Act / Assert: exercise the contract and check its result.
 	assert.True(t, isUniqueViolation(&pgconn.PgError{Code: "23505"}))
 }

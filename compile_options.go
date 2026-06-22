@@ -2,43 +2,49 @@ package contexty
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 )
 
 // CompileOption configures ephemeral compile-time behavior on CompileRequest.
 type CompileOption func(*compileOptions)
 
-// MessagePosition selects which messages match a selector.
-type MessagePosition int
-
-const (
-	PositionFirst MessagePosition = iota
-	PositionLast
-	PositionAll
+var (
+	ErrInvalidTextReplacement   = errors.New("contexty: invalid text replacement")
+	ErrMissingReplacementTarget = errors.New("contexty: text replacement target missing")
 )
 
-// MessageSelector targets messages for ephemeral patches (compile-only, not persisted).
-type MessageSelector struct {
-	Segment  SegmentName
-	Role     Role // zero = any role
-	Position MessagePosition
+// TextReplacement addresses an exact compile-only message by its ID.
+// It retains non-text parts and metadata. Source and persistence remain unchanged.
+type TextReplacement struct {
+	Segment   SegmentName `json:"segment"`
+	MessageID string      `json:"message_id"`
+	Text      string      `json:"text"`
 }
 
 type compileOptions struct {
-	patches     []ephemeralPatch
-	resolveVars map[string]string
+	replacements        []TextReplacement
+	resolveVars         map[string]string
+	historicalArguments []HistoricalArgumentProjection
 }
 
-type ephemeralPatch struct {
-	selector MessageSelector
-	text     string
-}
-
-// WithEphemeralPatch applies low-level compile-only text replacement to messages
-// matching sel. Prefer CurrentTurn for prompt-safe active input.
-func WithEphemeralPatch(sel MessageSelector, text string) CompileOption {
+// WithHistoricalArgumentProjection applies a confirmed offload only to prompt
+// history before budgeting. CompileRequest.History remains the original source.
+func WithHistoricalArgumentProjection(projection HistoricalArgumentProjection) CompileOption {
+	frozen := cloneHistoricalArguments(projection)
 	return func(o *compileOptions) {
-		o.patches = append(o.patches, ephemeralPatch{selector: sel, text: text})
+		o.historicalArguments = append(o.historicalArguments, cloneHistoricalArguments(frozen))
+	}
+}
+
+// WithTextReplacement replaces text on an exact message ID in the selected segment.
+// History replacements run after budget; other segments run before hooks/budget.
+// Missing targets fail rather than falling back to another message. Prefer
+// CurrentTurn for the active turn's prompt-safe projection.
+func WithTextReplacement(replacement TextReplacement) CompileOption {
+	return func(o *compileOptions) {
+		o.replacements = append(o.replacements, replacement)
 	}
 }
 
@@ -92,21 +98,31 @@ const (
 	patchPhasePostBudget
 )
 
-func applyEphemeralPatches(
+func applyCompileReplacements(ctx context.Context, snapshot ConversationSnapshot,
+	options compileOptions, phase patchPhase,
+) (ConversationSnapshot, error) {
+	updated, err := applyTextReplacements(ctx, snapshot, options, phase)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	if len(options.replacements) == 0 {
+		return updated, nil
+	}
+	return traceSnapshot(ctx, "patch", snapshot, updated)
+}
+
+func applyTextReplacements(
 	ctx context.Context,
 	snap ConversationSnapshot,
 	opts compileOptions,
 	phase patchPhase,
-) ConversationSnapshot {
-	if len(opts.patches) == 0 {
-		return snap
-	}
+) (ConversationSnapshot, error) {
 	next := snap
-	for _, patch := range opts.patches {
-		seg := patch.selector.Segment
-		if seg == "" {
-			continue
+	for _, replacement := range opts.replacements {
+		if err := ctx.Err(); err != nil {
+			return ConversationSnapshot{}, err
 		}
+		seg := replacement.Segment
 		if phase == patchPhasePreBudget && seg == SegmentHistory {
 			continue
 		}
@@ -114,45 +130,28 @@ func applyEphemeralPatches(
 			continue
 		}
 		msgs := next.Segment(seg)
-		indices := resolveSelectorIndices(msgs, patch.selector)
-		if len(indices) == 0 {
-			continue
+		index := -1
+		for i, msg := range msgs {
+			if msg.ID == replacement.MessageID {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return ConversationSnapshot{}, fmt.Errorf(
+				"%w: segment %s, ID %s",
+				ErrMissingReplacementTarget,
+				seg,
+				replacement.MessageID,
+			)
 		}
 		updated := cloneMessageSlice(msgs)
-		for _, idx := range indices {
-			cloned := patchTextOnMessage(updated[idx], patch.text)
-			recordEphemeralPatchCtx(ctx, updated[idx], cloned)
-			updated[idx] = cloned
-		}
+		cloned := patchTextOnMessage(updated[index], replacement.Text)
+		recordTextReplacementCtx(ctx, updated[index], cloned)
+		updated[index] = cloned
 		next = next.WithSegment(seg, updated)
 	}
-	return next
-}
-
-func resolveSelectorIndices(msgs []Message, sel MessageSelector) []int {
-	if len(msgs) == 0 {
-		return nil
-	}
-	var candidates []int
-	for i, m := range msgs {
-		if sel.Role != "" && m.Role != sel.Role {
-			continue
-		}
-		candidates = append(candidates, i)
-	}
-	if len(candidates) == 0 {
-		return nil
-	}
-	switch sel.Position {
-	case PositionFirst:
-		return []int{candidates[0]}
-	case PositionLast:
-		return []int{candidates[len(candidates)-1]}
-	case PositionAll:
-		return candidates
-	default:
-		return []int{candidates[len(candidates)-1]}
-	}
+	return next, nil
 }
 
 func patchTextOnMessage(m Message, text string) Message {
@@ -167,7 +166,7 @@ func patchTextOnMessage(m Message, text string) Message {
 	return cloned
 }
 
-func recordEphemeralPatchCtx(ctx context.Context, before, after Message) {
+func recordTextReplacementCtx(ctx context.Context, before, after Message) {
 	rec := transformRecorderFrom(ctx)
 	if rec == nil || before.ID == "" {
 		return
@@ -176,5 +175,5 @@ func recordEphemeralPatchCtx(ctx context.Context, before, after Message) {
 		return
 	}
 	rec.introduceIfAbsent(before)
-	rec.setUnlessFinal(before.ID, ActionFormatted, ReasonEphemeralPatch)
+	rec.set(before.ID, ActionFormatted, ReasonTextReplacement)
 }

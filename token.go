@@ -21,6 +21,12 @@ type CharFallbackEstimator struct {
 	EstimateTool         ToolCallPartEstimator
 }
 
+func (*CharFallbackEstimator) EstimateAccuracy() EstimateQuality { return EstimateEstimated }
+
+func (*CharFallbackEstimator) EstimateCapabilities() map[EstimateKind]EstimateQuality {
+	return legacyEstimateCapabilities()
+}
+
 // Estimate returns estimated token count for all messages.
 func (c *CharFallbackEstimator) Estimate(ctx context.Context, msgs []Message) (int, error) {
 	weights, err := c.EstimatePerMessage(ctx, msgs)
@@ -48,6 +54,9 @@ func (c *CharFallbackEstimator) EstimatePerMessage(ctx context.Context, msgs []M
 	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := rejectUnknownMedia(m); err != nil {
+			return nil, err
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

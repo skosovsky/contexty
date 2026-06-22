@@ -1,6 +1,9 @@
 package contexty
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // TransformAction classifies what the compile pipeline did to a message.
 type TransformAction string
@@ -15,12 +18,14 @@ const (
 const (
 	ReasonProtectedPending      = "protected_pending"
 	ReasonCurrentTurnProjection = "current_turn_projection"
+	ReasonRoleProjection        = "role_projection"
 	ReasonSegmentFormatter      = "segment_formatter"
 	ReasonReplacedByFormatter   = "replaced_by_formatter"
 	ReasonTransformHook         = "transform_hook"
 	ReasonReplacedByHook        = "replaced_by_hook"
 	ReasonReplacedByDeferred    = "replaced_by_deferred"
-	ReasonEphemeralPatch        = "ephemeral_patch"
+	ReasonTextReplacement       = "text_replacement"
+	ReasonHistoricalArguments   = "historical_arguments"
 	ReasonTokenBudgetExceeded   = "token_budget_exceeded" //nolint:gosec // reason label, not a credential
 )
 
@@ -30,20 +35,54 @@ type TransformRecord struct {
 	Reason string
 }
 
+// TransformChain retains every observed transition of a message in stage order.
+// It replaces the last-write-wins record contract. Final derives the effective
+// persistence outcome while retaining later observations after removal.
+type TransformChain []TransformRecord
+
+// Final returns the effective outcome; an empty chain has no declared action.
+func (c TransformChain) Final() TransformRecord {
+	var final TransformRecord
+	for _, step := range c {
+		switch step.Action {
+		case ActionEvicted, ActionTruncated:
+			final = step
+		case ActionPassed, ActionFormatted:
+			if final.Action == ActionEvicted || final.Action == ActionTruncated {
+				continue
+			}
+			if final.Action == ActionFormatted && !isInPlaceFormatReason(final.Reason) {
+				continue
+			}
+			final = step
+		}
+	}
+	return final
+}
+
 // CompileResult is the immutable compile output plus O(1) traceability by Message.ID.
 type CompileResult struct {
 	Payload            AbstractPayload
-	Transformations    map[string]TransformRecord
+	Transformations    map[string]TransformChain
 	Source             CompileRequest     // immutable freeze after Normalize, before pipeline mutations
 	Introduced         map[string]Message // deep-cloned baseline for payload-born IDs (post-deferred, pre-hooks/patches)
 	Artifacts          []ContextArtifact
 	NormalizedSnapshot ConversationSnapshot
 	Writeback          CompileWritebackIntent
 	Projections        map[string]CompileProjection
+	Lineage            Lineage
+	Manifest           *CompileManifest
+	Record             *SavedCompileRecord
+	Estimates          []ManifestEstimateReport
+	ArtifactEstimates  []ArtifactBudgetEstimate
+	Compactions        []CompactionRecord
 }
 
 // CompileRequest is the single exhaustive compile input (including stateless CompileSnapshot).
 type CompileRequest struct {
+	// DeferredResources is populated from engine declarations before resolution.
+	// It is retained in Source, without raw body or authorization scope.
+	DeferredResources      []ResourceSelection
 	TurnID                 string
 	System                 []Message
 	History                []Message
@@ -56,6 +95,11 @@ type CompileRequest struct {
 	IdentityPolicy         MessageIdentityPolicy
 	RequireDurableIdentity bool
 	Targets                []CompileTarget
+	CompilationID          string
+	Lineage                Lineage
+	Origins                []ContentRef
+	SourceRevision         int64
+	PreviousRecord         *ContentRef
 }
 
 // Normalize ensures every message has a non-empty ID and returns durable ID
@@ -66,7 +110,8 @@ func (r CompileRequest) Normalize() (CompileRequest, []MessageIdentityWriteback,
 
 // Freeze returns a deep copy of all messages for immutable CompileResult.Source.
 func (r CompileRequest) Freeze() CompileRequest {
-	return CompileRequest{ //nolint:exhaustruct // Options omitted from immutable source snapshot
+	return CompileRequest{ //nolint:exhaustruct_v5 // Options omitted from immutable source snapshot
+		DeferredResources:      cloneResourceSelections(r.DeferredResources),
 		TurnID:                 r.TurnID,
 		System:                 cloneMessageSlice(r.System),
 		History:                cloneMessageSlice(r.History),
@@ -78,11 +123,24 @@ func (r CompileRequest) Freeze() CompileRequest {
 		IdentityPolicy:         r.IdentityPolicy,
 		RequireDurableIdentity: r.RequireDurableIdentity,
 		Targets:                append([]CompileTarget(nil), r.Targets...),
+		CompilationID:          r.CompilationID,
+		Lineage:                r.Lineage.Clone(),
+		Origins:                append([]ContentRef(nil), r.Origins...),
+		SourceRevision:         r.SourceRevision,
+		PreviousRecord:         cloneContentRef(r.PreviousRecord),
 	}
 }
 
 // Validate checks compile input invariants after Normalize.
 func (r CompileRequest) Validate() error {
+	if r.SourceRevision < 0 {
+		return ErrInvalidManifest
+	}
+	if r.PreviousRecord != nil {
+		if err := r.PreviousRecord.Validate(); err != nil {
+			return err
+		}
+	}
 	if r.CurrentTurn != nil {
 		if err := r.CurrentTurn.validate(); err != nil {
 			return err
@@ -101,6 +159,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 	var writebacks []MessageIdentityWriteback
 	var err error
 	next := CompileRequest{
+		DeferredResources:      cloneResourceSelections(r.DeferredResources),
 		TurnID:                 r.TurnID,
 		System:                 nil,
 		History:                nil,
@@ -113,6 +172,14 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		IdentityPolicy:         r.IdentityPolicy,
 		RequireDurableIdentity: r.RequireDurableIdentity,
 		Targets:                append([]CompileTarget(nil), r.Targets...),
+		CompilationID:          r.CompilationID,
+		Lineage:                r.Lineage.Clone(),
+		Origins:                append([]ContentRef(nil), r.Origins...),
+		SourceRevision:         r.SourceRevision,
+		PreviousRecord:         cloneContentRef(r.PreviousRecord),
+	}
+	for i := range next.Targets {
+		next.Targets[i].Name = strings.TrimSpace(next.Targets[i].Name)
 	}
 	next.System, writebacks, err = normalizeMessagesForCompile(
 		r.System,
@@ -371,18 +438,19 @@ func (r CompileRequest) AllMessages() []Message {
 
 // RequestFromSnapshot builds a CompileRequest from snapshot segments (no Pending).
 func RequestFromSnapshot(snap ConversationSnapshot) CompileRequest {
-	return CompileRequest{ //nolint:exhaustruct // Pending is compile-time only
-		System:    snap.Segment(SegmentSystem),
-		History:   snap.Segment(SegmentHistory),
-		Memory:    snap.Segment(SegmentMemory),
-		Tools:     snap.Segment(SegmentTools),
-		Artifacts: snap.Artifacts(),
+	return CompileRequest{ //nolint:exhaustruct_v5 // Pending is compile-time only
+		System:         snap.Segment(SegmentSystem),
+		History:        snap.Segment(SegmentHistory),
+		Memory:         snap.Segment(SegmentMemory),
+		Tools:          snap.Segment(SegmentTools),
+		Artifacts:      snap.Artifacts(),
+		SourceRevision: snap.Version(),
 	}
 }
 
 // ToSnapshot builds a conversation snapshot from request segments (excludes Pending).
 func (r CompileRequest) ToSnapshot() ConversationSnapshot {
-	snap := EmptySnapshot()
+	snap := EmptySnapshot().WithVersion(r.SourceRevision)
 	if len(r.System) > 0 {
 		snap = snap.WithSegment(SegmentSystem, cloneMessageSlice(r.System))
 	}

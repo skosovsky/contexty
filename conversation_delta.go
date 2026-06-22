@@ -134,12 +134,12 @@ type ConversationStateCodec struct {
 }
 
 type conversationDeltaWire struct {
-	Operation  DeltaOperation   `json:"operation"`
-	Segment    SegmentName      `json:"segment,omitempty"`
-	Messages   json.RawMessage  `json:"messages,omitempty"`
-	MessageIDs []string         `json:"message_ids,omitempty"`
-	Artifact   *ContextArtifact `json:"artifact,omitempty"`
-	ToolRound  json.RawMessage  `json:"tool_round,omitempty"`
+	Operation  DeltaOperation  `json:"operation"`
+	Segment    SegmentName     `json:"segment,omitempty"`
+	Messages   json.RawMessage `json:"messages,omitempty"`
+	MessageIDs []string        `json:"message_ids,omitempty"`
+	Artifact   json.RawMessage `json:"artifact,omitempty"`
+	ToolRound  json.RawMessage `json:"tool_round,omitempty"`
 }
 
 // EncodeState serializes conversation state.
@@ -162,12 +162,19 @@ func (c ConversationStateCodec) EncodeDelta(delta ConversationDelta) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
+	var artifact json.RawMessage
+	if delta.Artifact != nil {
+		artifact, err = marshalArtifactJSON(*delta.Artifact, c.Extensions.snapshot())
+		if err != nil {
+			return nil, err
+		}
+	}
 	wire := conversationDeltaWire{
 		Operation:  delta.Operation,
 		Segment:    delta.Segment,
 		Messages:   msgs,
 		MessageIDs: slices.Clone(delta.MessageIDs),
-		Artifact:   cloneArtifactPtr(delta.Artifact),
+		Artifact:   artifact,
 		ToolRound:  toolRound,
 	}
 	return json.Marshal(wire)
@@ -178,6 +185,14 @@ func (c ConversationStateCodec) DecodeDelta(data []byte) (ConversationDelta, err
 	var wire conversationDeltaWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return ConversationDelta{}, err
+	}
+	var artifact *ContextArtifact
+	if len(wire.Artifact) > 0 && string(wire.Artifact) != jsonNullLiteral {
+		decoded, artifactErr := UnmarshalArtifactJSON(wire.Artifact, c.Extensions)
+		if artifactErr != nil {
+			return ConversationDelta{}, artifactErr
+		}
+		artifact = &decoded
 	}
 	msgs, err := unmarshalMessagesWithRegistries(wire.Messages, c.Provenance, c.Extensions)
 	if err != nil {
@@ -196,7 +211,7 @@ func (c ConversationStateCodec) DecodeDelta(data []byte) (ConversationDelta, err
 		Segment:    wire.Segment,
 		Messages:   msgs,
 		MessageIDs: slices.Clone(wire.MessageIDs),
-		Artifact:   cloneArtifactPtr(wire.Artifact),
+		Artifact:   artifact,
 		ToolRound:  toolRoundPtr,
 	}, nil
 }
@@ -234,14 +249,6 @@ func cloneArtifactMap(in map[string]ContextArtifact) map[string]ContextArtifact 
 		out[id] = artifact.Clone()
 	}
 	return out
-}
-
-func cloneArtifactPtr(in *ContextArtifact) *ContextArtifact {
-	if in == nil {
-		return nil
-	}
-	cp := in.Clone()
-	return &cp
 }
 
 func mergeArtifactMaps(base map[string]ContextArtifact, artifacts []ContextArtifact) map[string]ContextArtifact {
