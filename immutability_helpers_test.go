@@ -20,8 +20,8 @@ func fixtureOwnedCompile(t *testing.T) (contexty.CompileRequest, contexty.Compil
 		Artifacts: []contexty.ContextArtifact{
 			contexty.NewMemoryBlock("memory", contexty.TextPayload("memo")).ContextArtifact,
 		},
-		Targets: []contexty.CompileTarget{{Name: "first", SourceSegment: contexty.SegmentHistory},
-			{Name: "second", SourceSegment: contexty.SegmentHistory}},
+		Targets: []contexty.CompileTarget{{Name: "first", Segments: []contexty.SegmentName{contexty.SegmentHistory}},
+			{Name: "second", Segments: []contexty.SegmentName{contexty.SegmentHistory}}},
 	}
 	engine := contexty.NewEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),

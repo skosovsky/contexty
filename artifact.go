@@ -32,12 +32,11 @@ const (
 	ArtifactPersistenceSkip    ArtifactPersistencePolicy = "skip"
 )
 
-// ArtifactBudgetPolicy bounds the materialized message using the main estimator.
+// ArtifactBudgetPolicy bounds the materialized message using each output estimator.
 // A nil policy is unlimited locally; TokenLimit zero is zero, not unlimited.
 // Negative limits on active artifacts fail compilation.
 type ArtifactBudgetPolicy struct {
-	Group      string `json:"group,omitempty"`
-	TokenLimit int    `json:"token_limit,omitempty"`
+	TokenLimit int `json:"token_limit,omitempty"`
 }
 
 // ContextArtifact is the common contract for retrieval and memory context.

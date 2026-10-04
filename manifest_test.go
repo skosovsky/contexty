@@ -103,7 +103,7 @@ func TestManifest_RoundTrip(t *testing.T) {
 		))
 	request := contexty.CompileRequest{CompilationID: "manifest", Targets: []contexty.CompileTarget{
 		{Name: "xml", View: string(contexty.ViewLLMXML)},
-		{
+		{Segments: []contexty.SegmentName{contexty.SegmentHistory},
 			Name: "small",
 			Budget: contexty.NewBudgetPipeline(
 				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(50)},
@@ -189,7 +189,7 @@ func TestManifest_IdentityAndPolicies(t *testing.T) {
 	msg := contexty.TextMessage(contexty.RoleUser, "same")
 	msg.ID = "m"
 	request := contexty.CompileRequest{CompilationID: "id", History: []contexty.Message{msg}, SourceRevision: 7,
-		Targets: []contexty.CompileTarget{{Name: "main"}}}
+		Targets: []contexty.CompileTarget{{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "main"}}}
 	profile := fixtureRecordProfile("main")
 	compile := func(record contexty.RecordProfile, limit int) (contexty.CompileResult, error) {
 		return contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()), contexty.WithCompileRecording(record),

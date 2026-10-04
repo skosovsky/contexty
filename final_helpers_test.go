@@ -15,11 +15,13 @@ func fixtureFinalCancellationRequest(
 	request := contexty.CompileRequest{History: []contexty.Message{input}}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)
 	if target {
-		request.Targets = []contexty.CompileTarget{{Name: "target", Budget: pipe,
-			Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
-				messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "final"}}
-				return messages, nil
-			}}}
+		request.Targets = []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "target", Budget: pipe,
+				Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
+					messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "final"}}
+					return messages, nil
+				}},
+		}
 		return contexty.NewEngine(), request
 	}
 	request.Options = []contexty.CompileOption{contexty.WithTextReplacement(contexty.TextReplacement{

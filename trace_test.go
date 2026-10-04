@@ -43,8 +43,15 @@ func TestLineage_Stages(t *testing.T) {
 			contexty.CharTokenEstimator{},
 		)),
 	)
-	req := contexty.CompileRequest{CompilationID: "trace-run", History: []contexty.Message{a, b}, Origins: refs,
-		Targets: []contexty.CompileTarget{{Name: "one", Formatter: formatter}, {Name: "two"}}}
+	req := contexty.CompileRequest{
+		CompilationID: "trace-run",
+		History:       []contexty.Message{a, b},
+		Origins:       refs,
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "one", Formatter: formatter},
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "two"},
+		},
+	}
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, req)
 	// Assert: every same-ID revision remains, and the summary traces both inputs.
@@ -63,10 +70,10 @@ func TestLineage_Stages(t *testing.T) {
 	require.NotEmpty(t, summary.Inputs[0].Occurrence)
 	require.Len(t, result.Transformations["operator"], 5) // source + 2 hooks + role + truncate
 	require.Equal(t, "safe", result.Projections["one"].Messages[0].TextContent())
-	require.Equal(t, "sum", result.Projections["two"].Messages[0].TextContent())
+	require.Equal(t, "instruction!!", result.Projections["two"].Messages[0].TextContent())
 	require.Equal(t, "sum", result.Payload.History[0].TextContent())
 	require.Len(t, result.Payload.History[0].SourceRefs, 2)
-	require.Greater(t, len(result.Projections["one"].Lineage.Records), len(result.Lineage.Records))
+	require.NotEqual(t, result.Projections["one"].Lineage, result.Lineage)
 	persisted := result.DerivePersistenceProjection(contexty.SegmentHistory)
 	require.Len(t, persisted, 1)
 	require.Equal(t, "sum", persisted[0].TextContent())

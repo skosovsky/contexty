@@ -36,7 +36,8 @@ loading or accepting compaction records. Unknown channels, duplicate proposal
 identities, inherited/non-summary invocations and invalid refs fail validation.
 Each budget also pins its optional compaction capture profile. Validation derives
 the complete required invocation set from current channel-local summarize edges:
-target graphs inherit main edges, but do not require or claim them again. Missing
+target graphs inherit shared preparation edges, but do not inherit main admission,
+compaction or formatting edges. Shared edges are not claimed again. Missing
 or extra links, a link reassigned to another channel, and inconsistent capture
 model/encoding/privacy/estimator/summarizer identities fail before replay output.
 Changing capture policy invalidates replay intent even when no summary was needed.
@@ -204,7 +205,8 @@ not inspect trust classes or grant permissions from content/roles.
 
 Use `ExportProjection` with an explicit `ExportSelection`, not serialization of
 the whole local `CompileProjection`. Only IDs present in `projection.Messages`
-and the caller-provided artifact set are selectable. Source/InputSnapshot and
+and the projection's participating `ArtifactIDs`/`Artifacts` are selectable.
+The export API accepts no external artifact collection. Source/InputSnapshot and
 rendered Text are never copied. Missing, empty and duplicate selected IDs fail
 with `ErrInvalidExportSelection`.
 
@@ -799,3 +801,12 @@ atomic publication, consume one OCC revision, and publish no partial batch on fa
 ConversationCodec is lossless and schema-tagged; OCC is independent of schema.
 See [checkpoint-store.md](checkpoint-store.md) for policy matrix, Cluster key layout,
 unknown network outcomes and host reconciliation boundaries.
+
+## Independent output preparation and selection
+
+Main and targets branch from one owned prepared candidate set before lossy
+admission. Composition, policy identity, exact required refs, selected/excluded
+units, artifact revisions and estimate profiles are recorded per output.
+Accepted replay restores these outcomes without executing policies or resolvers.
+Compile is atomic across outputs. See [context projections](context-projections.md)
+for composition, admission, final coverage and persistence boundaries.

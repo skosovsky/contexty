@@ -16,6 +16,7 @@ type DeferredConfiguration struct {
 
 // CompileConfiguration contains identities, never option values or executions.
 type CompileConfiguration struct {
+	Outputs  []OutputConfiguration   `json:"outputs"`
 	Options  ContentRef              `json:"options"`
 	Deferred []DeferredConfiguration `json:"deferred"`
 }
@@ -102,10 +103,12 @@ func (e *Engine) compileConfiguration(ctx context.Context) (CompileConfiguration
 		return CompileConfiguration{}, ErrInvalidRecordingComponent
 	}
 	deferred, err := e.deferredConfiguration()
-	return CompileConfiguration{Options: ref, Deferred: deferred}, err
+	outputs, _ := ctx.Value(outputConfigurationKey{}).([]OutputConfiguration)
+	return CompileConfiguration{Options: ref, Deferred: deferred, Outputs: cloneOutputConfigurations(outputs)}, err
 }
 
 func (c CompileConfiguration) clone() CompileConfiguration {
+	c.Outputs = cloneOutputConfigurations(c.Outputs)
 	c.Deferred = slices.Clone(c.Deferred)
 	for i := range c.Deferred {
 		c.Deferred[i].Resources = cloneResourceSelections(c.Deferred[i].Resources)
@@ -114,6 +117,9 @@ func (c CompileConfiguration) clone() CompileConfiguration {
 }
 
 func (c CompileConfiguration) validate(profile RecordProfile) error {
+	if err := validateOutputConfigurations(c.Outputs, profile); err != nil {
+		return err
+	}
 	if c.Options.ID != compileOptionsIdentity || c.Options.Occurrence != "" {
 		return ErrInvalidRecordingComponent
 	}

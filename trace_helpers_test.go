@@ -38,7 +38,10 @@ func fixtureTraceStageFixture() (contexty.CompileRequest, []contexty.EngineOptio
 		Options: []contexty.CompileOption{contexty.WithTextReplacement(contexty.TextReplacement{
 			Segment: contexty.SegmentSystem, MessageID: "instruction", Text: "s",
 		})},
-		Targets: []contexty.CompileTarget{{Name: "structured"}, {Name: "text", View: string(contexty.ViewLLMXML)}},
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "structured"},
+			{Name: "text", View: string(contexty.ViewLLMXML)},
+		},
 	}
 	formatter := func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
 		return messages, nil

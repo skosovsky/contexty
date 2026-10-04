@@ -10,7 +10,7 @@ type ResourceArtifactMerge struct {
 	Inputs   []ContentRef `json:"inputs"`
 	Artifact ContentRef   `json:"artifact"`
 	Message  ContentRef   `json:"message"`
-	Admitted bool         `json:"admitted"`
+	Prepared bool         `json:"prepared"`
 	Lineage  Lineage      `json:"lineage"`
 }
 
@@ -141,7 +141,7 @@ func resourceAppendLineage(ctx context.Context, id string, existing, incoming, a
 		},
 	}, Unresolved: nil}
 	record := ResourceArtifactMerge{Inputs: slices.Clone(inputs), Artifact: output, Message: materialized,
-		Admitted: false, Lineage: graph}
+		Prepared: false, Lineage: graph}
 	return record, record.Validate(id, incoming.ID)
 }
 

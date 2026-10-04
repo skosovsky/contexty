@@ -144,8 +144,13 @@ func TestBudget_RoundCompilePersistenceReplay(t *testing.T) {
 		contexty.WithCompileRecording(fixtureRecordProfile("pending")),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent)))
-	request := contexty.CompileRequest{CompilationID: "pending-compile", History: messages,
-		Targets: []contexty.CompileTarget{{Name: "pending", Budget: target}}}
+	request := contexty.CompileRequest{
+		CompilationID: "pending-compile",
+		History:       messages,
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "pending", Budget: target},
+		},
+	}
 	// Act.
 	compiled, err := engine.CompileSnapshot(context.Background(), request)
 	// Assert: original missing call remains unresolved through persistence and replay.

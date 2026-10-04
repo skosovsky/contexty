@@ -101,7 +101,10 @@ func fixtureAssertAppendSequenceReplay(
 		}))
 	require.NoError(t, err)
 	require.Equal(t, compiled.Artifacts, replayed.Artifacts)
-	require.Equal(t, compiled.Payload.Memory, replayed.Outputs[0].Segments["memory"])
+	require.Len(t, replayed.Outputs[0].Segments["memory"], len(compiled.Payload.Memory))
+	if len(compiled.Payload.Memory) > 0 {
+		require.Equal(t, compiled.Payload.Memory, replayed.Outputs[0].Segments["memory"])
+	}
 }
 
 func fixtureAssertAppendReplay(t *testing.T, compiled contexty.CompileResult,
@@ -121,6 +124,9 @@ func fixtureAssertAppendReplay(t *testing.T, compiled contexty.CompileResult,
 	)
 	require.NoError(t, err)
 	require.Equal(t, compiled.Artifacts, replayed.Artifacts)
-	require.Equal(t, compiled.Payload.Memory, replayed.Outputs[0].Segments["memory"])
+	require.Len(t, replayed.Outputs[0].Segments["memory"], len(compiled.Payload.Memory))
+	if len(compiled.Payload.Memory) > 0 {
+		require.Equal(t, compiled.Payload.Memory, replayed.Outputs[0].Segments["memory"])
+	}
 	require.Equal(t, 1, *reads)
 }

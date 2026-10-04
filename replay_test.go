@@ -65,10 +65,10 @@ func TestExact_Replay(t *testing.T) {
 	)
 	request := contexty.CompileRequest{CompilationID: "saved", History: []contexty.Message{a, b},
 		Artifacts: []contexty.ContextArtifact{artifact}, Targets: []contexty.CompileTarget{
-			{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Name: "small",
 				Budget: contexty.NewBudgetPipeline(
-					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(8)},
+					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)},
 					contexty.CharTokenEstimator{},
 				),
 				Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {

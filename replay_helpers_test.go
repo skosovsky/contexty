@@ -120,7 +120,12 @@ func fixtureHistoricalBlobRecord(
 		),
 	)
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "argument-replay", History: request.History, Targets: []contexty.CompileTarget{{Name: "copy"}}})
+		CompilationID: "argument-replay",
+		History:       request.History,
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "copy"},
+		},
+	})
 	require.NoError(t, err)
 	accepted, err := result.Record.Accept("host-accept")
 	require.NoError(t, err)

@@ -33,6 +33,7 @@ type AbstractPayload struct {
 
 // Engine compiles conversation snapshots into CompileResult.
 type Engine struct {
+	selection      *SelectionPolicy
 	stateStore     ConversationStateStore
 	hooks          []TransformHook
 	budget         *BudgetPipeline
@@ -101,6 +102,7 @@ func WithRoleProjectionPolicy(policy RoleProjectionPolicy) EngineOption {
 // NewEngine creates a compile engine.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
+		selection:      nil,
 		stateStore:     nil,
 		hooks:          nil,
 		budget:         nil,
@@ -174,7 +176,7 @@ func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) Com
 		Options:                req.Options,
 		IdentityPolicy:         req.IdentityPolicy,
 		RequireDurableIdentity: req.RequireDurableIdentity,
-		Targets:                append([]CompileTarget(nil), req.Targets...),
+		Targets:                cloneCompileTargets(req.Targets),
 		CompilationID:          req.CompilationID,
 		Lineage:                req.Lineage.Clone(),
 		Origins:                append([]ContentRef(nil), req.Origins...),
@@ -206,12 +208,12 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		return CompileResult{}, err
 	}
 	projections, err := e.compileTargets(
-		compiled.Context,
-		compiled.Snapshot,
+		compiled.PreparedContext,
+		compiled.PreparedSnapshot,
 		req.Targets,
 		frozenSource,
-		compiled.Transformations,
-		compiled.ActiveArtifacts,
+		compiled.PreparedTransforms,
+		compiled.PreparedArtifacts,
 	)
 	if err != nil {
 		return CompileResult{}, err
@@ -222,6 +224,8 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		}
 	}
 	result := CompileResult{
+		Selection:          compiled.Selection.clone(),
+		PreparedSnapshot:   compiled.PreparedSnapshot.AllSegmentsSnapshot(),
 		Payload:            compiled.Payload,
 		Transformations:    compiled.Transformations,
 		Source:             frozenSource,
@@ -288,13 +292,28 @@ func (e *Engine) finalizeCompileRecording(ctx context.Context, result CompileRes
 	return result, nil
 }
 
-type compilePipelineResult struct {
+type preparedCompile struct {
 	Context         context.Context
 	Snapshot        ConversationSnapshot
-	Payload         AbstractPayload
 	Transformations map[string]TransformChain
-	Introduced      map[string]Message
-	ActiveArtifacts []ContextArtifact
+	Artifacts       []ContextArtifact
+	Pending         []Message
+	Options         compileOptions
+	Recorder        *transformRecorder
+}
+
+type compilePipelineResult struct {
+	Selection          *SelectionDecision
+	PreparedContext    context.Context
+	PreparedSnapshot   ConversationSnapshot
+	PreparedTransforms map[string]TransformChain
+	PreparedArtifacts  []ContextArtifact
+	Context            context.Context
+	Snapshot           ConversationSnapshot
+	Payload            AbstractPayload
+	Transformations    map[string]TransformChain
+	Introduced         map[string]Message
+	ActiveArtifacts    []ContextArtifact
 }
 
 func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) context.Context {
@@ -311,19 +330,21 @@ func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) c
 	return ctx
 }
 
-func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (compilePipelineResult, error) {
+func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (preparedCompile, error) {
 	ctx = e.startCompileEvidence(ctx, req)
+	ctx = context.WithValue(ctx, outputConfigurationKey{}, e.outputConfigurations(req))
+	ctx = context.WithValue(ctx, sharedPreparationKey{}, true)
 	ctx, compileOpts, err := e.prepareCompileHistoricalOptions(ctx, req)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	ctx, err = e.startContentCapture(ctx, req)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	ctx, err = e.startCompileTrace(ctx, req)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	ctx = withCompileIdentity(ctx, req.IdentityPolicy, req.RequireDurableIdentity, req.TurnID, "")
 
@@ -331,32 +352,81 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	ctx = withTransformRecorder(ctx, recorder)
 	compilePending, err := tracedCompilePending(ctx, req)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	snap, activeArtifacts, err := e.snapshotWithActiveArtifacts(ctx, req)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	if traceErr := traceArtifactSources(ctx, activeArtifacts); traceErr != nil {
-		return compilePipelineResult{}, traceErr
+		return preparedCompile{}, traceErr
 	}
 	snap, err = applyHistoricalArguments(ctx, snap, compileOpts.historicalArguments)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 
 	beforeDeferred := snap
 	setResourceActiveArtifacts(ctx, activeArtifacts)
 	snap, err = e.applyDeferredBlocks(ctx, snap)
 	if err != nil {
-		return compilePipelineResult{}, err
+		return preparedCompile{}, err
 	}
 	activeArtifacts = activeResourceArtifacts(ctx)
+	snap = snap.WithArtifacts(activeArtifacts)
 	recorder.registerDeferredMessageIDs(beforeDeferred, snap)
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
-		return compilePipelineResult{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
+		return preparedCompile{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
 	}
 
+	preparedSnapshot := snap.AllSegmentsSnapshot()
+	preparedTransforms := recorder.snapshot()
+	preparedArtifacts := cloneArtifacts(activeArtifacts)
+	preparedContext := context.WithValue(ctx, sharedPreparationKey{}, false)
+	preparedContext = context.WithValue(
+		preparedContext,
+		preparedOutputKey{},
+		preparedOutput{pending: cloneMessageSlice(compilePending), options: compileOpts},
+	)
+	return preparedCompile{
+		Context:         preparedContext,
+		Snapshot:        preparedSnapshot,
+		Transformations: preparedTransforms,
+		Artifacts:       preparedArtifacts,
+		Pending:         compilePending,
+		Options:         compileOpts,
+		Recorder:        recorder,
+	}, nil
+}
+
+func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (compilePipelineResult, error) {
+	prepared, err := e.prepareCompile(ctx, req)
+	if err != nil {
+		return compilePipelineResult{}, err
+	}
+	preparedContext := prepared.Context
+	preparedSnapshot := prepared.Snapshot
+	preparedTransforms := prepared.Transformations
+	preparedArtifacts := prepared.Artifacts
+	snap := prepared.Snapshot
+	activeArtifacts := cloneArtifacts(prepared.Artifacts)
+	compilePending := prepared.Pending
+	compileOpts := prepared.Options
+	recorder := prepared.Recorder
+
+	ctx = preparedContext
+	if trace := traceFromContext(ctx); trace != nil {
+		ctx = context.WithValue(ctx, compileTraceKey{}, trace.mainBranch())
+	}
+	snap, mainSelection, err := selectOutput(ctx, snap, compilePending, e.selection, e.budget)
+	if err != nil {
+		return compilePipelineResult{}, err
+	}
+	if selectionErr := recordSelectionArtifactExclusions(ctx, mainSelection, activeArtifacts); selectionErr != nil {
+		return compilePipelineResult{}, selectionErr
+	}
+	activeArtifacts = filterParticipatingArtifacts(activeArtifacts, snapshotAllMessages(snap))
+	snap = snap.WithArtifacts(activeArtifacts)
 	snap, err = applyCompileReplacements(ctx, snap, compileOpts, patchPhasePreBudget)
 	if err != nil {
 		return compilePipelineResult{}, err
@@ -369,7 +439,18 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	if err != nil {
 		return compilePipelineResult{}, err
 	}
+	if roundErr := validateFinalSelectionRounds(snap); roundErr != nil {
+		return compilePipelineResult{}, roundErr
+	}
 	payload := e.payloadFromSnapshot(snap, compilePending)
+	activeArtifacts, err = finalParticipatingArtifacts(ctx, activeArtifacts, payload.FlattenMessages())
+	if err != nil {
+		return compilePipelineResult{}, err
+	}
+	snap = snap.WithArtifacts(activeArtifacts)
+	if err := validateMandatorySelection(ctx, mainSelection, e.selection, payload.FlattenMessages()); err != nil {
+		return compilePipelineResult{}, err
+	}
 	if e.budget != nil {
 		if err := e.budget.validateRecordedRetention(ctx, payload.History); err != nil {
 			return compilePipelineResult{}, err
@@ -379,12 +460,17 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 		}
 	}
 	return compilePipelineResult{
-		Context:         ctx,
-		Snapshot:        snap,
-		Payload:         payload,
-		Transformations: recorder.snapshot(),
-		Introduced:      recorder.introducedSnapshot(),
-		ActiveArtifacts: cloneArtifacts(activeArtifacts),
+		Selection:          mainSelection,
+		PreparedContext:    preparedContext,
+		PreparedSnapshot:   preparedSnapshot,
+		PreparedTransforms: preparedTransforms,
+		PreparedArtifacts:  preparedArtifacts,
+		Context:            ctx,
+		Snapshot:           snap,
+		Payload:            payload,
+		Transformations:    recorder.snapshot(),
+		Introduced:         recorder.introducedSnapshot(),
+		ActiveArtifacts:    cloneArtifacts(activeArtifacts),
 	}, nil
 }
 

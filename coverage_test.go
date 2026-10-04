@@ -23,11 +23,24 @@ func TestManifest_Coverage(t *testing.T) {
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(6)}, contexty.CharTokenEstimator{})))
-	request := contexty.CompileRequest{CompilationID: "coverage", System: []contexty.Message{system},
-		History: []contexty.Message{old, recent}, Targets: []contexty.CompileTarget{{Name: "history"},
-			{Name: "empty", Formatter: func(context.Context, []contexty.Message) ([]contexty.Message, error) {
-				return nil, nil
-			}}}}
+	request := contexty.CompileRequest{
+		CompilationID: "coverage",
+		System:        []contexty.Message{system},
+		History: []contexty.Message{
+			old,
+			recent,
+		},
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "history"},
+			{
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Name:     "empty",
+				Formatter: func(context.Context, []contexty.Message) ([]contexty.Message, error) {
+					return nil, nil
+				},
+			},
+		},
+	}
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), request)
 	// Assert: every input and empty segment is accounted for independently per output.
@@ -88,9 +101,17 @@ func TestCoverage_Materialization(t *testing.T) {
 	profile.RequireOrigins = true
 	artifactRef, err := contexty.ArtifactContentRef(active)
 	require.NoError(t, err)
-	request := contexty.CompileRequest{CompilationID: "materialize", TurnID: "now", CurrentTurn: &turn,
-		Artifacts: []contexty.ContextArtifact{active, inactive, oversized},
-		Origins:   []contexty.ContentRef{fixtureRefForMessage(t, raw), artifactRef}}
+	request := contexty.CompileRequest{
+		CompilationID: "materialize",
+		TurnID:        "now",
+		CurrentTurn:   &turn,
+		Artifacts:     []contexty.ContextArtifact{active, inactive, oversized},
+		Origins: []contexty.ContentRef{
+			fixtureRefForMessage(t, raw),
+			artifactRef,
+			fixtureArtifactContentRef(t, oversized),
+		},
+	}
 	engine := contexty.NewEngine(
 		contexty.WithTraceProfile(profile),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
@@ -142,20 +163,33 @@ func TestCoverage_Summary(t *testing.T) {
 				})}, contexty.CharTokenEstimator{},
 			contexty.WithSummarizerDescriptor(fixtureTraceProfile().Stages["summarize"]))))
 	request := contexty.CompileRequest{CompilationID: "summary-coverage", History: []contexty.Message{a, b},
-		Targets: []contexty.CompileTarget{{Name: "history"},
-			{Name: "empty", Formatter: func(context.Context, []contexty.Message) ([]contexty.Message, error) {
-				return nil, nil
-			}}}}
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "history"},
+			{
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Name:     "empty",
+				Formatter: func(context.Context, []contexty.Message) ([]contexty.Message, error) {
+					return nil, nil
+				},
+			},
+		}}
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), request)
 	// Assert: each source maps to summary; a later run retaining it is not new summarization.
 	require.NoError(t, err)
-	for _, output := range []string{"main", "history"} {
+	for _, output := range []string{"main"} {
 		for _, id := range []string{"a", "b"} {
 			entry := fixtureCoverage(t, *result.Manifest, output, "history", id)
 			require.Equal(t, contexty.CoverageSummarized, entry.Status)
 			require.Equal(t, "summary", entry.Outputs[0].ID)
 		}
+	}
+	for _, id := range []string{"a", "b"} {
+		require.Equal(
+			t,
+			contexty.CoverageIncluded,
+			fixtureCoverage(t, *result.Manifest, "history", "history", id).Status,
+		)
 	}
 	for _, id := range []string{"a", "b"} {
 		entry := fixtureCoverage(t, *result.Manifest, "empty", "history", id)

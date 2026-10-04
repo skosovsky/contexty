@@ -89,11 +89,12 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		RequireDurableIdentity: true,
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "flat_classifier",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
-				Formatter:     nil,
+				Name:         "flat_classifier",
+				View:         "",
+				Segments:     []contexty.SegmentName{contexty.SegmentHistory},
+				ArtifactRefs: nil, IncludeCurrentTurn: false, IncludeArtifacts: false, Selection: nil,
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 		Options: []contexty.CompileOption{

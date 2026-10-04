@@ -5,13 +5,20 @@ import (
 	"fmt"
 )
 
+type sharedPreparationKey struct{}
+type preparedOutputKey struct{}
+type preparedOutput struct {
+	pending []Message
+	options compileOptions
+}
+
 type artifactExclusionsKey struct{}
 type artifactEstimatesKey struct{}
 
 const artifactInactiveReason = "artifact_inactive"
 
-// selectArtifacts captures decisions once, using the same estimator as the
-// main output. Neither recording nor replay is allowed to re-estimate them.
+// selectArtifacts prepares lifecycle-visible revisions once. During shared
+// preparation no budget admission occurs; each output evaluates its own caps.
 func (e *Engine) selectArtifacts(
 	ctx context.Context,
 	turnID string,
@@ -59,7 +66,7 @@ func artifactSelectionReason(
 	if err != nil {
 		return "", err
 	}
-	if artifact.Budget == nil {
+	if shared, _ := ctx.Value(sharedPreparationKey{}).(bool); shared || artifact.Budget == nil {
 		return "", nil
 	}
 	if artifact.Budget.TokenLimit < 0 {

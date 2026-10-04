@@ -168,8 +168,12 @@ func TestRolling_SummaryConfiguration(t *testing.T) {
 	// Act.
 	_, err := engine.CompileSnapshot(
 		context.Background(),
-		contexty.CompileRequest{History: fixtureProtectedHistory()[:3],
-			Targets: []contexty.CompileTarget{{Name: "invalid", Budget: pipeline}}},
+		contexty.CompileRequest{
+			History: fixtureProtectedHistory()[:3],
+			Targets: []contexty.CompileTarget{
+				{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "invalid", Budget: pipeline},
+			},
+		},
 	)
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrInvalidDescriptor)

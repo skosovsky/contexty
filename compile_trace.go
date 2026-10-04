@@ -444,3 +444,9 @@ func uniqueContentRefs(refs []ContentRef) []ContentRef {
 	}
 	return result
 }
+
+func (t *compileTrace) mainBranch() *compileTrace {
+	copyTrace := t.branch("")
+	copyTrace.prefix = t.prefix + "main/"
+	return copyTrace
+}

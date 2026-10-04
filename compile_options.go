@@ -177,3 +177,17 @@ func recordTextReplacementCtx(ctx context.Context, before, after Message) {
 	rec.introduceIfAbsent(before)
 	rec.set(before.ID, ActionFormatted, ReasonTextReplacement)
 }
+
+func outputOptions(options compileOptions, snap ConversationSnapshot) compileOptions {
+	out := options
+	out.replacements = nil
+	for _, replacement := range options.replacements {
+		for _, message := range snap.Segment(replacement.Segment) {
+			if message.ID == replacement.MessageID {
+				out.replacements = append(out.replacements, replacement)
+				break
+			}
+		}
+	}
+	return out
+}

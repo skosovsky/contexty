@@ -89,22 +89,48 @@ func cloneArtifactEstimates(estimates []ArtifactBudgetEstimate) ([]ArtifactBudge
 	return result, nil
 }
 
-func artifactBudgetRequests(turnID string, artifacts []ContextArtifact) ([]ArtifactBudgetRequest, error) {
-	var requests []ArtifactBudgetRequest
-	seen := make(map[ContentRef]bool)
-	for _, artifact := range artifacts {
-		if artifact.Budget == nil || !artifactVisibleInTurn(turnID, artifact) {
-			continue
+func cloneValidArtifactEstimates(estimates []ArtifactBudgetEstimate) []ArtifactBudgetEstimate {
+	result := slices.Clone(estimates)
+	for i, estimate := range result {
+		if estimate.Report != nil {
+			report := cloneEstimateReportValue(*estimate.Report)
+			result[i].Report = &report
 		}
-		ref, err := ArtifactContentRef(artifact)
-		if err != nil {
-			return nil, err
-		}
-		if seen[ref] {
-			continue
-		}
-		seen[ref] = true
-		requests = append(requests, ArtifactBudgetRequest{Input: ref, TokenLimit: artifact.Budget.TokenLimit})
 	}
-	return requests, nil
+	return result
+}
+
+// Cloning owns values without validating or changing their evidence. Validation
+// belongs to the manifest boundary and must return an error rather than panic.
+func cloneEstimateReportValue(report EstimateReport) EstimateReport {
+	report.Profile = report.Profile.clone()
+	report.ManifestRef = cloneContentRef(report.ManifestRef)
+	report.WireRef = cloneContentRef(report.WireRef)
+	report.Segments = slices.Clone(report.Segments)
+	for i, segment := range report.Segments {
+		segment.Messages = slices.Clone(segment.Messages)
+		segment.PerMessage = slices.Clone(segment.PerMessage)
+		segment.Coverage = slices.Clone(segment.Coverage)
+		segment.PartKinds = slices.Clone(segment.PartKinds)
+		for j, groups := range segment.PartKinds {
+			segment.PartKinds[j] = slices.Clone(groups)
+			for k, kinds := range groups {
+				segment.PartKinds[j][k] = slices.Clone(kinds)
+			}
+		}
+		segment.ExtensionTypes = slices.Clone(segment.ExtensionTypes)
+		for j, types := range segment.ExtensionTypes {
+			segment.ExtensionTypes[j] = slices.Clone(types)
+		}
+		report.Segments[i] = segment
+	}
+	return report
+}
+
+func artifactRequestsFromEstimates(estimates []ArtifactBudgetEstimate) []ArtifactBudgetRequest {
+	var out []ArtifactBudgetRequest
+	for _, estimate := range estimates {
+		out = append(out, ArtifactBudgetRequest{Input: estimate.Input, TokenLimit: estimate.TokenLimit})
+	}
+	return out
 }

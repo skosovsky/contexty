@@ -19,9 +19,13 @@ func TestResource_DeferredNative(t *testing.T) {
 	block.Resources[0].ID = "caller mutation"
 	block.Resources[0].Configuration.Estimate.Capabilities[contexty.EstimateText] = contexty.EstimateUnknown
 	// Act: the same resolved message reaches main and both target pipelines.
-	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "resources",
-		Targets: []contexty.CompileTarget{{Name: "first", SourceSegment: contexty.SegmentMemory},
-			{Name: "second", SourceSegment: contexty.SegmentMemory}}})
+	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
+		CompilationID: "resources",
+		Targets: []contexty.CompileTarget{
+			{Name: "first", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+			{Name: "second", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+		},
+	})
 	// Assert: no target refetch, no raw body in Source or prompt, full resource edges.
 	require.NoError(t, err)
 	require.Equal(t, 1, *calls)

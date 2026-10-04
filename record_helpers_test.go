@@ -75,7 +75,7 @@ func fixtureComponentFixture(t *testing.T) (contexty.CompileResult, contexty.Rec
 		},
 		IdentityPolicy: contexty.NewStableMessageIdentityPolicy("host"),
 		Targets: []contexty.CompileTarget{
-			{Name: "formatted", Formatter: formatter},
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "formatted", Formatter: formatter},
 			{Name: "xml", View: string(contexty.ViewLLMXML)},
 		},
 	})

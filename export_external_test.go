@@ -18,21 +18,28 @@ func TestExport_PrivateEnvelope(t *testing.T) {
 	public.ID = "public"
 	public.Actor = &contexty.Actor{ID: "PRIVATE-ACTOR"}
 	public.SourceRefs = []contexty.SourceRef{{URI: "PRIVATE-RESOLVER-HANDLE"}}
-	result, err := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile())).CompileSnapshot(
-		context.Background(), contexty.CompileRequest{CompilationID: "PRIVATE-COMPILE-ID",
-			System: []contexty.Message{private}, History: []contexty.Message{public},
-			Targets: []contexty.CompileTarget{{Name: "consumer"}}})
-	require.NoError(t, err)
 	artifact := contexty.NewMemoryBlock("approved-artifact", contexty.TextPayload("approved blob")).ContextArtifact
 	artifact.ArtifactType = "PRIVATE-DOMAIN-TYPE"
 	artifact.OwnerRef = &contexty.SourceRef{URI: "PRIVATE-OWNER"}
 	artifact.BoundTurnID = "PRIVATE-TURN"
 	artifact.SourceRefs = []contexty.SourceRef{{URI: "PRIVATE-ARTIFACT-HANDLE"}}
+	result, err := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile())).CompileSnapshot(
+		context.Background(), contexty.CompileRequest{
+			CompilationID: "PRIVATE-COMPILE-ID",
+			System:        []contexty.Message{private},
+			History:       []contexty.Message{public},
+			Artifacts:     []contexty.ContextArtifact{artifact},
+			Targets: []contexty.CompileTarget{
+				{Segments: []contexty.SegmentName{contexty.SegmentHistory}, IncludeArtifacts: true, Name: "consumer"},
+			},
+		})
+	require.NoError(t, err)
 	selection := contexty.ExportSelection{MessageIDs: []string{"public"}, ArtifactIDs: []string{artifact.ID},
 		Metadata: contexty.ExportMetadata{Lineage: true}}
+	projection := result.Projections["consumer"]
 	// Act: serialize the entire envelope, not just visible text.
-	envelope, err := contexty.ExportProjection(result.Projections["consumer"],
-		[]contexty.ContextArtifact{artifact}, selection, contexty.DefaultJSONSerializer())
+	envelope, err := contexty.ExportProjection(projection,
+		selection, contexty.DefaultJSONSerializer())
 	require.NoError(t, err)
 	wire, err := json.Marshal(envelope)
 	// Assert: no implicit local metadata, snapshots or handles are disclosed.
@@ -68,7 +75,7 @@ func TestExport_SameIDDoesNotApproveRawRevision(t *testing.T) {
 		Metadata:   contexty.ExportMetadata{Lineage: true},
 	}
 	// Act.
-	envelope, err := contexty.ExportProjection(projection, nil, selection, contexty.DefaultJSONSerializer())
+	envelope, err := contexty.ExportProjection(projection, selection, contexty.DefaultJSONSerializer())
 	// Assert: ID permission never silently authorizes the historical raw digest.
 	require.NoError(t, err)
 	require.Len(t, envelope.Lineage, 1)
@@ -80,7 +87,7 @@ func TestExport_SameIDDoesNotApproveRawRevision(t *testing.T) {
 	// Arrange: explicit opaque-digest permission discloses a hash, not payload.
 	selection.AllowOpaqueDigests = true
 	// Act.
-	envelope, err = contexty.ExportProjection(projection, nil, selection, contexty.DefaultJSONSerializer())
+	envelope, err = contexty.ExportProjection(projection, selection, contexty.DefaultJSONSerializer())
 	// Assert.
 	require.NoError(t, err)
 	require.Equal(t, []string{rawRef.Digest}, envelope.Lineage[0].OpaqueInputDigests)
@@ -105,7 +112,7 @@ func TestExport_UnorderedGraph(t *testing.T) {
 	selection := contexty.ExportSelection{MessageIDs: []string{"c"}, LineageRefs: refs,
 		Metadata: contexty.ExportMetadata{Lineage: true, TransformDescriptors: true}}
 	// Act.
-	envelope, err := contexty.ExportProjection(projection, nil, selection, contexty.DefaultJSONSerializer())
+	envelope, err := contexty.ExportProjection(projection, selection, contexty.DefaultJSONSerializer())
 	// Assert: the entire approved ancestor chain survives, without raw input bodies.
 	require.NoError(t, err)
 	require.Len(t, envelope.Lineage, 2)
@@ -124,13 +131,34 @@ func TestExport_SelectionErrors(t *testing.T) {
 		Source: contexty.CompileRequest{System: []contexty.Message{private}}}
 	for _, ids := range [][]string{{"private"}, {"public", "public"}, {""}} {
 		// Act.
-		_, err := contexty.ExportProjection(projection, nil,
-			contexty.ExportSelection{MessageIDs: ids}, contexty.DefaultJSONSerializer())
+		_, err := contexty.ExportProjection(
+			projection,
+			contexty.ExportSelection{MessageIDs: ids},
+			contexty.DefaultJSONSerializer(),
+		)
 		// Assert.
 		require.ErrorIs(t, err, contexty.ErrInvalidExportSelection)
 	}
 	// Act / Assert: artifact permission cannot resolve a nonexistent object.
-	_, err := contexty.ExportProjection(projection, nil,
-		contexty.ExportSelection{ArtifactIDs: []string{"missing"}}, contexty.DefaultJSONSerializer())
+	_, err := contexty.ExportProjection(
+		projection,
+		contexty.ExportSelection{ArtifactIDs: []string{"missing"}},
+		contexty.DefaultJSONSerializer(),
+	)
 	require.ErrorIs(t, err, contexty.ErrInvalidExportSelection)
+}
+
+func TestExport_RejectsForeignArtifact(t *testing.T) {
+	// Arrange: a local projection only contains its own participating artifacts.
+	artifact := contexty.NewMemoryBlock("foreign", contexty.TextPayload("PRIVATE")).ContextArtifact
+	projection := contexty.CompileProjection{}
+	// Act.
+	envelope, err := contexty.ExportProjection(
+		projection,
+		contexty.ExportSelection{ArtifactIDs: []string{artifact.ID}},
+		contexty.DefaultJSONSerializer(),
+	)
+	// Assert.
+	require.Error(t, err)
+	require.Zero(t, envelope)
 }

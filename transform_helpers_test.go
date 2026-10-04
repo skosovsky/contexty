@@ -32,7 +32,9 @@ func fixtureCancelTransformFixture(
 	case "segment":
 		return contexty.NewEngine(contexty.WithSegmentFormatter(contexty.SegmentHistory, formatter)), request
 	case "target":
-		request.Targets = []contexty.CompileTarget{{Name: "target", Formatter: formatter}}
+		request.Targets = []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "target", Formatter: formatter},
+		}
 		return contexty.NewEngine(), request
 	default:
 		pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1),

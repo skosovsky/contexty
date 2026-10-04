@@ -70,7 +70,7 @@ type exportedArtifact struct {
 // or InputSnapshot. All selected IDs must exist and be unique. Metadata defaults
 // to no disclosure; lineage digests of excluded content require separate consent.
 // Text is intentionally not copied: it may render a wider context than Messages.
-func ExportProjection(projection CompileProjection, artifacts []ContextArtifact,
+func ExportProjection(projection CompileProjection,
 	selection ExportSelection, codec JSONSerializer,
 ) (ExportEnvelope, error) {
 	if err := projection.Lineage.Validate(); err != nil {
@@ -80,7 +80,12 @@ func ExportProjection(projection CompileProjection, artifacts []ContextArtifact,
 	if err != nil {
 		return ExportEnvelope{}, err
 	}
-	artifactWire, err := exportArtifacts(artifacts, selection, codec.Extensions)
+	for _, id := range selection.ArtifactIDs {
+		if !slices.Contains(projection.ArtifactIDs, id) {
+			return ExportEnvelope{}, ErrInvalidExportSelection
+		}
+	}
+	artifactWire, err := exportArtifacts(projection.Artifacts, selection, codec.Extensions)
 	if err != nil {
 		return ExportEnvelope{}, err
 	}

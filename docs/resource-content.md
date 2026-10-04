@@ -55,49 +55,54 @@ Actual resource lineage is imported before deferred/merge/target transforms;
 targets use the same resolved message without invoking readers again. Manifest
 compile configuration includes selections and owns their nested containers.
 
-Resolved artifacts pass the same lifecycle and local-budget admission as explicit
-artifacts, using the main estimator. Inactive turn-bound or over-budget projections
-are excluded, with actual cost and exclusion reason in manifest evidence. Only
-admitted artifacts/messages reach main and targets. Default replacement and
-`PolicyReplaceByOrigin` may replace an existing artifact with the same ID;
-ephemeral artifacts follow the existing replacement semantics too. Resolution evidence and
-admission state are owned by one compile operation; another compile starts fresh.
-`CompileResult.Artifacts` contains admitted projections; normal artifact checkpoint
-policy controls retention. Artifact-generated messages are not also saved through
-`DerivePersistenceProjection`, which prevents an ephemeral projection becoming a
-persistent ordinary message. Source retains only pre-resolution input metadata.
+Resolved artifacts pass lifecycle checks and merge during shared preparation,
+before local or whole-output budget admission. Inactive turn-bound projections
+remain unavailable. Main and each target then select independently from the
+prepared artifact set, using their own estimator for artifact-local caps. A main
+exclusion cannot remove a prepared candidate from another target. Manifest
+estimate/exclusion evidence belongs to the actual output; targets do not read
+resources again. Default replacement and `PolicyReplaceByOrigin` may replace an
+existing same-ID artifact; ephemeral artifacts retain their replacement semantics.
+Resolution evidence and preparation state are owned by one compile operation.
 
-For distinct artifact IDs, an admitted `PolicyReplaceByOrigin` resource applies
-the normal typed-origin replacement against both existing artifacts and earlier
-resolutions. Removed artifact messages disappear from every shared segment before
-later transforms/targets. Replaced projections in the same deferred callback are
-filtered from its collected messages too. Unrelated origins remain unchanged;
-inactive/over-budget replacements cannot evict active artifacts. Selected source
-and actual resolution records remain immutable evidence, with `artifact_merge`
-exclusions for replaced artifacts. Exact replay restores the final admitted set
-without resolving again. Same-ID replacement retains only the last admitted
-message, including when the two artifact revisions are identical. Different
-revisions sharing an ID remain distinct manifest inputs and exclusions use full
-content references, not bare IDs. Ordinary deferred messages may not reuse a
-resource materialization ID in the same result: that conflict fails explicitly
-instead of silently discarding host content. Same-ID deduplication follows the
-contract below. Same-ID append produces a separate derived artifact as described
-below, without rewriting the original resolution evidence.
+`CompileResult.Artifacts` contains main participating projections; each named
+projection owns its own participating artifacts. Choose one output artifact set
+and apply normal checkpoint policy explicitly. Artifact-generated messages are
+not also saved through `DerivePersistenceProjection`, which prevents an ephemeral
+projection becoming a persistent ordinary message. Source retains pre-resolution
+input metadata, not an implicitly approved downstream resource body.
+
+For distinct artifact IDs, a lifecycle-visible `PolicyReplaceByOrigin` resource
+applies typed-origin replacement against existing artifacts and earlier
+resolutions during preparation. Removed artifact messages disappear from shared
+segments before output selection/transforms. Replaced projections in the same
+callback are filtered from collected messages too. Unrelated origins remain
+unchanged; inactive replacements cannot evict active artifacts. An over-budget
+replacement can replace the old revision in preparation and then be excluded by
+an output; that exclusion does not restore the old revision. Selected source and
+actual resolution records remain immutable evidence, with `artifact_merge`
+exclusions for replaced artifacts. Replay restores each output's recorded set
+without resolving again. Same-ID replacement retains the last prepared message,
+including when revisions are identical. Different revisions sharing an ID remain
+distinct manifest inputs and exclusions use full content refs. Ordinary deferred
+messages may not reuse a resource materialization ID in the same result; that
+conflict fails explicitly. Same-ID append produces a separate derived artifact
+without rewriting incoming resolution evidence.
 
 ### Same-ID deduplication contract
 
-An admitted non-ephemeral `PolicyDeduplicateByLayer` projection follows the
-existing artifact source-layer contract: when its non-empty source reference
-intersects the active artifact with the same ID, retain that existing artifact
-unchanged and emit no incoming materialization. Otherwise replace it with the
-incoming artifact. Ephemeral lifecycle retains its replacement precedence.
-Resource resolution evidence and its approved replay dependencies remain present
-even when deduplication excludes the incoming projection. Inactive or locally
-over-budget incoming projections cannot replace the active artifact. Main and
-targets must agree with the final admitted artifact set; no target reads again.
+A lifecycle-visible non-ephemeral `PolicyDeduplicateByLayer` projection follows
+the artifact source-layer contract: if its non-empty source reference intersects
+the active same-ID artifact, retain the existing artifact unchanged and emit no
+incoming materialization. Otherwise replace it with the incoming artifact.
+Ephemeral lifecycle retains replacement precedence. Resolution evidence and
+approved replay dependencies remain present even when preparation deduplicates
+the incoming projection. Inactive incoming projections cannot replace active
+artifacts. Budget admission follows preparation independently for each output;
+local overflow does not roll back a replacement or trigger another read.
 Deduplication selects one intact artifact; it does not merge labels, broaden trust
-or treat an empty source identity as a common origin. A repeated identical typed
-artifact revision has one manifest budget request/estimate, not duplicate entries.
+or treat an empty source identity as a common origin. Repeated identical typed
+revisions have one actual budget request/estimate per output, not duplicate entries.
 
 ### Same-ID append contract
 
@@ -111,23 +116,21 @@ using the existing newline text-append semantics. Media and blob-bound previews
 are unsupported for append and fail explicitly instead of flattening or reusing
 an invalid immutable-object binding.
 
-Incoming admission precedes append. The resulting derived artifact undergoes a
-second local-budget admission using the main estimator. If excluded, the prior
-active artifact remains unchanged; final main/target budgets still apply. Metadata
-and actual dependencies for the derivation are separate from the original
-resolution. Host-approved capture includes both inputs, the derived artifact and
-message, including an excluded derivation. Accepted replay verifies these saved
-dependencies without executing reader, label policy, projector or estimator.
+Append is prepared before output-local admission. `ResourceResolution.Merge`
+records the immutable old/incoming refs, derived artifact/message refs and two
+derivation edges; `Prepared` states that the shared merge entered preparation,
+not that it fits or survives every output. Original resolution refs, reports and
+four edges remain unchanged. Host-approved capture includes both inputs and the
+derived artifact/message, including a derivation later excluded by an output.
 
-`ResourceResolution.Merge` stores the two full input refs, derived artifact and
-materialized message refs, initial admission decision and the two derivation
-edges. Original resolution refs/reports/four edges stay unchanged. Derived local
-budget evidence belongs to the actual derived artifact, not the incoming report.
-Derived refs are not declared as external manifest inputs. A later merge may
-replace an initially admitted derivation; its admission flag is not a promise
-that it remains in the final prompt. Replay restores the final admitted set from
-saved bytes and validates the text/source/lifecycle/persistence/budget binding
-of each derivation without running the host label policy again.
+Each output estimates the actual derived artifact using its own estimator and
+applies its local cap plus final output budget. Derived local-budget evidence
+belongs to that artifact, not to the incoming resolution report. Exclusion does
+not restore the prior active revision. A later shared merge may replace an earlier
+prepared derivation; `Prepared` is not a final participation flag. Derived refs
+are not declared as external manifest inputs. Accepted replay restores recorded
+output sets and validates saved text/source/lifecycle/persistence/budget bindings
+without running reader, label policy, projector or estimator again.
 
 Contract tests cover sequential same/separate-callback append with strict origins,
 independent-codec labeled accepted replay, missing old/incoming/derived dependencies,

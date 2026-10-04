@@ -89,7 +89,7 @@ func (e *Engine) validateEstimateProfile(pipeline *BudgetPipeline, main bool) er
 		return ErrStaleEstimate
 	}
 	if e.recording != nil &&
-		(profile.Model != e.recording.Model || (main && profile.Estimator != e.recording.Estimator)) {
+		main && (profile.Model != e.recording.Model || profile.Estimator != e.recording.Estimator) {
 		return ErrStaleEstimate
 	}
 	return nil

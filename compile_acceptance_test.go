@@ -1425,7 +1425,6 @@ func TestAcceptance_Typed_ArtifactCodecRoundTrip(t *testing.T) {
 		}},
 		MergePolicy: contexty.PolicyReplaceByOrigin,
 		Budget: &contexty.ArtifactBudgetPolicy{
-			Group:      "retrieval",
 			TokenLimit: 200,
 		},
 		Persistence: contexty.ArtifactPersistenceStore,
@@ -1465,7 +1464,6 @@ func TestAcceptance_Typed_ArtifactCodecRoundTrip(t *testing.T) {
 	assert.Equal(t, "doc-1", decodedArtifact.SourceRefs[0].ID)
 	assert.Equal(t, contexty.PolicyReplaceByOrigin, decodedArtifact.MergePolicy)
 	require.NotNil(t, decodedArtifact.Budget)
-	assert.Equal(t, "retrieval", decodedArtifact.Budget.Group)
 
 	value, err := contexty.DecodeTypedArtifact[retrievedFact](decodedArtifact, desc)
 	require.NoError(t, err)
@@ -1596,10 +1594,10 @@ func TestAcceptance_Multi_TargetCompileOutput(t *testing.T) {
 		}},
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "classifier_history",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
+				Name:     "classifier_history",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Budget:   nil,
 				Formatter: func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
 					out := make([]contexty.Message, len(msgs))
 					for i, msg := range msgs {
@@ -1612,11 +1610,11 @@ func TestAcceptance_Multi_TargetCompileOutput(t *testing.T) {
 				},
 			},
 			{
-				Name:          "memory_plain",
-				View:          "",
-				SourceSegment: contexty.SegmentMemory,
-				Budget:        nil,
-				Formatter:     nil,
+				Name:     "memory_plain",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true,
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 	})
@@ -1636,7 +1634,7 @@ func TestAcceptance_Multi_TargetCompileOutput(t *testing.T) {
 	assert.Equal(t, "m1", memory.Messages[0].ID)
 }
 
-func TestAcceptance_Projection_InputSnapshotUsesCompiledState(t *testing.T) {
+func TestAcceptance_Projection_InputSnapshotUsesPreparedState(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
@@ -1663,11 +1661,11 @@ func TestAcceptance_Projection_InputSnapshotUsesCompiledState(t *testing.T) {
 			Parts: []contexty.ContentPart{contexty.TextPart{Text: "history"}},
 		}},
 		Targets: []contexty.CompileTarget{{
-			Name:          "history_target",
-			View:          "",
-			SourceSegment: contexty.SegmentHistory,
-			Budget:        nil,
-			Formatter:     nil,
+			Name:      "history_target",
+			View:      "",
+			Segments:  []contexty.SegmentName{contexty.SegmentHistory},
+			Budget:    nil,
+			Formatter: nil,
 		}},
 	})
 	// Assert.
@@ -1677,7 +1675,7 @@ func TestAcceptance_Projection_InputSnapshotUsesCompiledState(t *testing.T) {
 	assert.Equal(t, []string{"h1"}, fixtureMessageIDs(projection.Source.History))
 	assert.Equal(
 		t,
-		[]string{"h1", "hooked"},
+		[]string{"h1"},
 		fixtureMessageIDs(projection.InputSnapshot.Segment(contexty.SegmentHistory)),
 	)
 	assert.Equal(t, []string{"h1", "hooked"}, fixtureMessageIDs(projection.Messages))
@@ -1704,9 +1702,9 @@ func TestAcceptance_Target_TraceabilityAndIdentityPolicy(t *testing.T) {
 		RequireDurableIdentity: true,
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "budgeted",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
+				Name:     "budgeted",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Budget: contexty.NewBudgetPipeline(
 					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1)},
 					&contexty.FixedEstimator{TokensPerMessage: 1},
@@ -1714,10 +1712,10 @@ func TestAcceptance_Target_TraceabilityAndIdentityPolicy(t *testing.T) {
 				Formatter: nil,
 			},
 			{
-				Name:          "derived",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
+				Name:     "derived",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Budget:   nil,
 				Formatter: func(_ context.Context, _ []contexty.Message) ([]contexty.Message, error) {
 					return []contexty.Message{contexty.TextMessage(contexty.RoleUser, "derived")}, nil
 				},
@@ -1773,9 +1771,9 @@ func TestAcceptance_Target_BudgetSummaryTraceability(t *testing.T) {
 		RequireDurableIdentity: true,
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "summary_target",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
+				Name:     "summary_target",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Budget: contexty.NewBudgetPipeline(
 					contexty.BudgetConfig{
 						Budget:     contexty.EffectiveInputBudget(1),
@@ -1823,10 +1821,10 @@ func TestAcceptance_Target_GeneratedIDsFailClosedWithoutPolicy(t *testing.T) {
 		RequireDurableIdentity: true,
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "derived",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
+				Name:     "derived",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Budget:   nil,
 				Formatter: func(_ context.Context, _ []contexty.Message) ([]contexty.Message, error) {
 					return []contexty.Message{contexty.TextMessage(contexty.RoleUser, "derived")}, nil
 				},
@@ -1850,10 +1848,10 @@ func TestAcceptance_Target_FormatterDuplicateIDsFailClosed(t *testing.T) {
 		}},
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "duplicate_target",
-				View:          "",
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
+				Name:     "duplicate_target",
+				View:     "",
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Budget:   nil,
 				Formatter: func(_ context.Context, _ []contexty.Message) ([]contexty.Message, error) {
 					return []contexty.Message{
 						{
@@ -1883,18 +1881,18 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	_, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "dup",
-				View:          "",
-				SourceSegment: "",
-				Budget:        nil,
-				Formatter:     nil,
+				Name:      "dup",
+				View:      "",
+				Segments:  nil,
+				Budget:    nil,
+				Formatter: nil,
 			},
 			{
-				Name:          "dup",
-				View:          "",
-				SourceSegment: "",
-				Budget:        nil,
-				Formatter:     nil,
+				Name:      "dup",
+				View:      "",
+				Segments:  nil,
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 	})
@@ -1905,11 +1903,11 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "unknown_view",
-				View:          "clasifier",
-				SourceSegment: "",
-				Budget:        nil,
-				Formatter:     nil,
+				Name:      "unknown_view",
+				View:      "clasifier",
+				Segments:  nil,
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 	})
@@ -1918,11 +1916,11 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "bad_segment",
-				View:          "",
-				SourceSegment: contexty.SegmentName("scratch"),
-				Budget:        nil,
-				Formatter:     nil,
+				Name:      "bad_segment",
+				View:      "",
+				Segments:  []contexty.SegmentName{contexty.SegmentName("scratch")},
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 	})
@@ -1931,11 +1929,11 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
-				Name:          "view_conflict",
-				View:          string(contexty.ViewLLMXML),
-				SourceSegment: contexty.SegmentHistory,
-				Budget:        nil,
-				Formatter:     nil,
+				Name:      "view_conflict",
+				View:      string(contexty.ViewLLMXML),
+				Segments:  []contexty.SegmentName{contexty.SegmentHistory},
+				Budget:    nil,
+				Formatter: nil,
 			},
 		},
 	})

@@ -193,8 +193,7 @@ Orphan/duplicate results are errors, not silently repaired history.
 ## Isolated consumers, offload and estimate evidence
 
 Do not send an entire `CompileProjection`, its `Source` or `InputSnapshot` to an
-isolated consumer. Call `ExportProjection(projection, artifacts, selection,
-codec)` and serialize the resulting `ExportEnvelope`. Allowlist actual public
+isolated consumer. Call `ExportProjection(projection, selection, codec)` and serialize the resulting `ExportEnvelope`. Allowlist actual public
 message/artifact revisions and each metadata category; references never authorize
 raw payload. Sanitize host extensions before approving them. Blob handles/scopes
 are not automatic export metadata.
@@ -281,3 +280,29 @@ The default logical namespace is `default`. There is no dual read or legacy writ
 Hosts must explicitly migrate old checkpoint data and OCC markers together, or
 choose fresh conversation identities. Never independently delete active revision
 markers. Clear/TTL remain monotonic, without cross-backend transaction promises.
+
+## Independent output composition and admission
+
+Replace `CompileTarget.SourceSegment` with explicit `Segments`. Set
+`IncludeCurrentTurn` when a consumer needs active prompt-safe input, and choose
+exact `ArtifactRefs` or `IncludeArtifacts` separately. No segment or artifact
+inherits from main. Targets now branch before main admission/budgeting; a wider
+target can retain input that main excludes. View-only targets render prepared
+stored segments without budget guarantees.
+
+Remove `ArtifactBudgetPolicy.Group`: it had no allocator semantics. Host retrieval
+and priorities belong in `SelectionPolicy`; core validates exact candidate refs,
+mandatory units, complete rounds, deterministic admission and final capacity.
+`SelectionDecision` records admission, while final output coverage accounts for
+later transforms. Pin policy identity and required refs for recorded replay.
+
+`ResourceArtifactMerge.Prepared` replaces `Admitted`: a shared merge is prepared
+before output budgets. An over-cap merged artifact is excluded locally, without
+silently restoring its old revision. Each output uses its own artifact estimator.
+
+`ExportProjection` no longer accepts an external artifact collection. Its artifact
+allowlist addresses only the projection's participating artifacts. Do not send
+`Source`, `InputSnapshot` or `PreparedSnapshot` to an isolated consumer.
+Choose one output for persistence and apply host persistence policy explicitly;
+there is no automatic union of summaries or checkpoint projections. See
+[the complete contract](context-projections.md).

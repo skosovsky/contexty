@@ -8,11 +8,12 @@
 //   - ContextArtifact lifecycle, ownership, and typed artifact codecs
 //   - ConversationState and ConversationDelta for immutable transitions
 //   - ConversationStateStore with optimistic concurrency
-//   - CompileTarget and CompileProjection for named outputs from one compile pass
+//   - CompileTarget and CompileProjection for independent explicit outputs from shared preparation
 //   - CompileRequest.Options for resolve vars and low-level compile options
 //   - CompileResult.Source + NormalizedSnapshot + Writeback + Projections + Introduced
-//   - CompileProjection.Source + InputSnapshot for target traceability
-//   - DerivePersistenceProjection for persistence
+//   - CompileProjection.Source + InputSnapshot for local preparation traceability
+//   - SelectionPolicy for exact atomic candidate admission with host priorities
+//   - DerivePersistenceProjection and ProjectCheckpoint for explicit persistence
 //   - RetentionPolicy, budget-aware SummaryRequest and explicit BudgetDecision
 //   - CompactionPolicy for early compression with a soft target
 //   - BudgetPipeline (retention with summary or eviction) and Engine.Compile → CompileResult

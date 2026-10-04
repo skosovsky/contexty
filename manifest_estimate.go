@@ -27,7 +27,7 @@ func validateManifestEstimate(manifest CompileManifest, estimate ManifestEstimat
 		return err
 	}
 	if estimate.Report.ManifestRef != nil || estimate.Report.WireRef != nil ||
-		estimate.Report.Profile.Model != manifest.Profile.Model || estimate.Report.Profile.Encoding != manifest.Encoding {
+		(estimate.Kind == ManifestMainOutput && estimate.Report.Profile.Model != manifest.Profile.Model) || estimate.Report.Profile.Encoding != manifest.Encoding {
 		return ErrStaleEstimate
 	}
 	budgetIndex := slices.IndexFunc(manifest.Budgets, func(budget ManifestBudget) bool {
