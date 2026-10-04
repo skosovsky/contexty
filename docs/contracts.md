@@ -852,3 +852,27 @@ canonical body.
 оценки/identity. Fail-closed — default; разрешённый drop фиксируется в evidence.
 BYOT payload и pinned codec/profile сохраняются losslessly через store и replay.
 Plain render и isolated export автоматически state не раскрывают.
+
+## Host strategy recipes and evaluation
+
+The [external context cookbook](context-strategies.md) composes existing contracts
+without adding an agent runtime, transcript store or search API to core. The host
+archives original events separately, selects exact resource descriptors, authorizes
+bounded reads, coordinates blob claims and explicitly replaces typed memory facts.
+Working checkpoints and local summaries do not retain all original events; local
+compaction is distinct from externally bound opaque state.
+
+The [offline strategy runner](../examples/context_evaluation) compares fixed
+fixtures under the same budget and estimator/evaluator profile. Its source-defined
+checks establish mechanical preservation, provenance, lifecycle and disclosure
+constraints. Deterministic summaries are test callbacks, not evidence of LLM
+quality. Structural results exclude variable wall-clock timing; CPU benchmarks,
+semantic estimates and real provider usage/cost are separate measurements.
+An optional host invocation supplies typed model/summarizer/evaluator ports and
+records actual measurements; ordinary validation never enables provider execution.
+Unmeasured provider quality, usage and money remain explicitly not measured.
+
+Offload reduces prompt size while exact replay capture may retain original private
+bytes. Capture authorization/deletion and durable archives, blobs, claims and
+checkpoints remain host responsibilities. Use [blob-retention.md](blob-retention.md)
+and [resource-content.md](resource-content.md) as the canonical protocols.

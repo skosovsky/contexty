@@ -7,6 +7,15 @@ there are no aliases for replaced selectors, budget fields or deferred callbacks
 compatibility modes. Host types, authorization, model selection and storage
 ownership stay in the application.
 
+The [external context cookbook](context-strategies.md) and
+[offline evaluation runner](../examples/context_evaluation) are host recipes over
+these contracts. They add no transcript/search/model port to core. Preserve
+original events in a separate host archive before lossy compilation; saving only
+`DerivePersistenceState` does not preserve evicted/truncated originals. Use the
+existing resource and blob retention protocols for recovery, not summary text or
+private replay capture as an implicit archive policy. Provider quality/usage/cost
+remain not measured until an explicitly connected host runner records them.
+
 ## Test utilities
 
 Replace `contexty.FailingEstimator` with `testutil.FailingEstimator`, importing
