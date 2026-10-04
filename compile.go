@@ -35,6 +35,7 @@ type AbstractPayload struct {
 type Engine struct {
 	artifactMaterialization *ArtifactMaterializationPolicy
 	outputPolicy            *OutputPolicy
+	opaqueStatePolicy       *OpaqueStatePolicy
 	selection               *SelectionPolicy
 	stateStore              ConversationStateStore
 	hooks                   []TransformHook
@@ -321,6 +322,7 @@ type compilePipelineResult struct {
 }
 
 func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) context.Context {
+	ctx = initializeOpaqueEvidenceContext(ctx)
 	ctx = startResourceCompile(ctx, req)
 	ctx = context.WithValue(ctx, outputPolicyDecisionsKey{}, make(map[manifestChannelKey]OutputPolicyDecision))
 	ctx = context.WithValue(ctx, budgetDecisionsKey{}, make(map[manifestChannelKey]BudgetDecision))
@@ -336,19 +338,10 @@ func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) c
 }
 
 func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (preparedCompile, error) {
-	codec := DefaultJSONSerializer()
-	if e.trace != nil {
-		codec = e.trace.Codec
+	ctx, opaqueErr := e.initializeOpaqueCompileContext(ctx, req)
+	if opaqueErr != nil {
+		return preparedCompile{}, opaqueErr
 	}
-	materializationCtx, materializationErr := initializeArtifactMaterializationContext(
-		ctx,
-		e.artifactMaterialization,
-		codec,
-	)
-	if materializationErr != nil {
-		return preparedCompile{}, materializationErr
-	}
-	ctx = materializationCtx
 
 	ctx = e.startCompileEvidence(ctx, req)
 	ctx = context.WithValue(ctx, outputConfigurationKey{}, e.outputConfigurations(req))
@@ -398,6 +391,13 @@ func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (prepar
 		return preparedCompile{}, fmt.Errorf("contexty: compile deferred: %w", idErr)
 	}
 
+	if opaqueErr = registerPreparedOpaqueStates(
+		ctx,
+		append(snapshotAllMessages(snap), compilePending...),
+		e.opaqueStatePolicy,
+	); opaqueErr != nil {
+		return preparedCompile{}, opaqueErr
+	}
 	preparedSnapshot := snap.AllSegmentsSnapshot()
 	preparedTransforms := recorder.snapshot()
 	preparedArtifacts := cloneArtifacts(activeArtifacts)

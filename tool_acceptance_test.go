@@ -247,8 +247,7 @@ func TestAcceptance_Tool_RoundsStayAlignedWithHistoryDeltas(t *testing.T) {
 	t.Parallel()
 	codec := contexty.ConversationStateCodec{
 		Provenance: contexty.DefaultProvenanceRegistry(),
-		Extensions: newTestExtensionRegistry(),
-	}
+		Extensions: newTestExtensionRegistry(), OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	assistant := contexty.Message{
 		ID:         "assistant-call",
 		Role:       contexty.RoleAssistant,

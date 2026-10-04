@@ -84,16 +84,8 @@ func (p EstimateProfile) validate() error {
 			return ErrInvalidEstimateReport
 		}
 	}
-	for typeID, policy := range p.Extensions {
-		if typeID == "" {
-			return ErrInvalidEstimateReport
-		}
-		if err := policy.Codec.Validate(); err != nil {
-			return err
-		}
-		if err := policy.Policy.Validate(); err != nil {
-			return err
-		}
+	if err := validateEstimateExtensionPolicies(p.Extensions); err != nil {
+		return err
 	}
 	if p.Fallback != nil {
 		if err := p.Fallback.Policy.Validate(); err != nil {

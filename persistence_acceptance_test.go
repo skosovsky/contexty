@@ -44,7 +44,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncatedByDropHead(t *testing.T)
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	ids := messageIDsFromSlice(proj)
 	assert.NotContains(t, ids, "h1")
 	assert.Contains(t, ids, "h3")
@@ -68,7 +68,7 @@ func TestAcceptance_PersistenceProjection_KeepsOriginalOnRedaction(t *testing.T)
 	// Assert.
 	require.NoError(t, err)
 	assert.Contains(t, result.Payload.History[0].TextContent(), "[REDACTED]")
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "contact me@example.com", proj[0].TextContent())
 }
@@ -94,7 +94,7 @@ func TestAcceptance_PersistenceProjection_ExcludesPending(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Len(t, result.Payload.History, 2)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "h1", proj[0].ID)
 }
@@ -125,7 +125,7 @@ func TestAcceptance_PersistenceProjection_ReplacedByFormatter(t *testing.T) {
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "mem-new", proj[0].ID)
 	assert.Equal(t, "new", proj[0].TextContent())
@@ -175,7 +175,7 @@ func TestAcceptance_PersistenceProjection_IncludesSummary(t *testing.T) {
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "summary-1", proj[0].ID)
 }
@@ -201,7 +201,7 @@ func TestAcceptance_PersistenceProjection_TextReplacement(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "REDACTED", result.Payload.History[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "secret@mail.com", proj[0].TextContent())
 }
@@ -233,7 +233,7 @@ func TestAcceptance_PersistenceProjection_MemorySegment(t *testing.T) {
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	ids := messageIDsFromSlice(proj)
 	assert.Contains(t, ids, "mem-stored")
 	assert.Contains(t, ids, "mem-deferred")
@@ -264,7 +264,7 @@ func TestAcceptance_PersistenceProjection_DeferredPlusHook(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Contains(t, result.Payload.Memory[0].TextContent(), "[REDACTED]")
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "contact me@example.com", proj[0].TextContent())
 }
@@ -297,7 +297,7 @@ func TestAcceptance_PersistenceProjection_DeferredPlusPreBudgetPatch(t *testing.
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "REDACTED", result.Payload.System[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentSystem)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentSystem)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "secret locale", proj[0].TextContent())
 }
@@ -352,7 +352,7 @@ func TestAcceptance_PersistenceProjection_SummaryPlusTextReplacement(t *testing.
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "REDACTED", result.Payload.History[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "secret@mail.com", proj[0].TextContent())
 }
@@ -401,7 +401,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncated(t *testing.T) {
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "summary-1", proj[0].ID)
 	for _, id := range []string{"h-a", "h-b", "h-c"} {
@@ -442,7 +442,7 @@ func TestAcceptance_PersistenceProjection_InPlaceFormatter(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "fmt:raw", result.Payload.Memory[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "raw", proj[0].TextContent())
 }
@@ -466,7 +466,7 @@ func TestAcceptance_PersistenceProjection_ReplacedByHook(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Payload.History, 1)
 	assert.Equal(t, "hook-new", result.Payload.History[0].ID)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "hook-new", proj[0].ID)
 }
@@ -492,7 +492,7 @@ func TestAcceptance_PersistenceProjection_PreBudgetPatchNonHistory(t *testing.T)
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "REDACTED", result.Payload.Memory[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "secret", proj[0].TextContent())
 }
@@ -545,7 +545,7 @@ func TestAcceptance_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.
 	rec, ok := result.Transformations["h-a"]
 	require.True(t, ok)
 	assert.Equal(t, contexty.ActionTruncated, rec.Final().Action)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	assert.Empty(t, proj)
 }
 
@@ -628,7 +628,7 @@ func TestAcceptance_PersistenceProjection_DeferredPlusInPlaceFormatter(t *testin
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "fmt:deferred raw", result.Payload.Memory[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "deferred raw", proj[0].TextContent())
 }
@@ -659,7 +659,7 @@ func TestAcceptance_PersistenceProjection_PartialHookReplaceOrder(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, result.Payload.History, 2)
 	assert.Equal(t, "hook-new", result.Payload.History[1].ID)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "h-keep", proj[0].ID)
 	assert.Equal(t, "hook-new", proj[1].ID)
@@ -696,7 +696,7 @@ func TestAcceptance_PersistenceProjection_ToolsSegment(t *testing.T) {
 	require.Len(t, result.Payload.Tools, 2)
 	assert.Contains(t, result.Payload.Tools[1].TextContent(), "[REDACTED]")
 	assert.Equal(t, "tool me@example.com", result.Introduced["tool-deferred"].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentTools)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentTools)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "tool-src", proj[0].ID)
 	assert.Equal(t, "source tool", proj[0].TextContent())
@@ -737,7 +737,7 @@ func TestAcceptance_PersistenceProjection_DropsBudgetEvicted(t *testing.T) {
 	rec, ok := result.Transformations["h1"]
 	require.True(t, ok)
 	assert.Equal(t, contexty.ActionEvicted, rec.Final().Action)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	assert.Empty(t, proj)
 }
 
@@ -759,7 +759,7 @@ func TestAcceptance_PersistenceProjection_FormattedWithoutIntroducedOmits(t *tes
 		Introduced: nil,
 	}
 	// Act.
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	// Assert.
 	assert.Empty(t, proj)
 }
@@ -802,7 +802,10 @@ func TestAcceptance_Conversation_DeltaStateCodecAndStore(t *testing.T) {
 	assert.Len(t, state.Segment(contexty.SegmentHistory), 2)
 	require.Len(t, state.Artifacts(), 1)
 
-	codec := contexty.ConversationStateCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+	codec := contexty.ConversationStateCodec{
+		Provenance:    contexty.DefaultProvenanceRegistry(),
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	stateData, err := codec.EncodeState(state)
 	require.NoError(t, err)
 	decodedState, err := codec.DecodeState(stateData)

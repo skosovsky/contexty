@@ -71,7 +71,7 @@ func TestPrefix_NativeOffload(t *testing.T) {
 	require.Equal(t, []contexty.PrefixInvalidationReason{
 		contexty.PrefixContentChanged, contexty.PrefixOffloadChanged,
 	}, report.Invalidations[0].Reasons)
-	require.Equal(t, request.History, compiled.DerivePersistenceProjection(contexty.SegmentHistory))
+	require.Equal(t, request.History, fixturePersistenceSegment(t, compiled, contexty.SegmentHistory))
 	require.Equal(t, request.History, compiled.Source.History)
 	require.Equal(t, fact, *report.Manifest.Boundaries[0].Messages[0].Offload)
 }

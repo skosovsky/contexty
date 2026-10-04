@@ -4,7 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/skosovsky/contexty)](https://goreportcard.com/report/github.com/skosovsky/contexty)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-`contexty` is a **semantic context engine** for LLM applications: typed message AST, actor-aware provider-role projection, typed current turns, durable identity policies, typed tool payloads, typed context artifacts, immutable conversation deltas, named compile targets, unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `NormalizedSnapshot` + `Writeback` + `Projections` + `DerivePersistenceProjection`).
+`contexty` is a **semantic context engine** for LLM applications: typed message AST, actor-aware provider-role projection, typed current turns, durable identity policies, typed tool payloads, typed context artifacts, immutable conversation deltas, named compile targets, unified budgeting, and `Compile()` → `CompileResult` (payload + immutable `Source` + `NormalizedSnapshot` + `Writeback` + `Projections` + `DerivePersistenceState`).
 
 ## Installation
 
@@ -56,9 +56,11 @@ result, err := engine.Compile(ctx, contexty.CompileRequest{
     Targets: []contexty.CompileTarget{{Name: "classifier_history", Segments: []contexty.SegmentName{contexty.SegmentHistory}}},
 })
 if err != nil { return err }
+checkpoint, err := result.DerivePersistenceState(contexty.DefaultJSONSerializer(), contexty.Descriptor{})
+if err != nil { return err }
 err = store.CommitState(ctx, "chat-1", result.NormalizedSnapshot.Version(), contexty.ConversationDelta{
     Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentHistory,
-    Messages: result.DerivePersistenceProjection(contexty.SegmentHistory),
+    Messages: checkpoint.Segment(contexty.SegmentHistory),
 })
 if err != nil { return err }
 
@@ -83,11 +85,12 @@ result, err := engine.Compile(ctx, contexty.CompileRequest{
     Options: []contexty.CompileOption{contexty.WithResolveVar("locale", "ru-RU")},
 })
 payload := result.Payload
-toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
+toSave, err := result.DerivePersistenceState(contexty.DefaultJSONSerializer(), contexty.Descriptor{})
+if err != nil { return err }
 classifier := result.Projections["classifier_history"]
 ```
 
-`CompileResult.Source` is an immutable freeze of normalized input messages (before pipeline mutations). `CompileResult.NormalizedSnapshot` and `CompileResult.Writeback` expose durable ID normalization and checkpoint writeback intent. `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceProjection` for checkpoint persistence instead of parsing `Transformations`.
+`CompileResult.Source` is an immutable freeze of normalized input messages (before pipeline mutations). `CompileResult.NormalizedSnapshot` and `CompileResult.Writeback` expose durable ID normalization and checkpoint writeback intent. `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceState` for checkpoint persistence instead of parsing `Transformations`.
 
 **Pipeline order:** normalize IDs/current turn → freeze Source → historical argument projection → authorized deferred resolution/merge → freeze shared prepared candidates → independently for main and each target: scope/selection/admission → pre-budget patches → hooks/role projection/segment formatters → history budgeting with protected current turn → post-budget patches → final OutputPolicy → accepted-content checks/recount → rendering. Compile options and shared resolvers run once; output selection runs once per output.
 
@@ -99,7 +102,7 @@ The current clear-break contract is summarized below and in the [migration guide
 2. Replace `WithOverlay` with `CompileRequest.Options` for resolve vars and `CompileRequest.CurrentTurn` for prompt-only current-turn projection.
 3. Use `CompileRequest.Targets` and `CompileResult.Projections` for classifier projections built from the same compile pass.
 4. Set `DeferredBlock.MergePolicy` for origin/layer collision handling.
-5. Persist with `DerivePersistenceProjection`.
+5. Persist with `DerivePersistenceState`.
 
 ### Migrating snapshot-only compilation
 
@@ -150,7 +153,7 @@ A target `View` renders prepared stored segments and is mutually exclusive with 
 
 `WithSelectionPolicy` configures main selection; `CompileTarget.Selection` configures a target. A host policy selects exact `ContextCandidate.Ref` values with integer priorities. Core admits required units first, then higher priority, breaking ties by preparation ordinal and preserving conversation order. Complete tool rounds remain atomic. `SelectionDecision` describes admission; later transforms and budgeting may change final coverage. Main and targets may use different estimators/profiles, without sharing estimates.
 
-Choose persistence explicitly: `result.DerivePersistenceProjection(segment)` derives main persistence with compile-only changes restored. A target `Snapshot` is an explicit prompt-state choice, not automatic durable writeback; apply the host's persistence policy and `ProjectCheckpoint` before committing it. Summaries from different outputs are never merged automatically.
+Choose persistence explicitly: `result.DerivePersistenceState(codec, profile)` validates the complete restored state and derives main persistence with compile-only changes restored. A target `Snapshot` is an explicit prompt-state choice, not automatic durable writeback; apply the host's persistence policy and `ProjectCheckpoint(state, codec, profile)` before committing it. Summaries from different outputs are never merged automatically.
 
 See [the output contract](docs/context-projections.md) and runnable [two-consumer example](examples/context_projections/main.go).
 
@@ -269,11 +272,12 @@ Deferred content resolves at compile time and is not persisted unless written to
 After compile, persist checkpoint segments without parsing `Transformations`. Payload-born messages (deferred, summarize) use `result.Introduced` baselines when hooks or patches redact payload text:
 
 ```go
-toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
+toSave, err := result.DerivePersistenceState(contexty.DefaultJSONSerializer(), contexty.Descriptor{})
+if err != nil { return err }
 _ = result.Introduced // pre-transform baselines for payload-born IDs
 ```
 
-Patches and `Pending` are compile-only. `DerivePersistenceProjection` excludes evicted/truncated messages and returns Source originals for formatted messages. If `Pending` alone exceeds the effective input limit, compile returns `ErrPendingExceedsBudget`.
+Patches and `Pending` are compile-only. `DerivePersistenceState(codec, profile)` excludes evicted/truncated messages and returns Source originals for formatted messages. It validates cross-segment opaque dependencies and returns an error rather than an invalid durable state. Use the same registered codec and receiving profile as the store; an empty profile is sufficient only for state without opaque envelopes. If `Pending` alone exceeds the effective input limit, compile returns `ErrPendingExceedsBudget`.
 
 ## Current Turn and Identity
 
@@ -320,7 +324,7 @@ Resource resolution pins an independent `LabelPolicyIdentity` and explicit custo
 
 `DescribeResource` pins an opaque host reference/revision, display name, full typed artifact digest and serialized byte length. `ResourceResolver.Resolve` requires an explicit `ResourceReader`, fresh scope, pinned projection, byte bound and estimate budget. It validates the actual body before projection and retains host labels/source ancestry. Declare selections/codecs in `DeferredBlock.Resources`/`ResourceCodec`, then return actual evidence in `DeferredResult.Resources`. Source keeps pre-resolution metadata; manifest and privacy-controlled saved records retain actual resolution dependencies. Resource-bearing accepted replay requires explicit `WithReplayResourceCodecs`; it never invokes a reader or refetches missing bodies. Missing/changed/oversized/unsupported content and cancellation fail without partial output or implicit fallback. Core does not discover resources, parse paths, install capabilities or execute body text. See the [selected resource contract](docs/resource-content.md), [host-owned reference reader](adapters/resource/memory/reader.go) and runnable [progressive disclosure example](examples/progressive_disclosure/main.go).
 
-Resolved artifacts pass lifecycle checks and merges during shared preparation, before output admission. Same-ID replacement and source-layer deduplication select one intact prepared revision; append creates separate `ResourceResolution.Merge` evidence with `Prepared` recording the shared derivation. Incoming and merged evidence stay immutable. Main and targets independently apply artifact-local caps using their own estimators, without additional reads. An excluded replacement or merged revision does not silently restore the prior artifact. Append labels require the compile host label policy; media and blob-bound previews fail explicitly rather than being flattened. Choose an output artifact set for persistence and apply its checkpoint policy, not additional ordinary messages from `DerivePersistenceProjection`. Replay requires saved old/incoming/derived content for every append, including output-excluded derivations, and never re-executes the host label policy or estimator.
+Resolved artifacts pass lifecycle checks and merges during shared preparation, before output admission. Same-ID replacement and source-layer deduplication select one intact prepared revision; append creates separate `ResourceResolution.Merge` evidence with `Prepared` recording the shared derivation. Incoming and merged evidence stay immutable. Main and targets independently apply artifact-local caps using their own estimators, without additional reads. An excluded replacement or merged revision does not silently restore the prior artifact. Append labels require the compile host label policy; media and blob-bound previews fail explicitly rather than being flattened. Choose an output artifact set for persistence and apply its checkpoint policy, not additional ordinary messages from `DerivePersistenceState`. Replay requires saved old/incoming/derived content for every append, including output-excluded derivations, and never re-executes the host label policy or estimator.
 
 ## Prefix diagnostics
 
@@ -776,9 +780,40 @@ Wrap `ConversationStateStore` with retry logic on `ErrUnavailable`. Respect `con
 
 ## Wire JSON contract
 
+### Host-owned opaque state
+
+`OpaqueState` is a reserved typed extension envelope for external model state.
+The host supplies a typed payload, pinned payload codec, ID, `Placement.AfterPart`
+and `OpaqueBinding` with a receiving profile and exact content refs. An optional
+ordered prefix binds the context beginning through `Boundary`, including insertion
+and order; that boundary must precede the owner. Changes after it remain outside
+the prefix scope. Register each independent host payload
+with `ExtensionRegistry.RegisterOpaquePayload` and configure
+`WithOpaqueStatePolicy`. Compilation without opaque envelopes requires no state policy.
+
+Dependency changes fail with `ErrOpaqueStateInvalidated`. The host may explicitly
+choose `OpaqueDropInvalid`; drops are recorded, without repairing payload bytes.
+Final output projection and branch selection also pass this check. Plain-text
+rendering excludes opaque bytes. Export requires separate `OpaqueStateIDs`, a
+matching `OpaqueProfile` and explicitly selected dependency messages; selecting a
+state never grants hidden access to raw source content. Cost comes from the host
+adapter estimator or remains unknown under `EstimateReporter`; payload byte length
+does not establish token cost.
+
+Conversation stores and codecs require the same `ConversationCodec.OpaqueProfile`
+and registered payload codecs. `DerivePersistenceState(codec, profile)` and
+`ProjectCheckpoint(state, codec, profile)` validate the entire selected state;
+handle their errors before committing. Accepted replay restores recorded bytes
+and bindings through registered codecs without rerunning selection, materialization or
+output policies, and pins policy/profile/encoding identity.
+The executable [offline host recipe](examples/opaque_state/main.go) uses distinct
+signature and opaque compaction fixtures. A local `CompactionRecord` represents a
+summary transformation; it is not external opaque compaction state. Core neither
+interprets signatures nor promises portability between models.
+
 Messages and segments serialize as JSON with explicit discriminators:
 
-- Content parts: `kind` ∈ `text`, `image`, `tool_call`, `tool_result`
+- Content parts: `kind` ∈ `text`, `image`, `media`, `tool_call`, `tool_result`
 - Tool payloads: `text`, `data`, explicit `binary_hex`, MIME type, error, progress, control
 - Provenance: `type_id` resolved via `ProvenanceRegistry` (unknown types error at decode)
 - Extensions: `type_id` resolved via `ExtensionRegistry` (unknown types error at decode)

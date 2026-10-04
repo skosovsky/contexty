@@ -179,7 +179,11 @@ func NewMemoryConversationStateStore(opts ...MemoryStateStoreOption) *MemoryConv
 	//nolint:exhaustruct_v5 // sync.RWMutex zero-initializes
 	store := &MemoryConversationStateStore{
 		conversations: make(map[string]ConversationSnapshot),
-		codec:         ConversationCodec{Provenance: DefaultProvenanceRegistry(), Extensions: nil},
+		codec: ConversationCodec{
+			Provenance:    DefaultProvenanceRegistry(),
+			Extensions:    nil,
+			OpaqueProfile: Descriptor{ID: "", Revision: ""},
+		},
 	}
 	for _, opt := range opts {
 		opt(store)
@@ -232,7 +236,11 @@ func (s *MemoryConversationStateStore) CommitState(
 	if err != nil {
 		return err
 	}
-	next, err = ProjectCheckpoint(next)
+	next, err = ProjectCheckpoint(
+		next,
+		JSONSerializer{Provenance: s.codec.Provenance, Extensions: s.codec.Extensions},
+		s.codec.OpaqueProfile,
+	)
 	if err != nil {
 		return err
 	}

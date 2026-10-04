@@ -90,7 +90,14 @@ func run(ctx context.Context) error {
 		len(result.Source.DeferredResources),
 		len(result.Source.Memory),
 	)
-	fmt.Printf("Ordinary persisted messages: %d\n", len(result.DerivePersistenceProjection(contexty.SegmentMemory)))
+	persisted, err := result.DerivePersistenceState(
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Ordinary persisted messages: %d\n", len(persisted.Segment(contexty.SegmentMemory)))
 	return nil
 }
 

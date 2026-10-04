@@ -134,8 +134,11 @@ func MarshalMessageJSON(m Message, codec MessageCodec) ([]byte, error) {
 func marshalMessageJSONWithRegistries(
 	m Message,
 	_ *ProvenanceRegistry,
-	_ *ExtensionRegistry,
+	extRegistry *ExtensionRegistry,
 ) ([]byte, error) {
+	if err := validateOpaqueMessageCodec(m, extRegistry); err != nil {
+		return nil, err
+	}
 	partsJSON, err := MarshalParts(m.Parts)
 	if err != nil {
 		return nil, err

@@ -37,6 +37,10 @@ type ExportSelection struct {
 	LineageRefs         []ContentRef
 	Metadata            ExportMetadata
 	AllowOpaqueDigests  bool
+	// OpaqueStateIDs separately approve host state carried by selected messages.
+	OpaqueStateIDs []string
+	// OpaqueProfile must match every approved state binding.
+	OpaqueProfile Descriptor
 }
 
 // ExportLineageRecord exposes only approved references. OmittedInputs explicitly
@@ -117,6 +121,7 @@ func exportMessages(messages []Message, selection ExportSelection, codec JSONSer
 		return exportedMessages{}, err
 	}
 	result := exportedMessages{wires: nil, originals: nil, publicRefs: nil}
+	var publicMessages []Message
 	for _, id := range selection.MessageIDs {
 		msg := findMessageByID(messages, id)
 		if msg.ID == "" {
@@ -130,6 +135,7 @@ func exportMessages(messages []Message, selection ExportSelection, codec JSONSer
 		if err != nil {
 			return exportedMessages{}, err
 		}
+		publicMessages = append(publicMessages, public)
 		wire, err := codec.Marshal(public)
 		if err != nil {
 			return exportedMessages{}, err
@@ -142,7 +148,7 @@ func exportMessages(messages []Message, selection ExportSelection, codec JSONSer
 		result.originals = append(result.originals, original)
 		result.publicRefs = append(result.publicRefs, ref)
 	}
-	return result, nil
+	return exportOpaqueStates(messages, publicMessages, result, selection, codec)
 }
 
 func exportMessageMetadata(msg Message, policy ExportMetadata, registry *ExtensionRegistry) (Message, error) {
@@ -170,7 +176,8 @@ func exportMessageMetadata(msg Message, policy ExportMetadata, registry *Extensi
 	}
 	var selected []Extension
 	for _, ext := range msg.Extensions {
-		if !nilInterfaceValue(ext) && slices.Contains(policy.ExtensionTypes, ext.ExtensionType()) {
+		if !nilInterfaceValue(ext) && ext.ExtensionType() != OpaqueStateExtensionType &&
+			slices.Contains(policy.ExtensionTypes, ext.ExtensionType()) {
 			selected = append(selected, ext)
 		}
 	}
@@ -422,4 +429,94 @@ func exportAncestors(graph Lineage, selected []ContentRef) map[ContentRef]struct
 		queue = append(queue, producers[ref]...)
 	}
 	return needed
+}
+
+// exportOpaqueStates validates dependencies against the actual disclosed semantic
+// revisions. Metadata approvals never grant permission to copy host opaque state.
+func exportOpaqueStates(originals, public []Message, result exportedMessages,
+	selection ExportSelection, codec JSONSerializer,
+) (exportedMessages, error) {
+	if len(selection.OpaqueStateIDs) == 0 {
+		return result, nil
+	}
+	if err := validateExportIDs(selection.OpaqueStateIDs); err != nil {
+		return exportedMessages{}, err
+	}
+	if err := selection.OpaqueProfile.Validate(); err != nil {
+		return exportedMessages{}, fmt.Errorf("%w: opaque profile required", ErrInvalidExportSelection)
+	}
+	if err := approveExportOpaqueStates(originals, public, selection); err != nil {
+		return exportedMessages{}, err
+	}
+	if err := ValidateOpaqueState(public, codec, selection.OpaqueProfile); err != nil {
+		return exportedMessages{}, fmt.Errorf("%w: %w", ErrInvalidExportSelection, err)
+	}
+	return encodeExportOpaqueStates(public, result, selection.OpaqueProfile, codec)
+}
+
+func approveExportOpaqueStates(originals, public []Message, selection ExportSelection) error {
+	found := make(map[string]bool, len(selection.OpaqueStateIDs))
+	for i := range public {
+		public[i].Extensions = nil
+		for _, extension := range findMessageByID(originals, public[i].ID).Extensions {
+			state, ok := opaqueStateFromExtension(extension)
+			if !ok {
+				if !nilInterfaceValue(extension) && extension.ExtensionType() != OpaqueStateExtensionType &&
+					slices.Contains(selection.Metadata.ExtensionTypes, extension.ExtensionType()) {
+					public[i].Extensions = append(public[i].Extensions, extension.CloneExtension())
+				}
+				continue
+			}
+			if !slices.Contains(selection.OpaqueStateIDs, state.ID) {
+				continue
+			}
+			if found[state.ID] {
+				return fmt.Errorf("%w: duplicate opaque state %q", ErrInvalidExportSelection, state.ID)
+			}
+			found[state.ID] = true
+			public[i].Extensions = append(public[i].Extensions, state.CloneExtension())
+		}
+	}
+	if len(found) != len(selection.OpaqueStateIDs) {
+		return fmt.Errorf("%w: opaque state missing from selected messages", ErrInvalidExportSelection)
+	}
+	return nil
+}
+
+func encodeExportOpaqueStates(public []Message, result exportedMessages, profile Descriptor,
+	codec JSONSerializer,
+) (exportedMessages, error) {
+	// Codec round-trip is part of the isolated transport guarantee, including
+	// the host payload decoder and its pinned identity.
+	for i, message := range public {
+		wire, err := codec.Marshal(message)
+		if err != nil {
+			return exportedMessages{}, err
+		}
+		var decoded Message
+		if err = codec.Unmarshal(wire, &decoded); err != nil {
+			return exportedMessages{}, err
+		}
+		ref, err := MessageContentRef(decoded, codec)
+		if err != nil {
+			return exportedMessages{}, err
+		}
+		expected, err := MessageContentRef(message, codec)
+		if err != nil {
+			return exportedMessages{}, err
+		}
+		if ref != expected {
+			return exportedMessages{}, fmt.Errorf(
+				"%w: opaque codec changed exported revision",
+				ErrInvalidExportSelection,
+			)
+		}
+		public[i] = decoded
+		result.wires[i] = wire
+		result.publicRefs[i] = ref
+	}
+	if err := ValidateOpaqueState(public, codec, profile); err != nil {
+		return exportedMessages{}, fmt.Errorf("%w: %w", ErrInvalidExportSelection, err)
+	}
+	return result, nil
 }

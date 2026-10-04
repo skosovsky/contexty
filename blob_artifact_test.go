@@ -65,7 +65,7 @@ func TestBlob_ArtifactCompileAndResume(t *testing.T) {
 	require.NoError(t, json.Unmarshal(stored.Content.Bytes, &restored))
 	require.Equal(t, request.Artifact.Payload, restored)
 	require.Equal(t, []contexty.ContentRef{original}, stored.Sources)
-	codec := contexty.ConversationCodec{}
+	codec := contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	wire, err := codec.Encode(contexty.EmptySnapshot().WithArtifacts(result.Artifacts))
 	require.NoError(t, err)
 	require.NotContains(t, string(wire), "private ")
@@ -146,7 +146,7 @@ func TestBlob_ArtifactTampering(t *testing.T) {
 			case "media":
 				artifact.Blob.Object.MIMEType = fixtureBlobMIME
 			case "policy":
-				artifact.Blob.Policy = contexty.Descriptor{}
+				artifact.Blob.Policy = contexty.Descriptor{ID: "", Revision: ""}
 			case "threshold":
 				artifact.Blob.Threshold = &contexty.BlobThresholdLimits{MaxInlineBytes: 10, MaxBlobBytes: 1}
 				want = contexty.ErrInvalidBlobPolicy
@@ -164,7 +164,7 @@ func TestBlob_ArtifactTampering(t *testing.T) {
 			// Assert: corruption never reaches a prompt or silently drops metadata.
 			require.ErrorIs(t, compileErr, want)
 			require.Zero(t, result)
-			codec := contexty.ConversationCodec{}
+			codec := contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 			snapshot := contexty.EmptySnapshot()
 			for _, item := range artifacts {
 				snapshot = snapshot.WithArtifact(item)

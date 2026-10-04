@@ -34,18 +34,26 @@ func TestResourceArtifact_Lifecycle(t *testing.T) {
 			// Act: compile then encode the exact admitted artifact set as a checkpoint.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{TurnID: "turn"})
 			require.NoError(t, err)
-			projected, err := contexty.ProjectCheckpoint(contexty.EmptyState().WithArtifacts(result.Artifacts))
+			projected, err := contexty.ProjectCheckpoint(
+				contexty.EmptyState().WithArtifacts(result.Artifacts),
+				contexty.DefaultJSONSerializer(),
+				contexty.Descriptor{ID: "", Revision: ""},
+			)
 			require.NoError(t, err)
-			wire, err := (contexty.ConversationCodec{}).Encode(projected)
+			wire, err := (contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}).Encode(
+				projected,
+			)
 			require.NoError(t, err)
-			checkpoint, err := (contexty.ConversationCodec{}).Decode(wire)
+			checkpoint, err := (contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}).Decode(
+				wire,
+			)
 			// Assert: resource projection obeys normal admission and artifact persistence.
 			require.NoError(t, err)
 			require.Equal(t, 1, *calls)
 			require.Equal(t, scenario.visible, len(result.Payload.Memory) == 1)
 			require.Equal(t, scenario.visible, len(result.Artifacts) == 1)
 			require.Equal(t, scenario.stored, len(checkpoint.Artifacts()) == 1)
-			require.Empty(t, result.DerivePersistenceProjection(contexty.SegmentMemory))
+			require.Empty(t, fixturePersistenceSegment(t, result, contexty.SegmentMemory))
 			require.Empty(t, result.Source.Artifacts)
 		})
 	}

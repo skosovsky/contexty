@@ -116,6 +116,9 @@ func Replay(
 	if err = validateReplayMessageCodecs(ctx, copyRecord.Manifest, index, codec); err != nil {
 		return ReplayResult{}, err
 	}
+	if err = validateReplayOpaqueStates(ctx, copyRecord.Manifest, index, codec); err != nil {
+		return ReplayResult{}, err
+	}
 	result := ReplayResult{Manifest: copyRecord.Manifest, Outputs: nil, Artifacts: nil, WireArtifacts: nil}
 	for _, output := range copyRecord.Manifest.Outputs {
 		if cancelErr := ctx.Err(); cancelErr != nil {

@@ -176,6 +176,7 @@ const (
 // ManifestOutput identifies one compiled channel and its transformation evidence.
 // Text is a reference to rendered content, never the rendered payload itself.
 type ManifestOutput struct {
+	OpaqueState       *OpaqueStateDecision      `json:"opaque_state,omitempty"`
 	OutputPolicy      *OutputPolicyDecision     `json:"output_policy,omitempty"`
 	Kind              ManifestOutputKind        `json:"kind"`
 	Name              string                    `json:"name"`
@@ -462,6 +463,7 @@ func manifestOutputs(ctx context.Context, result CompileResult, codec JSONSerial
 		{
 			Selection:    result.Selection.clone(),
 			OutputPolicy: compileOutputPolicyDecision(ctx, ManifestMainOutput, string(ManifestMainOutput)),
+			OpaqueState:  compileOpaqueStateDecision(ctx, ManifestMainOutput, string(ManifestMainOutput)),
 			ArtifactRefs: nil, ArtifactEstimates: nil, ArtifactBudgets: nil, ExcludedArtifacts: nil,
 			Kind:            ManifestMainOutput,
 			Name:            string(ManifestMainOutput),
@@ -496,6 +498,7 @@ func manifestOutputs(ctx context.Context, result CompileResult, codec JSONSerial
 		output := ManifestOutput{
 			Selection:         projection.Selection.clone(),
 			OutputPolicy:      compileOutputPolicyDecision(ctx, ManifestTargetOutput, name),
+			OpaqueState:       compileOpaqueStateDecision(ctx, ManifestTargetOutput, name),
 			ArtifactRefs:      append([]ContentRef(nil), artifactRefs...),
 			ArtifactEstimates: cloneValidArtifactEstimates(projection.ArtifactEstimates),
 			ArtifactBudgets:   artifactRequestsFromEstimates(projection.ArtifactEstimates),
@@ -751,6 +754,9 @@ func (m CompileManifest) validateConfiguration() error {
 		return err
 	}
 	if err := validateManifestPolicyEvidence(m); err != nil {
+		return err
+	}
+	if err := validateManifestOpaqueEvidence(m); err != nil {
 		return err
 	}
 	return m.TraceConfiguration.validate()

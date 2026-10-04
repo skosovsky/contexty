@@ -41,7 +41,7 @@ func TestHistoricalArguments_MultipleCalls(t *testing.T) {
 	})
 	// Assert: persistence keeps both originals; both prompt refs stay independent.
 	require.NoError(t, err)
-	require.Equal(t, request.History, result.DerivePersistenceProjection(contexty.SegmentHistory))
+	require.Equal(t, request.History, fixturePersistenceSegment(t, result, contexty.SegmentHistory))
 	for _, part := range result.Payload.History[0].Parts {
 		call, ok := part.(contexty.ToolCallPart)
 		require.True(t, ok)
@@ -103,7 +103,7 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 	// Assert: call/result/approval identity and original persistence are intact.
 	require.NoError(t, err)
 	require.Equal(t, request.History, result.Source.History)
-	require.Equal(t, request.History, result.DerivePersistenceProjection(contexty.SegmentHistory))
+	require.Equal(t, request.History, fixturePersistenceSegment(t, result, contexty.SegmentHistory))
 	require.Equal(t, prepared.Prompt, result.Payload.History)
 	require.Equal(t, prepared.Prompt, result.Projections["copy"].Messages)
 	require.Equal(t, request.History[0].Extensions, result.Payload.History[0].Extensions)
@@ -118,9 +118,12 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 		}
 	}
 	require.True(t, found)
-	checkpointCodec := contexty.ConversationCodec{Extensions: request.Codec.Extensions}
+	checkpointCodec := contexty.ConversationCodec{
+		Extensions:    request.Codec.Extensions,
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	checkpoint, err := checkpointCodec.Encode(contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory,
-		result.DerivePersistenceProjection(contexty.SegmentHistory)))
+		fixturePersistenceSegment(t, result, contexty.SegmentHistory)))
 	require.NoError(t, err)
 	resumed, err := checkpointCodec.Decode(checkpoint)
 	require.NoError(t, err)
@@ -135,7 +138,7 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, result.Payload.History, resumeResult.Payload.History)
-	require.Equal(t, request.History, resumeResult.DerivePersistenceProjection(contexty.SegmentHistory))
+	require.Equal(t, request.History, fixturePersistenceSegment(t, resumeResult, contexty.SegmentHistory))
 	accepted, err := result.Record.Accept("host-accept")
 	require.NoError(t, err)
 	wire, err := contexty.EncodeSavedRecord(accepted)

@@ -54,7 +54,7 @@ func TestResource_ReplaceByOrigin(t *testing.T) {
 	require.Len(t, compiled.Manifest.ExcludedArtifacts, 1)
 	require.Equal(t, "old", compiled.Manifest.ExcludedArtifacts[0].Input.ID)
 	require.Equal(t, "artifact_merge", compiled.Manifest.ExcludedArtifacts[0].Reason)
-	require.Empty(t, compiled.DerivePersistenceProjection(contexty.SegmentMemory))
+	require.Empty(t, fixturePersistenceSegment(t, compiled, contexty.SegmentMemory))
 	accepted, err := compiled.Record.Accept("host-accept")
 	require.NoError(t, err)
 	expected, err := contexty.ReplayExpectationFor(accepted.Manifest)
@@ -186,7 +186,7 @@ func TestResource_SequentialOriginReplacement(t *testing.T) {
 			require.Len(t, compiled.Payload.Memory, 1)
 			require.Equal(t, "artifact:"+expectedID, compiled.Payload.Memory[0].ID)
 			require.Len(t, compiled.Source.DeferredResources, 2)
-			require.Empty(t, compiled.DerivePersistenceProjection(contexty.SegmentMemory))
+			require.Empty(t, fixturePersistenceSegment(t, compiled, contexty.SegmentMemory))
 		})
 	}
 }

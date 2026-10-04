@@ -61,12 +61,16 @@ func TestAcceptance_CheckpointCodecLossless(t *testing.T) {
 	}
 	artifact.Lifecycle = contexty.ArtifactLifecycleEphemeral
 	working := contexty.EmptyState().WithArtifact(artifact)
-	codec := contexty.ConversationCodec{}
+	codec := contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	// Act.
 	wire, err := codec.Encode(working)
 	require.NoError(t, err)
 	restored, err := codec.Decode(wire)
-	checkpoint, projectionErr := contexty.ProjectCheckpoint(working)
+	checkpoint, projectionErr := contexty.ProjectCheckpoint(
+		working,
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
 	// Assert: filtering is explicit and encoding working state is lossless.
 	require.NoError(t, err)
 	require.NoError(t, projectionErr)
@@ -87,12 +91,16 @@ func TestAcceptance_CheckpointExactArtifactSet(t *testing.T) {
 	b := a.Clone()
 	b.ID, b.Payload = "b", contexty.TextPayload("second")
 	working := contexty.EmptyState().WithArtifacts([]contexty.ContextArtifact{a, b})
-	codec := contexty.ConversationCodec{}
+	codec := contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	// Act.
 	wire, err := codec.Encode(working)
 	require.NoError(t, err)
 	restored, err := codec.Decode(wire)
-	projected, projectErr := contexty.ProjectCheckpoint(working)
+	projected, projectErr := contexty.ProjectCheckpoint(
+		working,
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
 	// Assert: boundaries preserve the exact set; upsert/merge belongs to transitions.
 	require.NoError(t, err)
 	require.NoError(t, projectErr)

@@ -70,7 +70,10 @@ func TestJSONSerializer_RoundTrip(t *testing.T) {
 
 func TestConversationCodec_RoundTrip(t *testing.T) {
 	// Arrange.
-	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+	codec := contexty.ConversationCodec{
+		Provenance:    contexty.DefaultProvenanceRegistry(),
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	snap := contexty.EmptySnapshot().WithVersion(3).WithSegment(contexty.SegmentHistory, []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "hi"),
 	})

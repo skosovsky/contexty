@@ -79,9 +79,18 @@ func main() {
 
 	// The host chooses main for durability and restores its compile-only changes.
 	// Answer/classifier summaries or prompt snapshots are not merged into this state.
-	chosen := contexty.EmptyState().WithSegment(contexty.SegmentHistory,
-		result.DerivePersistenceProjection(contexty.SegmentHistory)).WithArtifacts(result.Artifacts)
-	checkpoint, err := contexty.ProjectCheckpoint(chosen)
+	chosen, err := result.DerivePersistenceState(
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
+	if err != nil {
+		panic(err)
+	}
+	checkpoint, err := contexty.ProjectCheckpoint(
+		chosen,
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
 	if err != nil {
 		panic(err)
 	}

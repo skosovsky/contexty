@@ -39,6 +39,9 @@ func (c *FixedEstimator) EstimatePerMessage(ctx context.Context, msgs []Message)
 	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := rejectOpaqueEstimateCost(m); err != nil {
+			return nil, err
+		}
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("contexty: fixed estimator: %w", err)
 		}

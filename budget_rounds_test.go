@@ -158,7 +158,7 @@ func TestBudget_RoundCompilePersistenceReplay(t *testing.T) {
 	require.Equal(t, messages[3:], compiled.Payload.History[1:])
 	require.Equal(t, messages[3:], compiled.Projections["pending"].Messages)
 	assistantFound, resultFound := false, false
-	for _, persisted := range compiled.DerivePersistenceProjection(contexty.SegmentHistory) {
+	for _, persisted := range fixturePersistenceSegment(t, compiled, contexty.SegmentHistory) {
 		if persisted.ID == "assistant" {
 			assistantFound = true
 			require.Equal(t, messages[3], persisted)

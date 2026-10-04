@@ -58,8 +58,20 @@ func (CharTokenEstimator) EstimatePerMessage(ctx context.Context, msgs []Message
 }
 
 func rejectUnknownMedia(message Message) error {
+	if err := rejectOpaqueEstimateCost(message); err != nil {
+		return err
+	}
 	for _, part := range message.Parts {
 		if part != nil && part.partKind() == PartKindMedia {
+			return ErrUnknownEstimateCost
+		}
+	}
+	return nil
+}
+
+func rejectOpaqueEstimateCost(message Message) error {
+	for _, extension := range message.Extensions {
+		if !nilInterfaceValue(extension) && extension.ExtensionType() == OpaqueStateExtensionType {
 			return ErrUnknownEstimateCost
 		}
 	}

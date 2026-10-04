@@ -32,7 +32,7 @@ func TestRolling_SummaryResume(t *testing.T) {
 	require.Equal(t, []string{"a", "b", "c"}, fixtureRefIDs(compaction.Covered))
 	require.Equal(t, contexty.EffectiveInputBudget(5), compaction.Budget)
 	require.Len(t, first.Payload.History[0].SourceRefs, 3)
-	persisted := first.DerivePersistenceProjection(contexty.SegmentHistory)
+	persisted := fixturePersistenceSegment(t, first, contexty.SegmentHistory)
 	require.Equal(t, first.Payload.History[:3], persisted[:3], "summary must precede its recent tail on resume")
 	require.Equal(t, turn.Raw, persisted[len(persisted)-1])
 	require.Equal(t, turn.Raw, request.CurrentTurn.Raw)
@@ -88,7 +88,7 @@ func TestRolling_SummaryResume(t *testing.T) {
 		}
 	}
 	require.True(t, oldSummaryEdge)
-	persisted = second.DerivePersistenceProjection(contexty.SegmentHistory)
+	persisted = fixturePersistenceSegment(t, second, contexty.SegmentHistory)
 	require.Equal(t, nextTurn.Raw, persisted[len(persisted)-1])
 	fixtureCheckRollingReplay(t, second, &calls)
 }

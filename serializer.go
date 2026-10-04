@@ -47,8 +47,9 @@ func (s JSONSerializer) Unmarshal(data []byte, msg *Message) error {
 // ConversationCodec losslessly serializes semantic snapshots with an explicit schema.
 // Use ProjectCheckpoint before encoding a durable checkpoint.
 type ConversationCodec struct {
-	Provenance *ProvenanceRegistry
-	Extensions *ExtensionRegistry
+	OpaqueProfile Descriptor
+	Provenance    *ProvenanceRegistry
+	Extensions    *ExtensionRegistry
 }
 
 // conversationWire is the storage envelope for a thread.
@@ -61,6 +62,13 @@ type conversationWire struct {
 
 // Encode serializes a snapshot to JSON bytes.
 func (c ConversationCodec) Encode(snap ConversationSnapshot) ([]byte, error) {
+	if err := ValidateOpaqueState(
+		checkpointMessages(snap),
+		JSONSerializer{Provenance: c.Provenance, Extensions: c.Extensions},
+		c.OpaqueProfile,
+	); err != nil {
+		return nil, err
+	}
 	reg := c.Provenance
 	if reg == nil {
 		reg = DefaultProvenanceRegistry()
@@ -126,6 +134,13 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 		snapshot = snapshot.WithArtifacts(artifacts)
 	}
 	if err := validateArtifactBlobs(snapshot.Artifacts()); err != nil {
+		return ConversationSnapshot{}, err
+	}
+	if err := ValidateOpaqueState(
+		checkpointMessages(snapshot),
+		JSONSerializer{Provenance: c.Provenance, Extensions: c.Extensions},
+		c.OpaqueProfile,
+	); err != nil {
 		return ConversationSnapshot{}, err
 	}
 	return snapshot, nil

@@ -181,6 +181,7 @@ func requiredSavedContent(manifest CompileManifest) []savedRequirement {
 		)
 	}
 	for _, output := range manifest.Outputs {
+		requirements = append(requirements, opaqueSavedRequirements(output.OpaqueState)...)
 		for _, ref := range output.ArtifactRefs {
 			requirements = append(requirements, savedRequirement{ref: ref, kind: SavedArtifact})
 		}
@@ -278,4 +279,20 @@ func validateManifestGeneratedResults(manifest CompileManifest) error {
 		return ErrInvalidManifest
 	}
 	return nil
+}
+
+func opaqueSavedRequirements(decision *OpaqueStateDecision) []savedRequirement {
+	if decision == nil {
+		return nil
+	}
+	var requirements []savedRequirement
+	for _, segment := range append(clonePolicySegments(decision.Inputs), decision.Outputs...) {
+		for _, ref := range segment.Messages {
+			requirements = append(requirements, savedRequirement{ref: ref, kind: SavedMessage})
+		}
+	}
+	for _, drop := range decision.Dropped {
+		requirements = append(requirements, savedRequirement{ref: drop.Message, kind: SavedMessage})
+	}
+	return requirements
 }

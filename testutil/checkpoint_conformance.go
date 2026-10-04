@@ -51,7 +51,11 @@ func CheckCheckpointStore(t *testing.T, store contexty.ConversationStateStore, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, err := contexty.ProjectCheckpoint(working)
+	expected, err := contexty.ProjectCheckpoint(
+		working,
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,6 +1,9 @@
 package contexty
 
-import "errors"
+import (
+	"bytes"
+	"errors"
+)
 
 var ErrMissingEstimateExtensionCodec = errors.New("contexty: missing estimate extension codec")
 
@@ -23,7 +26,10 @@ func (r *EstimateReporter) estimateExtensions(
 			return nil, nil, nil, 0, ErrInvalidEstimateReport
 		}
 		typeID := extension.ExtensionType()
-		if !r.hasExtensionCodec(typeID) {
+		if err := r.validateEstimateExtensionCodec(extension); err != nil {
+			return nil, nil, nil, 0, err
+		}
+		if !r.hasExtensionCodec(typeID) && typeID != OpaqueStateExtensionType {
 			return nil, nil, nil, 0, ErrMissingEstimateExtensionCodec
 		}
 		types = append(types, typeID)
@@ -54,6 +60,31 @@ func (r *EstimateReporter) estimateExtensions(
 	return known, types, coverage, fallback, nil
 }
 
+func (r *EstimateReporter) validateEstimateExtensionCodec(extension Extension) error {
+	if extension.ExtensionType() != OpaqueStateExtensionType {
+		return nil
+	}
+	encoded, err := EncodeExtension(extension)
+	if err != nil {
+		return err
+	}
+	if r.codec.Extensions == nil {
+		return ErrMissingEstimateExtensionCodec
+	}
+	restored, err := r.codec.Extensions.Decode(encoded)
+	if err != nil {
+		return errors.Join(ErrMissingEstimateExtensionCodec, err)
+	}
+	again, err := EncodeExtension(restored)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(encoded, again) {
+		return ErrMissingEstimateExtensionCodec
+	}
+	return nil
+}
+
 func estimateExtensionQuality(profile EstimateProfile, typeID string) EstimateQuality {
 	if _, found := profile.Extensions[typeID]; !found {
 		return EstimateUnknown
@@ -73,4 +104,19 @@ func (r *EstimateReporter) hasExtensionCodec(typeID string) bool {
 	registry.mu.RLock()
 	defer registry.mu.RUnlock()
 	return registry.decoders[typeID] != nil
+}
+
+func validateEstimateExtensionPolicies(policies map[string]EstimateExtensionPolicy) error {
+	for typeID, policy := range policies {
+		if typeID == "" || (typeID == OpaqueStateExtensionType && policy.MetadataOnly) {
+			return ErrInvalidEstimateReport
+		}
+		if err := policy.Codec.Validate(); err != nil {
+			return err
+		}
+		if err := policy.Policy.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

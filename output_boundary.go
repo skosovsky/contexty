@@ -66,6 +66,12 @@ func (e *Engine) acceptSemanticOutput(
 			return AbstractPayload{}, err
 		}
 	}
+	var opaqueErr error
+	accepted, opaqueErr = e.acceptOpaqueState(ctx, accepted)
+	if opaqueErr != nil {
+		return AbstractPayload{}, opaqueErr
+	}
+
 	after := semanticOutputMessages(ctx, accepted)
 	rebased, err := acceptedSelection(ctx, selection, after)
 	if err != nil {

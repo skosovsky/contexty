@@ -144,6 +144,13 @@ func (p TraceProfile) codecTopology() (map[CodecBinding]*Descriptor, error) {
 		if copyRegistry == nil {
 			continue
 		}
+		if len(copyRegistry.opaqueCodecs) > 0 ||
+			(registry.kind == CodecLabel && slices.Contains(p.Labels.RequiredTypes, OpaqueStateExtensionType)) {
+			key := CodecBinding{Kind: registry.kind, Type: OpaqueStateExtensionType,
+				Descriptor: Descriptor{ID: "", Revision: ""}}
+			identity := Descriptor{ID: "contexty/opaque-state-envelope", Revision: "1"}
+			expected[key] = &identity
+		}
 		for typeID, decoder := range copyRegistry.decoders {
 			if decoder == nil {
 				return nil, ErrMissingLabelCodec

@@ -30,6 +30,11 @@ func (b *ArtifactBlob) clone() *ArtifactBlob {
 }
 
 func validateArtifactBlob(artifact ContextArtifact) error {
+	for _, extension := range artifact.Extensions {
+		if !nilInterfaceValue(extension) && extension.ExtensionType() == OpaqueStateExtensionType {
+			return ErrInvalidOpaqueState
+		}
+	}
 	if artifact.Blob == nil {
 		return nil
 	}

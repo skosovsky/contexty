@@ -697,7 +697,7 @@ func TestAcceptance_MergePolicyReplaceByOrigin_PersistenceProjection(t *testing.
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentSystem)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentSystem)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "new-persona", proj[0].ID)
 	oldRec, ok := result.Transformations["old-persona"]
@@ -735,7 +735,7 @@ func TestAcceptance_MergePolicyDeduplicateByLayer_PersistenceProjection(t *testi
 	})
 	// Assert.
 	require.NoError(t, err)
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "mem-new", proj[0].ID)
 	oldRec, ok := result.Transformations["mem-old"]
@@ -801,7 +801,7 @@ func TestAcceptance_MergePolicyReplaceByOrigin_SkipsMessagesWithoutOrigin(t *tes
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, result.Payload.System, 2)
-	proj := result.DerivePersistenceProjection(contexty.SegmentSystem)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentSystem)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "existing-with-origin", proj[0].ID)
 	assert.Equal(t, "incoming-no-origin", proj[1].ID)
@@ -849,7 +849,7 @@ func TestAcceptance_Recorder_StructuralFormattedNotOverwrittenByPassed(t *testin
 	require.True(t, ok)
 	assert.Equal(t, contexty.ActionFormatted, oldRec.Final().Action)
 	assert.Equal(t, contexty.ReasonReplacedByDeferred, oldRec.Final().Reason)
-	proj := result.DerivePersistenceProjection(contexty.SegmentSystem)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentSystem)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "new-persona", proj[0].ID)
 }
@@ -893,7 +893,7 @@ func TestAcceptance_Introduced_BaselineBeforeHooksAndPatches(t *testing.T) {
 	assert.Equal(t, "contact me@example.com", result.Introduced["mem-deferred"].TextContent())
 	assert.Equal(t, "PATCHED", result.Payload.Memory[0].TextContent())
 	assert.Contains(t, result.Payload.Memory[1].TextContent(), "[REDACTED]")
-	proj := result.DerivePersistenceProjection(contexty.SegmentMemory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentMemory)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "source", proj[0].TextContent())
 	assert.Equal(t, "contact me@example.com", proj[1].TextContent())
@@ -955,7 +955,10 @@ func TestAcceptance_Actor_ProjectionAndSourceRefsRoundTrip(t *testing.T) {
 		}},
 		Parts: []contexty.ContentPart{contexty.TextPart{Text: "alert text"}},
 	}
-	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+	codec := contexty.ConversationCodec{
+		Provenance:    contexty.DefaultProvenanceRegistry(),
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	// Act.
 	data, err := codec.Encode(
 		contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{msg}),
@@ -1132,7 +1135,10 @@ func TestAcceptance_Context_ArtifactPersistenceAndMergePolicies(t *testing.T) {
 	).ContextArtifact
 	ephemeral.Lifecycle = contexty.ArtifactLifecycleEphemeral
 
-	codec := contexty.ConversationStateCodec{Provenance: contexty.DefaultProvenanceRegistry()}
+	codec := contexty.ConversationStateCodec{
+		Provenance:    contexty.DefaultProvenanceRegistry(),
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	projected, err := contexty.ProjectCheckpoint(
 		contexty.EmptyState().WithArtifacts([]contexty.ContextArtifact{
 			storeArtifact,
@@ -1140,8 +1146,7 @@ func TestAcceptance_Context_ArtifactPersistenceAndMergePolicies(t *testing.T) {
 			turnDefault,
 			turnStored,
 			ephemeral,
-		}),
-	)
+		}), contexty.DefaultJSONSerializer(), contexty.Descriptor{ID: "", Revision: ""})
 	require.NoError(t, err)
 	data, err := codec.EncodeState(projected)
 	require.NoError(t, err)
@@ -1192,7 +1197,7 @@ func TestAcceptance_CurrentTurn_PromptProjectionAndPersistence(t *testing.T) {
 		Reason: contexty.ReasonCurrentTurnProjection,
 	}, result.Transformations[result.Source.CurrentTurn.Raw.ID].Final())
 
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "h1", proj[0].ID)
 	assert.Equal(t, "raw secret text", proj[1].TextContent())
@@ -1221,7 +1226,7 @@ func TestAcceptance_CurrentTurn_CanPersistPromptSafeText(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "redacted text", proj[0].TextContent())
 	writebackHistory := result.Writeback.Snapshot.Segment(contexty.SegmentHistory)
@@ -1244,7 +1249,7 @@ func TestAcceptance_CurrentTurn_CanSkipPersistenceAndRejectInvalidPolicy(t *test
 	})
 	// Assert.
 	require.NoError(t, err)
-	assert.Empty(t, result.DerivePersistenceProjection(contexty.SegmentHistory))
+	assert.Empty(t, fixturePersistenceSegment(t, result, contexty.SegmentHistory))
 	assert.Empty(t, result.Writeback.Snapshot.Segment(contexty.SegmentHistory))
 
 	invalid := contexty.NewCurrentTurn(contexty.TextMessage(contexty.RoleUser, "raw text")).
@@ -1448,7 +1453,7 @@ func TestAcceptance_Typed_ArtifactCodecRoundTrip(t *testing.T) {
 	assert.Equal(t, 200, artifact.Budget.TokenLimit)
 	assert.Equal(t, contexty.ArtifactPersistenceStore, artifact.Persistence)
 
-	codec := contexty.ConversationCodec{}
+	codec := contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	// Act.
 	data, err := codec.Encode(contexty.EmptySnapshot().WithArtifacts([]contexty.ContextArtifact{artifact}))
 	// Assert.
