@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +52,37 @@ func TestStoreIntegration(t *testing.T) {
 
 	createTable(ctx, t, pool, "contexty_conversations")
 	createTable(ctx, t, pool, "custom_contexty_conversations")
+	t.Run("exhausted revision", func(t *testing.T) {
+		// Arrange: a live row has consumed its final int64 OCC token.
+		store := New(pool)
+		wire, encodeErr := store.codec.Encode(contexty.EmptyState().WithVersion(math.MaxInt64))
+		require.NoError(t, encodeErr)
+		_, insertErr := pool.Exec(
+			ctx,
+			`INSERT INTO contexty_conversations(thread_id,version,segments) VALUES($1,$2,$3)`,
+			"exhausted",
+			int64(math.MaxInt64),
+			wire,
+		)
+		require.NoError(t, insertErr)
+		before, loadErr := store.LoadState(ctx, "exhausted")
+		require.NoError(t, loadErr)
+		// Act.
+		require.ErrorIs(
+			t,
+			store.CommitState(ctx, "exhausted", before.Version(), contexty.ConversationDelta{}),
+			contexty.ErrConversationVersionExhausted,
+		)
+		require.ErrorIs(
+			t,
+			store.ClearState(ctx, "exhausted", before.Version()),
+			contexty.ErrConversationVersionExhausted,
+		)
+		// Assert: both transaction failures preserve payload and revision.
+		after, loadErr := store.LoadState(ctx, "exhausted")
+		require.NoError(t, loadErr)
+		require.Equal(t, before, after)
+	})
 
 	t.Run("fixture OCC conformance", func(t *testing.T) {
 		testutil.CheckStateStore(t, New(pool), "fixture-conformance")
@@ -109,7 +141,7 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("apply delta state and OCC", func(t *testing.T) {
 		store := New(pool)
 		conversationID := "thread-delta"
-		require.NoError(t, store.ApplyDelta(ctx, conversationID, 0, contexty.ConversationDelta{
+		require.NoError(t, store.CommitState(ctx, conversationID, 0, contexty.ConversationDelta{
 			Operation: contexty.DeltaReplaceSegment,
 			Segment:   contexty.SegmentHistory,
 			Messages: []contexty.Message{
@@ -125,7 +157,7 @@ func TestStoreIntegration(t *testing.T) {
 			"memory-1",
 			contexty.TextPayload("memory"),
 		).ContextArtifact
-		require.NoError(t, store.ApplyDelta(ctx, conversationID, state.Version(), contexty.ConversationDelta{
+		require.NoError(t, store.CommitState(ctx, conversationID, state.Version(), contexty.ConversationDelta{
 			Operation: contexty.DeltaUpsertArtifact,
 			Artifact:  &artifact,
 		}))
@@ -134,7 +166,7 @@ func TestStoreIntegration(t *testing.T) {
 		require.Len(t, state.Artifacts(), 1)
 		assert.Equal(t, "memory-1", state.Artifacts()[0].ID)
 
-		err = store.ApplyDelta(ctx, conversationID, 1, contexty.ConversationDelta{
+		err = store.CommitState(ctx, conversationID, 1, contexty.ConversationDelta{
 			Operation: contexty.DeltaAppendMessages,
 			Segment:   contexty.SegmentHistory,
 			Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "stale")},

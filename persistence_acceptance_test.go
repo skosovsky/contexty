@@ -830,7 +830,7 @@ func TestAcceptance_Conversation_DeltaStateCodecAndStore(t *testing.T) {
 	assert.Equal(t, "mem-1", reduced.Artifacts()[0].ID)
 
 	store := contexty.NewMemoryConversationStateStore()
-	err = store.ApplyDelta(ctx, "conversation-1", 0, contexty.ConversationDelta{
+	err = store.CommitState(ctx, "conversation-1", 0, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment,
 		Segment:   contexty.SegmentHistory,
 		Messages:  reduced.Segment(contexty.SegmentHistory),
@@ -871,7 +871,7 @@ func TestAcceptance_Conversation_DeltaStateCodecAndStore(t *testing.T) {
 		Assistant: assistant,
 		Results:   []contexty.Message{toolResult},
 	}
-	err = store.ApplyDelta(ctx, "conversation-1", 1, contexty.ConversationDelta{
+	err = store.CommitState(ctx, "conversation-1", 1, contexty.ConversationDelta{
 		Operation: contexty.DeltaAppendToolRound,
 		ToolRound: &round,
 	})
@@ -896,7 +896,7 @@ func TestAcceptance_Conversation_DeltaStateCodecAndStore(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, []string{"m2", "assistant-call", "tool-result"}, messageIDs(result.Payload.History))
-	err = store.ApplyDelta(
+	err = store.CommitState(
 		ctx,
 		"conversation-1",
 		0,

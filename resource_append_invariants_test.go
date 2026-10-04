@@ -105,7 +105,9 @@ func TestResourceAppend_CheckpointLifecycle(t *testing.T) {
 				TurnID: "turn", Artifacts: []contexty.ContextArtifact{old},
 			})
 			require.NoError(t, err)
-			wire, err := (contexty.ConversationCodec{}).Encode(contexty.EmptyState().WithArtifacts(compiled.Artifacts))
+			projected, err := contexty.ProjectCheckpoint(contexty.EmptyState().WithArtifacts(compiled.Artifacts))
+			require.NoError(t, err)
+			wire, err := (contexty.ConversationCodec{}).Encode(projected)
 			require.NoError(t, err)
 			state, err := (contexty.ConversationCodec{}).Decode(wire)
 			// Assert: checkpoint policy and lifecycle survive, without duplicate prompt-message persistence.

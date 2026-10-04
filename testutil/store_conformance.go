@@ -32,7 +32,7 @@ func CheckStateStore(t *testing.T, store contexty.ConversationStateStore, id str
 	// Arrange: a writer holds a token belonging to the deleted state.
 	initial, err := store.LoadState(ctx, id)
 	check(err)
-	check(store.ApplyDelta(ctx, id, initial.Version(), old))
+	check(store.CommitState(ctx, id, initial.Version(), old))
 	stale, err := store.LoadState(ctx, id)
 	check(err)
 	// Act: clear and recreate using the fresh empty-state identity.
@@ -44,11 +44,11 @@ func CheckStateStore(t *testing.T, store contexty.ConversationStateStore, id str
 	}
 	fresh := old
 	fresh.Messages = []contexty.Message{contexty.TextMessage(contexty.RoleUser, "fresh")}
-	check(store.ApplyDelta(ctx, id, empty.Version(), fresh))
+	check(store.CommitState(ctx, id, empty.Version(), fresh))
 	// Assert: both a stale replacement and clear must conflict.
-	conflict(store.ApplyDelta(ctx, id, stale.Version(), old))
+	conflict(store.CommitState(ctx, id, stale.Version(), old))
 	old.Operation = contexty.DeltaAppendMessages
-	conflict(store.ApplyDelta(ctx, id, stale.Version(), old))
+	conflict(store.CommitState(ctx, id, stale.Version(), old))
 	conflict(store.ClearState(ctx, id, stale.Version()))
 	current, err := store.LoadState(ctx, id)
 	check(err)
@@ -60,7 +60,7 @@ func CheckStateStore(t *testing.T, store contexty.ConversationStateStore, id str
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for range 2 {
-		wg.Go(func() { errs <- store.ApplyDelta(ctx, id, current.Version(), fresh) })
+		wg.Go(func() { errs <- store.CommitState(ctx, id, current.Version(), fresh) })
 	}
 	// Act.
 	wg.Wait()
@@ -77,4 +77,5 @@ func CheckStateStore(t *testing.T, store contexty.ConversationStateStore, id str
 	if commits != 1 {
 		t.Fatalf("expected one commit, got %d", commits)
 	}
+	CheckCheckpointStore(t, store, id+"/checkpoint")
 }

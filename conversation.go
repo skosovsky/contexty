@@ -171,16 +171,30 @@ func cloneMessageSlice(msgs []Message) []Message {
 type MemoryConversationStateStore struct {
 	mu            sync.RWMutex
 	conversations map[string]ConversationSnapshot
+	codec         ConversationCodec
 }
 
 // NewMemoryConversationStateStore returns an empty store.
-func NewMemoryConversationStateStore() *MemoryConversationStateStore {
+func NewMemoryConversationStateStore(opts ...MemoryStateStoreOption) *MemoryConversationStateStore {
 	//nolint:exhaustruct_v5 // sync.RWMutex zero-initializes
-	return &MemoryConversationStateStore{conversations: make(map[string]ConversationSnapshot)}
+	store := &MemoryConversationStateStore{
+		conversations: make(map[string]ConversationSnapshot),
+		codec:         ConversationCodec{Provenance: DefaultProvenanceRegistry(), Extensions: nil},
+	}
+	for _, opt := range opts {
+		opt(store)
+	}
+	return store
 }
 
 // LoadState returns the full immutable state for a conversation.
-func (s *MemoryConversationStateStore) LoadState(_ context.Context, conversationID string) (ConversationState, error) {
+func (s *MemoryConversationStateStore) LoadState(
+	ctx context.Context,
+	conversationID string,
+) (ConversationState, error) {
+	if err := ctx.Err(); err != nil {
+		return ConversationState{}, err
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	st, ok := s.conversations[conversationID]
@@ -190,13 +204,19 @@ func (s *MemoryConversationStateStore) LoadState(_ context.Context, conversation
 	return st.AllSegmentsSnapshot(), nil
 }
 
-// ApplyDelta applies a transition when expectedVersion matches.
-func (s *MemoryConversationStateStore) ApplyDelta(
-	_ context.Context,
+// CommitState atomically applies a nonempty batch when expectedVersion matches.
+func (s *MemoryConversationStateStore) CommitState(
+	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	delta ConversationDelta,
+	deltas ...ConversationDelta,
 ) error {
+	if len(deltas) == 0 {
+		return ErrEmptyCheckpointCommit
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.conversations[conversationID]
@@ -208,12 +228,27 @@ func (s *MemoryConversationStateStore) ApplyDelta(
 	} else if cur.version != expectedVersion {
 		return ErrConversationVersionConflict
 	}
-	next, err := ApplyDelta(cur, delta)
+	next, err := ApplyDeltas(cur, deltas...)
+	if err != nil {
+		return err
+	}
+	next, err = ProjectCheckpoint(next)
+	if err != nil {
+		return err
+	}
+	wire, err := s.codec.Encode(next)
+	if err != nil {
+		return err
+	}
+	next, err = s.codec.Decode(wire)
 	if err != nil {
 		return err
 	}
 	next.version, err = NextConversationVersion(cur.version)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.conversations[conversationID] = next
@@ -224,10 +259,13 @@ func (s *MemoryConversationStateStore) ApplyDelta(
 // LoadState after clear returns empty content with the new version. Callers must
 // reload this token before recreating the same conversation ID.
 func (s *MemoryConversationStateStore) ClearState(
-	_ context.Context,
+	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
 ) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, ok := s.conversations[conversationID]

@@ -44,7 +44,8 @@ func (s JSONSerializer) Unmarshal(data []byte, msg *Message) error {
 	return nil
 }
 
-// ConversationCodec serializes full conversation snapshots for storage adapters.
+// ConversationCodec losslessly serializes semantic snapshots with an explicit schema.
+// Use ProjectCheckpoint before encoding a durable checkpoint.
 type ConversationCodec struct {
 	Provenance *ProvenanceRegistry
 	Extensions *ExtensionRegistry
@@ -52,6 +53,7 @@ type ConversationCodec struct {
 
 // conversationWire is the storage envelope for a thread.
 type conversationWire struct {
+	Schema    string                     `json:"schema"`
 	Version   int64                      `json:"version"`
 	Segments  map[string]json.RawMessage `json:"segments"`
 	Artifacts []json.RawMessage          `json:"artifacts,omitempty"`
@@ -63,11 +65,12 @@ func (c ConversationCodec) Encode(snap ConversationSnapshot) ([]byte, error) {
 	if reg == nil {
 		reg = DefaultProvenanceRegistry()
 	}
-	artifacts, err := marshalArtifactList(persistentArtifacts(snap.Artifacts()), c.Extensions)
+	artifacts, err := marshalArtifactList(snap.Artifacts(), c.Extensions)
 	if err != nil {
 		return nil, err
 	}
 	wire := conversationWire{
+		Schema:    ConversationSchema,
 		Version:   snap.Version(),
 		Segments:  make(map[string]json.RawMessage, len(snap.segments)),
 		Artifacts: artifacts,
@@ -92,9 +95,19 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return ConversationSnapshot{}, err
 	}
+	if wire.Schema != ConversationSchema {
+		return ConversationSnapshot{}, ErrUnsupportedCheckpointSchema
+	}
 	artifacts, err := unmarshalArtifactList(wire.Artifacts, c.Extensions)
 	if err != nil {
 		return ConversationSnapshot{}, err
+	}
+	seen := make(map[string]bool, len(artifacts))
+	for _, artifact := range artifacts {
+		if seen[artifact.ID] {
+			return ConversationSnapshot{}, ErrInvalidCheckpoint
+		}
+		seen[artifact.ID] = true
 	}
 	segments := make(map[SegmentName][]Message, len(wire.Segments))
 	for name, raw := range wire.Segments {
@@ -106,8 +119,11 @@ func (c ConversationCodec) Decode(data []byte) (ConversationSnapshot, error) {
 	}
 	snapshot := ConversationSnapshot{
 		segments:  segments,
-		artifacts: mergeArtifactMaps(nil, artifacts),
+		artifacts: nil,
 		version:   wire.Version,
+	}
+	if len(artifacts) > 0 {
+		snapshot = snapshot.WithArtifacts(artifacts)
 	}
 	if err := validateArtifactBlobs(snapshot.Artifacts()); err != nil {
 		return ConversationSnapshot{}, err

@@ -15,7 +15,6 @@ const (
 	fixedTokensPerMsg  = 25
 	exampleTokenLimit  = 260
 	conversationMinMsg = 2
-	toolRoundVersion   = 3
 )
 
 func main() {
@@ -34,41 +33,9 @@ func main() {
 
 func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	store := contexty.NewMemoryConversationStateStore()
-	//nolint:exhaustruct_v5 // zero-value fields omitted in example
-	_ = store.ApplyDelta(ctx, "demo", 0, contexty.ConversationDelta{
-		Operation: contexty.DeltaReplaceSegment,
-		Segment:   contexty.SegmentSystem,
-		Messages: []contexty.Message{
-			withOrigin(
-				contexty.TextMessage(contexty.RoleSystem, "Assemble concise project context."),
-				"context/defaults",
-				"base",
-			),
-		},
-	})
-	//nolint:exhaustruct_v5 // zero-value fields omitted in example
-	_ = store.ApplyDelta(ctx, "demo", 1, contexty.ConversationDelta{
-		Operation: contexty.DeltaReplaceSegment,
-		Segment:   contexty.SegmentMemory,
-		Messages: []contexty.Message{
-			contexty.TextMessage(contexty.RoleSystem, "Project boundary: keep the library universal."),
-		},
-	})
-	//nolint:exhaustruct_v5 // zero-value fields omitted in example
-	_ = store.ApplyDelta(ctx, "demo", 2, contexty.ConversationDelta{
-		Operation: contexty.DeltaReplaceSegment,
-		Segment:   contexty.SegmentHistory,
-		Messages:  fetchConversation(),
-	})
-	toolRound, err := projectLookupRound()
-	if err != nil {
+	if err := seedAssemblyCheckpoint(ctx, store); err != nil {
 		return contexty.CompileResult{}, err
 	}
-	//nolint:exhaustruct_v5 // zero-value fields omitted in example
-	_ = store.ApplyDelta(ctx, "demo", toolRoundVersion, contexty.ConversationDelta{
-		Operation: contexty.DeltaAppendToolRound,
-		ToolRound: &toolRound,
-	})
 
 	pipe := contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{ //nolint:exhaustruct_v5 // optional Summarizer/TruncateStrategy omitted
@@ -247,4 +214,50 @@ func projectLookupRound() (contexty.ToolRound, error) {
 func withOrigin(msg contexty.Message, templateID, layerID string) contexty.Message {
 	msg.Origin = &contexty.MessageOrigin{TemplateID: templateID, LayerID: layerID}
 	return msg
+}
+
+func seedAssemblyCheckpoint(ctx context.Context, store contexty.ConversationStateStore) error {
+	initial, err := store.LoadState(ctx, "demo")
+	if err != nil {
+		return err
+	}
+	toolRound, err := projectLookupRound()
+	if err != nil {
+		return err
+	}
+	//nolint:exhaustruct_v5 // Each delta initializes only its operation-specific fields.
+	err = store.CommitState(
+		ctx,
+		"demo",
+		initial.Version(),
+		contexty.ConversationDelta{
+			Operation: contexty.DeltaReplaceSegment,
+			Segment:   contexty.SegmentSystem,
+			Messages: []contexty.Message{
+				withOrigin(
+					contexty.TextMessage(contexty.RoleSystem, "Assemble concise project context."),
+					"context/defaults",
+					"base",
+				),
+			},
+		},
+		contexty.ConversationDelta{
+			Operation: contexty.DeltaReplaceSegment,
+			Segment:   contexty.SegmentMemory,
+			Messages: []contexty.Message{
+				contexty.TextMessage(contexty.RoleSystem, "Project boundary: keep the library universal."),
+			},
+		},
+		contexty.ConversationDelta{
+			Operation: contexty.DeltaReplaceSegment,
+			Segment:   contexty.SegmentHistory,
+			Messages:  fetchConversation(),
+		},
+		contexty.ConversationDelta{Operation: contexty.DeltaAppendToolRound, ToolRound: &toolRound},
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

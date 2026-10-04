@@ -85,7 +85,7 @@ func TestManifest_RoundTrip(t *testing.T) {
 	msg := contexty.TextMessage(contexty.RoleUser, "PRIVATE-PAYLOAD")
 	msg.ID = "m"
 	store := contexty.NewMemoryConversationStateStore()
-	err := store.ApplyDelta(ctx, "thread", 0, contexty.ConversationDelta{Operation: contexty.DeltaReplaceSegment,
+	err := store.CommitState(ctx, "thread", 0, contexty.ConversationDelta{Operation: contexty.DeltaReplaceSegment,
 		Segment: contexty.SegmentHistory, Messages: []contexty.Message{msg}})
 	require.NoError(t, err)
 	profile := fixtureBindings(

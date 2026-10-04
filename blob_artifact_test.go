@@ -168,10 +168,17 @@ func TestBlob_ArtifactTampering(t *testing.T) {
 			for i, item := range artifacts {
 				rawArtifacts[i] = rawArtifact(item)
 			}
-			wire, wireErr := json.Marshal(map[string]any{"artifacts": rawArtifacts})
+			wire, wireErr := json.Marshal(
+				map[string]any{"schema": contexty.ConversationSchema, "artifacts": rawArtifacts},
+			)
 			require.NoError(t, wireErr)
 			decoded, decodeErr := codec.Decode(wire)
-			require.ErrorIs(t, decodeErr, want)
+			decodeWant := want
+			if scenario == "merged-preview" {
+				// Exact wire sets reject duplicate IDs; merges happen only in transitions.
+				decodeWant = contexty.ErrInvalidCheckpoint
+			}
+			require.ErrorIs(t, decodeErr, decodeWant)
 			require.Zero(t, decoded)
 		})
 	}

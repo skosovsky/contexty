@@ -16,7 +16,7 @@ func WithCodec(codec contexty.ConversationCodec) Option {
 	}
 }
 
-// WithKeyPrefix configures the thread key prefix.
+// WithKeyPrefix supplies a logical namespace, encoded before Cluster key construction.
 func WithKeyPrefix(prefix string) Option {
 	return func(store *Store) {
 		store.keyPrefix = prefix

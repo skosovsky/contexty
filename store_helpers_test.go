@@ -22,7 +22,7 @@ func updateSegment(
 	name contexty.SegmentName,
 	msgs []contexty.Message,
 ) error {
-	return store.ApplyDelta(ctx, conversationID, expectedVersion, contexty.ConversationDelta{
+	return store.CommitState(ctx, conversationID, expectedVersion, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment,
 		Segment:   name,
 		Messages:  msgs,
@@ -37,7 +37,7 @@ func appendSegment(
 	name contexty.SegmentName,
 	msgs ...contexty.Message,
 ) error {
-	return store.ApplyDelta(ctx, conversationID, expectedVersion, contexty.ConversationDelta{
+	return store.CommitState(ctx, conversationID, expectedVersion, contexty.ConversationDelta{
 		Operation: contexty.DeltaAppendMessages,
 		Segment:   name,
 		Messages:  msgs,

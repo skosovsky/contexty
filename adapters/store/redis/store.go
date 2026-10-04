@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -13,11 +14,32 @@ import (
 	"github.com/skosovsky/contexty"
 )
 
-const defaultKeyPrefix = "contexty:conv:"
+const defaultKeyPrefix = "default"
 
-// OCC keys never expire. An empty data value is a payload-free tombstone.
-// Expired payload transitions to a new tombstone atomically before a CAS or read.
-// Versions are compared as strings, avoiding Lua floating-point precision loss.
+// OCC keys never expire. MSET publishes revision and payload in one command.
+// All write permissions are checked before any write, including expiry cleanup.
+// Decimal carry preserves every int64 revision without Lua floating-point loss.
+const luaPrelude = `
+local function nextRevision(value)
+  if value == '9223372036854775807' then error('VERSION_EXHAUSTED') end
+  local suffix = ''
+  for i = #value, 1, -1 do
+    local digit = tonumber(string.sub(value, i, i))
+    if digit < 9 then return string.sub(value, 1, i - 1) .. tostring(digit + 1) .. suffix end
+    suffix = '0' .. suffix
+  end
+  return '1' .. suffix
+end
+local function checkWrites(payload, ttl)
+  if not redis.acl_check_cmd('MSET', KEYS[1], '0', KEYS[2], payload) then
+    error('CHECKPOINT_WRITE_DENIED')
+  end
+  if ttl > 0 and not redis.acl_check_cmd('PEXPIRE', KEYS[2], tostring(ttl)) then
+    error('CHECKPOINT_WRITE_DENIED')
+  end
+end
+`
+
 const luaState = `
 local cur = redis.call('GET', KEYS[1]) or '0'
 local data = redis.call('GET', KEYS[2])
@@ -25,34 +47,34 @@ if cur == '0' and data then return redis.error_reply('MISSING_REVISION') end
 if cur ~= '0' and not data then
   if ARGV[1] ~= '1' then return redis.error_reply('MISSING_PAYLOAD') end
   if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
-  redis.call('INCR', KEYS[1])
-  cur = redis.call('GET', KEYS[1])
-  redis.call('SET', KEYS[2], '')
+  checkWrites('', 0)
+  cur = nextRevision(cur)
+  redis.call('MSET', KEYS[1], cur, KEYS[2], '')
   data = ''
 end
 `
 
-const luaLoad = luaState + `
+const luaLoad = luaPrelude + luaState + `
 return {cur, data or ''}
 `
 
-const luaMutate = luaState + `
+const luaMutate = luaPrelude + `
+local ttl = tonumber(ARGV[4])
+checkWrites(ARGV[3], ttl)
+` + luaState + `
 if cur ~= ARGV[2] then return redis.error_reply('CONFLICT') end
 if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
-redis.call('INCR', KEYS[1])
-if tonumber(ARGV[4]) > 0 then
-  redis.call('SET', KEYS[2], ARGV[3], 'PX', ARGV[4])
-else
-  redis.call('SET', KEYS[2], ARGV[3])
-end
+redis.call('MSET', KEYS[1], nextRevision(cur), KEYS[2], ARGV[3])
+if ttl > 0 then redis.call('PEXPIRE', KEYS[2], ARGV[4]) end
 return 1
 `
 
-const luaClear = luaState + `
+const luaClear = luaPrelude + `
+checkWrites('', 0)
+` + luaState + `
 if cur ~= ARGV[2] then return redis.error_reply('CONFLICT') end
 if cur == '9223372036854775807' then return redis.error_reply('VERSION_EXHAUSTED') end
-redis.call('INCR', KEYS[1])
-redis.call('SET', KEYS[2], '')
+redis.call('MSET', KEYS[1], nextRevision(cur), KEYS[2], '')
 return 1
 `
 
@@ -79,11 +101,19 @@ func New(client goredis.UniversalClient, opts ...Option) *Store {
 }
 
 func (s *Store) verKey(conversationID string) string {
-	return s.keyPrefix + conversationID + ":ver"
+	return s.conversationKey(conversationID) + ":ver"
 }
 
 func (s *Store) dataKey(conversationID string) string {
-	return s.keyPrefix + conversationID + ":data"
+	return s.conversationKey(conversationID) + ":data"
+}
+
+func (s *Store) conversationKey(id string) string {
+	return "contexty:checkpoint:" + hex.EncodeToString(
+		[]byte(s.keyPrefix),
+	) + ":{c" + hex.EncodeToString(
+		[]byte(id),
+	) + "}"
 }
 
 // LoadState returns the full immutable conversation state.
@@ -118,16 +148,19 @@ func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.
 	return snap.WithVersion(version), nil
 }
 
-// ApplyDelta applies an immutable state transition when expectedVersion matches.
-func (s *Store) ApplyDelta(
+// CommitState atomically applies a nonempty batch when expectedVersion matches.
+func (s *Store) CommitState(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	delta contexty.ConversationDelta,
+	deltas ...contexty.ConversationDelta,
 ) error {
+	if len(deltas) == 0 {
+		return contexty.ErrEmptyCheckpointCommit
+	}
 	return s.mutate(ctx, conversationID, expectedVersion,
 		func(snap contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
-			return contexty.ApplyDelta(snap, delta)
+			return contexty.ApplyDeltas(snap, deltas...)
 		})
 }
 
@@ -165,6 +198,10 @@ func (s *Store) mutate(
 		return contexty.ErrConversationVersionConflict
 	}
 	next, err := update(cur)
+	if err != nil {
+		return err
+	}
+	next, err = contexty.ProjectCheckpoint(next)
 	if err != nil {
 		return err
 	}

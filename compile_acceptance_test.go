@@ -1133,7 +1133,7 @@ func TestAcceptance_Context_ArtifactPersistenceAndMergePolicies(t *testing.T) {
 	ephemeral.Lifecycle = contexty.ArtifactLifecycleEphemeral
 
 	codec := contexty.ConversationStateCodec{Provenance: contexty.DefaultProvenanceRegistry()}
-	data, err := codec.EncodeState(
+	projected, err := contexty.ProjectCheckpoint(
 		contexty.EmptyState().WithArtifacts([]contexty.ContextArtifact{
 			storeArtifact,
 			skipArtifact,
@@ -1142,6 +1142,8 @@ func TestAcceptance_Context_ArtifactPersistenceAndMergePolicies(t *testing.T) {
 			ephemeral,
 		}),
 	)
+	require.NoError(t, err)
+	data, err := codec.EncodeState(projected)
 	require.NoError(t, err)
 	decoded, err := codec.DecodeState(data)
 	require.NoError(t, err)
@@ -1554,7 +1556,7 @@ func TestAcceptance_Compile_MergesStoreAndRequestArtifactsBeforeValidation(t *te
 	incoming, err := contexty.NewTypedArtifact("fact-1", desc, retrievedFact{Body: "new"})
 	require.NoError(t, err)
 	store := contexty.NewMemoryConversationStateStore()
-	require.NoError(t, store.ApplyDelta(ctx, "chat-1", 0, contexty.ConversationDelta{
+	require.NoError(t, store.CommitState(ctx, "chat-1", 0, contexty.ConversationDelta{
 		Operation: contexty.DeltaUpsertArtifact,
 		Artifact:  &stored,
 	}))

@@ -38,7 +38,7 @@
 // Example:
 //
 //	store := contexty.NewMemoryConversationStateStore()
-//	_ = store.ApplyDelta(ctx, "chat-1", 0, contexty.ConversationDelta{
+//	_ = store.CommitState(ctx, "chat-1", 0, contexty.ConversationDelta{
 //	    Operation: contexty.DeltaAppendMessages,
 //	    Segment:   contexty.SegmentHistory,
 //	    Messages:  historyMsgs,

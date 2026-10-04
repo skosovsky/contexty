@@ -34,7 +34,9 @@ func TestResourceArtifact_Lifecycle(t *testing.T) {
 			// Act: compile then encode the exact admitted artifact set as a checkpoint.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{TurnID: "turn"})
 			require.NoError(t, err)
-			wire, err := (contexty.ConversationCodec{}).Encode(contexty.EmptyState().WithArtifacts(result.Artifacts))
+			projected, err := contexty.ProjectCheckpoint(contexty.EmptyState().WithArtifacts(result.Artifacts))
+			require.NoError(t, err)
+			wire, err := (contexty.ConversationCodec{}).Encode(projected)
 			require.NoError(t, err)
 			checkpoint, err := (contexty.ConversationCodec{}).Decode(wire)
 			// Assert: resource projection obeys normal admission and artifact persistence.
