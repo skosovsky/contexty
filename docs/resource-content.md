@@ -210,12 +210,21 @@ are owned independently; concurrent reads cannot mutate stored snapshots. Publis
 a new host reader snapshot for changed storage content, rather than updating a
 revision in place. The host pins the reader identity for that interpretation.
 
-Run `go run ./examples/progressive_disclosure`. The application discovers two
-descriptors with the same name, explicitly selects one, authorizes and reads only
-that body, and passes frozen evidence through native compile and a target. Source
-contains the descriptor/configuration, not body messages. The projected ephemeral
-artifact is not duplicated as ordinary persistent history. The example neither
-interprets resource text as instructions nor installs executable capabilities.
+Run `go run ./examples/progressive_disclosure`. The host searches descriptor
+metadata deterministically, selects a checkpoint chunk, then selects a permissions
+chunk on the next step. Each bounded authorized read passes frozen evidence and
+host labels through native compile and a target. Reader attempts and delivered
+body IDs are reported separately: the unrelated deployment chunk is never read.
+Stale revisions and denied scopes return typed errors with no body. Catalog
+metadata is not an access grant, and search does not read bodies. The fixture
+stores source strings in process and constructs typed bodies during selected
+reads; it is not a remote storage or search performance measurement.
+
+Source contains descriptor/configuration, not body messages. The projected
+ephemeral artifact is not duplicated as ordinary persistent history. The example
+neither interprets resource text as instructions nor installs capabilities. See
+the [external context cookbook](context-strategies.md) for archive/resume and
+offload composition using this same protocol.
 
 ## Interpretation identity
 

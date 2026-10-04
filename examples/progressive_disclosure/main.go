@@ -4,11 +4,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 
 	"github.com/skosovsky/contexty"
-	"github.com/skosovsky/contexty/adapters/resource/memory"
 )
 
 const (
@@ -34,129 +34,115 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	bodies := hostBodies()
-	catalog, err := hostCatalog(bodies)
+	provider, err := newHostProvider()
 	if err != nil {
 		return err
 	}
-	for _, descriptor := range catalog {
-		fmt.Printf("Available: %s (%s)\n", descriptor.Name, descriptor.Reference.ID)
+	for _, query := range []string{"checkpoint", "permissions"} {
+		choices := provider.Search(query)
+		if len(choices) == 0 {
+			return fmt.Errorf("no chunk for %q", query)
+		}
+		selected := choices[0]
+		fmt.Printf(
+			"Search %q: %s revision=%s bytes=%d\n",
+			query,
+			selected.Name,
+			selected.Reference.Revision,
+			selected.Length,
+		)
+		result, compileErr := compileChunk(ctx, provider, selected)
+		if compileErr != nil {
+			return compileErr
+		}
+		fmt.Printf("Selected content: %s\n", result.Payload.Memory[0].TextContent())
+		persisted, persistErr := result.DerivePersistenceState(hostCodec(), contexty.Descriptor{ID: "", Revision: ""})
+		if persistErr != nil {
+			return persistErr
+		}
+		fmt.Printf(
+			"Source descriptors=%d source bodies=%d persisted bodies=%d\n",
+			len(result.Source.DeferredResources),
+			len(result.Source.Memory),
+			len(persisted.Segment(contexty.SegmentMemory)),
+		)
 	}
-	// Selection/discovery remain in the application. Equal names never resolve
-	// ambiguously because the selected descriptor pins its own opaque identity.
-	selected := catalog[1]
-	reads := 0
-	reader, err := memory.New(memory.Config{MaxBodyBytes: inputLimit * inputLimit,
-		Authorize: func(_ context.Context, request contexty.ResourceReadRequest) error {
-			if request.ScopeRef != "current-read" || request.Resource.Reference.ID != selected.Reference.ID {
-				return contexty.ErrResourceDenied
-			}
-			reads++
-			return nil
-		}}, bodies...)
+	selected := provider.Search("checkpoint")[0]
+	stale := selected
+	stale.Reference.Revision = "obsolete"
+	resolver, err := hostResolver(provider)
 	if err != nil {
 		return err
 	}
-	block, err := resourceBlock(reader, selected)
+	for _, rejection := range []struct {
+		request  contexty.ResourceReadRequest
+		expected error
+	}{
+		{contexty.ResourceReadRequest{ScopeRef: authorizedScope, Resource: stale, MaxBytes: stale.Length}, contexty.ErrResourceMismatch},
+		{contexty.ResourceReadRequest{ScopeRef: "denied", Resource: selected, MaxBytes: selected.Length}, contexty.ErrResourceDenied},
+	} {
+		_, resolveErr := resolver.Resolve(
+			ctx,
+			contexty.ResourceResolveRequest{
+				ID:     "rejected-read",
+				Read:   rejection.request,
+				Budget: contexty.EffectiveInputBudget(inputLimit),
+			},
+		)
+		if !errors.Is(resolveErr, rejection.expected) {
+			return fmt.Errorf("expected %s, got %w", rejection.expected.Error(), resolveErr)
+		}
+		fmt.Printf("Rejected read: %v\n", resolveErr)
+	}
+	fmt.Printf("Delivered bodies: %v; reader attempts: %v\n", provider.deliveredIDs, provider.readIDs)
+	return nil
+}
+
+func compileChunk(
+	ctx context.Context,
+	provider *hostProvider,
+	selected contexty.ResourceDescriptor,
+) (contexty.CompileResult, error) {
+	block, err := resourceBlock(provider, selected)
 	if err != nil {
-		return err
+		return contexty.CompileResult{}, err
 	}
 	engine := contexty.NewEngine(
 		contexty.WithArtifactMaterialization(*hostMaterialization()),
+		contexty.WithTraceProfile(hostTrace()),
 		contexty.WithDeferredBlocks(block),
 	)
-	result, err := engine.CompileSnapshot(
+	return engine.CompileSnapshot(
 		ctx,
-		contexty.CompileRequest{ //nolint:exhaustruct_v5 // optional inputs omitted
+		contexty.CompileRequest{ //nolint:exhaustruct_v5 // only selected resources are issued
+			CompilationID: "jit/" + selected.Reference.ID,
 			Targets: []contexty.CompileTarget{
 				{
-					Name:         "selected",
-					Segments:     []contexty.SegmentName{contexty.SegmentMemory},
-					View:         "",
-					ArtifactRefs: nil, IncludeCurrentTurn: false, IncludeArtifacts: true, Selection: nil,
-					Budget:    nil,
-					Formatter: nil,
+					Name:               "selected",
+					Segments:           []contexty.SegmentName{contexty.SegmentMemory},
+					IncludeArtifacts:   true,
+					View:               "",
+					ArtifactRefs:       nil,
+					IncludeCurrentTurn: false,
+					Selection:          nil,
+					Budget:             nil,
+					Formatter:          nil,
 				},
 			},
 		},
 	)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Loaded bodies: %d\n", reads)
-	fmt.Printf("Selected content: %s\n", result.Payload.Memory[0].TextContent())
-	fmt.Printf(
-		"Descriptors in Source: %d; body messages in Source: %d\n",
-		len(result.Source.DeferredResources),
-		len(result.Source.Memory),
-	)
-	persisted, err := result.DerivePersistenceState(
-		contexty.DefaultJSONSerializer(),
-		contexty.Descriptor{ID: "", Revision: ""},
-	)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("Ordinary persisted messages: %d\n", len(persisted.Segment(contexty.SegmentMemory)))
-	return nil
-}
-
-func hostBodies() []contexty.ResourceBody {
-	var bodies []contexty.ResourceBody
-	for _, source := range []string{"source-a", "source-b"} {
-		artifact := contexty.NewRetrievalDocument(
-			source,
-			contexty.TextPayload("Host-selected document from "+source),
-		).ContextArtifact
-		artifact.SourceRefs = []contexty.SourceRef{{ID: source}} //nolint:exhaustruct_v5 // opaque source identity only
-		bodies = append(
-			bodies,
-			contexty.ResourceBody{
-				Reference: contexty.Descriptor{ID: source, Revision: pinnedIdentity},
-				Artifact:  artifact,
-			},
-		)
-	}
-	return bodies
-}
-
-func hostCatalog(bodies []contexty.ResourceBody) ([]contexty.ResourceDescriptor, error) {
-	var catalog []contexty.ResourceDescriptor
-	for _, body := range bodies {
-		descriptor, err := contexty.DescribeResource(body.Reference, "guide", body.Artifact)
-		if err != nil {
-			return nil, err
-		}
-		catalog = append(catalog, descriptor)
-	}
-	return catalog, nil
 }
 
 func resourceBlock(
 	reader contexty.ResourceReader,
 	selected contexty.ResourceDescriptor,
 ) (contexty.DeferredBlock, error) {
-	reporter, err := contexty.NewEstimateReporter(
-		contexty.CharTokenEstimator{},
-		estimateProfile(),
-		contexty.DefaultJSONSerializer(),
-	)
+	resolver, err := hostResolver(reader)
 	if err != nil {
 		return contexty.DeferredBlock{}, err
 	}
-	resolver := contexty.ResourceResolver{
-		Materialization:     hostMaterialization(),
-		Reader:              reader,
-		ReaderIdentity:      contexty.Descriptor{ID: "host-reader", Revision: pinnedIdentity},
-		Projection:          previewPolicy{},
-		ProjectionIdentity:  contexty.Descriptor{ID: "host-preview", Revision: pinnedIdentity},
-		Labels:              contexty.LabelProjection{Registry: nil, Policy: nil, RequiredTypes: nil},
-		LabelPolicyIdentity: contexty.Descriptor{ID: "", Revision: ""},
-		Codecs:              nil,
-		Reporter:            reporter,
-	}
 	request := contexty.ResourceResolveRequest{ID: "selected-read", Read: contexty.ResourceReadRequest{
-		ScopeRef: "current-read",
+		ScopeRef: authorizedScope,
 		Resource: selected,
 		MaxBytes: selected.Length,
 	}, Budget: contexty.EffectiveInputBudget(inputLimit)}
@@ -166,7 +152,7 @@ func resourceBlock(
 	}
 	return contexty.DeferredBlock{ //nolint:exhaustruct_v5 // default memory segment/append placement
 		Name:          "selected-content",
-		ResourceCodec: contexty.ResourceCodec{Messages: contexty.DefaultJSONSerializer(), Labels: nil},
+		ResourceCodec: contexty.ResourceCodec{Messages: hostCodec(), Labels: hostCodec().Extensions},
 		Resources: []contexty.ResourceSelection{{ID: request.ID, Resource: selected, Configuration: configuration,
 			Budget: request.Budget, MaxBytes: request.Read.MaxBytes}},
 		Resolve: func(ctx context.Context) (contexty.DeferredResult, error) {
@@ -182,6 +168,13 @@ func estimateProfile() contexty.EstimateProfile {
 		Estimator: contexty.Descriptor{ID: "character-count", Revision: pinnedIdentity},
 		Method:    contexty.Descriptor{ID: "approximate-characters", Revision: pinnedIdentity},
 		Encoding:  contexty.Descriptor{ID: "typed-json", Revision: pinnedIdentity},
+		Extensions: map[string]contexty.EstimateExtensionPolicy{
+			labelType: {
+				Codec:        contexty.Descriptor{ID: labelCodecID, Revision: pinnedIdentity},
+				Policy:       contexty.Descriptor{ID: "host-label-estimate", Revision: pinnedIdentity},
+				MetadataOnly: true,
+			},
+		},
 		Capabilities: map[contexty.EstimateKind]contexty.EstimateQuality{
 			contexty.EstimateText: contexty.EstimateEstimated, contexty.EstimateToolResult: contexty.EstimateEstimated,
 			contexty.EstimateImage: contexty.EstimateUnknown, contexty.EstimateToolCall: contexty.EstimateUnknown,

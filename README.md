@@ -853,6 +853,22 @@ Do **not** encode transport metadata in message text or use string heuristics (`
 
 The shipped contract is documented in this README, the package docs and [contract reference](docs/contracts.md).
 
+## External context strategies
+
+The [context strategy cookbook](docs/context-strategies.md) combines host archives,
+checkpoint resume, rolling summaries, explicit offload, chunk selection and typed
+memory replacement using existing contracts. Original transcripts, search,
+authorization, durable blob/claim storage and model quality remain host concerns.
+Working projections and summaries are not archives; exact replay capture may
+retain original private bytes even when offload reduces the issued prompt.
+
+Run `go run ./examples/context_evaluation` for a machine-readable offline comparison
+of sliding window, rolling summary, offload and host-selected retrieval. Fixed
+fixtures check mechanical guarantees with the same budget and estimator/evaluator
+profile. Timing is diagnostic; real-model quality, provider usage and money are
+not measured by this offline run. The optional typed live runner requires an
+explicit host invocation and is excluded from ordinary validation.
+
 ## Required context and early compaction
 
 `BudgetConfig.Retention` protects selected message IDs, exact content refs or

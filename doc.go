@@ -31,6 +31,7 @@
 //   - EstimateReporter for actual count quality, coverage and separate wire evidence
 //   - PrefixRecipe for opt-in semantic prefix diagnostics after final admission
 //   - PrefixWireConfirmation for separate adapter-owned wire identity, not cache hits
+//   - Executable host recipes for archives, offload, summary, retrieval and evaluation
 //
 // Clear/recreate and payload expiry preserve monotonic OCC identity. Reload the
 // empty state and use its current token before writing; old tokens remain stale.
@@ -41,6 +42,10 @@
 // Raw capture and persistence are separate from prompt acceptance.
 // Remote execution, discovery, permissions, durable record/blob storage and
 // deletion policy are application responsibilities, not inferred from content.
+// Working checkpoints and summaries are not transcript archives. Offline strategy
+// fixtures verify mechanics, not real-model quality or provider usage/cost. Host
+// recipes and evaluation boundaries are documented in docs/context-strategies.md;
+// model SDKs, external search and durable retention backends remain outside core.
 //
 // Example:
 //
