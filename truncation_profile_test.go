@@ -12,9 +12,15 @@ import (
 func TestTruncation_Configuration(t *testing.T) {
 	// Arrange: mutable caller config must not change a constructed pipeline.
 	atomic := true
-	roles := []string{"user", "system", "user", ""}
-	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100),
-		DropHead: contexty.DropHeadConfig{KeepTurnAtomicity: &atomic, MinMessages: 2, ProtectedRoles: roles}},
+	roles := []contexty.Role{contexty.RoleUser, contexty.RoleSystem}
+	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
+		Budget: contexty.EffectiveInputBudget(100),
+		DropHead: contexty.DropHeadConfig{
+			KeepTurnAtomicity: &atomic,
+			MinMessages:       2,
+		},
+		Retention: contexty.RetentionPolicy{Roles: roles},
+	},
 		contexty.CharTokenEstimator{})
 	atomic = false
 	roles[0] = "changed"
@@ -33,10 +39,14 @@ func TestTruncation_Configuration(t *testing.T) {
 	require.Zero(t, replayed)
 	profile := compiled.Manifest.Budgets[0].Truncation
 	require.True(t, *profile.DropHead.KeepTurnAtomicity)
-	require.Equal(t, []string{"system", "user"}, profile.DropHead.ProtectedRoles)
+	require.Equal(
+		t,
+		[]contexty.Role{contexty.RoleUser, contexty.RoleSystem},
+		compiled.Manifest.Budgets[0].Retention.Roles,
+	)
 	require.Equal(t, 2, profile.DropHead.MinMessages)
 	*expected.Budgets[0].Truncation.DropHead.KeepTurnAtomicity = false
-	expected.Budgets[0].Truncation.DropHead.ProtectedRoles[0] = "changed"
+	expected.Budgets[0].Retention.Roles[0] = "changed"
 	require.NoError(t, accepted.Validate())
 	require.NoError(t, compiled.Manifest.Validate())
 }

@@ -87,7 +87,8 @@ func TestSummarizer_CallbackOwnership(t *testing.T) {
 	original := fixtureRefForMessage(t, input)
 	profile := fixtureTraceProfile()
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4),
-		Summarizer: stubSummarizer(func(_ context.Context, messages []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+			messages := request.Messages
 			fixtureMutateMessage(messages[0])
 			return fixtureRollingText("summary", "sum"), nil
 		})}, contexty.CharTokenEstimator{}, contexty.WithSummarizerDescriptor(profile.Stages["summarize"]))

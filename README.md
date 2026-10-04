@@ -779,3 +779,22 @@ Do **not** encode transport metadata in message text or use string heuristics (`
 ## Architecture Notes
 
 The shipped contract is documented in this README, the package docs and [contract reference](docs/contracts.md).
+
+## Required context and early compaction
+
+`BudgetConfig.Retention` protects selected message IDs, exact content refs or
+roles through summarization and eviction, including all participants of a
+selected tool round. Insufficient mandatory capacity is an explicit error.
+`CompactionPolicy` optionally starts compression before hard overflow and sets
+a soft target as percentages of the effective input capacity.
+
+A host `Summarizer` receives `SummaryRequest` with owned `Messages`, actual
+remaining `MaxTokens`, desired `TargetTokens` and the policy `Purpose`. It runs
+at most once. A summary missing the soft target may succeed within the hard
+limit; `BudgetResult.Decision.TargetReached` reports this explicitly.
+`CompileResult.BudgetDecisions` exposes stage evidence for main and target
+outputs. Final output estimates remain separate and authoritative after later
+patches and formatting.
+
+See [the complete contract](docs/retention-budget.md) and the executable
+[tool-heavy budgeting example](examples/context_budget/main.go).

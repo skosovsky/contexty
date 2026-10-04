@@ -57,7 +57,7 @@ func fixtureTraceStageFixture() (contexty.CompileRequest, []contexty.EngineOptio
 		contexty.WithSegmentFormatter(contexty.SegmentHistory, formatter),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(20),
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+			Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				message := contexty.TextMessage(contexty.RoleAssistant, "s")
 				message.ID = "summary"
 				return message, nil

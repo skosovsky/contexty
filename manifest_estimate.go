@@ -82,6 +82,12 @@ func cloneManifestBudgets(budgets []ManifestBudget) []ManifestBudget {
 	copyBudgets := slices.Clone(budgets)
 	for i, budget := range copyBudgets {
 		copyBudgets[i].RollingSummary = cloneRollingSummary(budget.RollingSummary)
+		copyBudgets[i].Retention = budget.Retention.clone()
+		copyBudgets[i].CompactionPolicy = cloneCompactionPolicy(budget.CompactionPolicy)
+		if budget.Decision != nil {
+			d := budget.Decision.clone()
+			copyBudgets[i].Decision = &d
+		}
 		copyBudgets[i].Compaction = cloneCompactionProfile(budget.Compaction)
 		copyBudgets[i].Truncation = budget.Truncation.clone()
 		copyBudgets[i].Summarizer = cloneDescriptor(budget.Summarizer)

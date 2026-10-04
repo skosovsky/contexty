@@ -51,7 +51,8 @@ func TestInitial_EstimatorOwnership(t *testing.T) {
 	msg := contexty.TextMessage(contexty.RoleUser, "input")
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)
 	// Act.
-	result, err := pipe.Apply(context.Background(), []contexty.Message{msg})
+	resultBudget, err := pipe.Apply(context.Background(), []contexty.Message{msg})
+	result := resultBudget.Messages
 	// Assert: both caller and returned working representation remain authoritative.
 	require.NoError(t, err)
 	require.Equal(t, "input", msg.TextContent())

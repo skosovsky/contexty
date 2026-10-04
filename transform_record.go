@@ -62,6 +62,7 @@ func (c TransformChain) Final() TransformRecord {
 
 // CompileResult is the immutable compile output plus O(1) traceability by Message.ID.
 type CompileResult struct {
+	BudgetDecisions    []CompileBudgetDecision
 	Payload            AbstractPayload
 	Transformations    map[string]TransformChain
 	Source             CompileRequest     // immutable freeze after Normalize, before pipeline mutations

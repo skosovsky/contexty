@@ -76,7 +76,7 @@ func TestCompaction_PartialCannotAccept(t *testing.T) {
 				estimate = nil
 			}
 			partial, err := contexty.NewCompactionRecord(complete.ID, complete.Profile, complete.Covered,
-				complete.Output, complete.Lineage, complete.Budget, result, estimate)
+				complete.Output, complete.Lineage, complete.Budget, complete.Execution, result, estimate)
 			require.NoError(t, err)
 			// Act.
 			accepted, err := partial.Accept("host-accept")
@@ -196,8 +196,19 @@ func TestCompaction_OverflowAndTransitions(t *testing.T) {
 	report, err := reporter.Report(context.Background(), contexty.EstimateRequest{Budget: budget,
 		Segments: []contexty.EstimateSegment{{Name: "summary", Messages: []contexty.Message{summary}}}})
 	require.NoError(t, err)
-	proposal, err := contexty.NewCompactionRecord(baseline.ID, baseline.Profile, baseline.Covered, baseline.Output,
-		baseline.Lineage, budget, baseline.Result, &report)
+	proposal, err := contexty.NewCompactionRecord(
+		baseline.ID,
+		baseline.Profile,
+		baseline.Covered,
+		baseline.Output,
+		baseline.Lineage,
+		budget,
+		contexty.CompactionExecution{
+			Summary: contexty.SummaryBudget{MaxTokens: 3, TargetTokens: 3, Purpose: baseline.Profile.Policy},
+		},
+		baseline.Result,
+		&report,
+	)
 	require.NoError(t, err)
 	// Act.
 	accepted, err := proposal.Accept("host-accept")

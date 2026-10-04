@@ -135,7 +135,7 @@ func TestCoverage_Summary(t *testing.T) {
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(5), Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					summary := contexty.TextMessage(contexty.RoleAssistant, "sum")
 					summary.ID = "summary"
 					return summary, nil

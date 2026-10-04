@@ -22,7 +22,7 @@ func TestExact_Replay(t *testing.T) {
 	artifact := contexty.NewMemoryBlock("memory", contexty.TextPayload("memo")).ContextArtifact
 	hooks, summaries, resolves, formats, policies := 0, 0, 0, 0, 0
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(12),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			summaries++
 			message := contexty.TextMessage(contexty.RoleAssistant, "sum")
 			message.ID = "summary"

@@ -2,8 +2,8 @@
 
 This is a clear break. Update consumers, tests and checkpoint handling together;
 there are no aliases for replaced selectors, budget fields or deferred callbacks.
-The required `TokenEstimator` and whole-block `Summarizer` interfaces remain
-valid abstractions. New evidence/strictness features are explicit opt-ins, not
+`TokenEstimator` remains the estimator port. `Summarizer` now accepts the typed
+`SummaryRequest` with owned messages, actual MaxTokens and soft TargetTokens. New evidence/strictness features are explicit opt-ins, not
 compatibility modes. Host types, authorization, model selection and storage
 ownership stay in the application.
 
@@ -245,3 +245,18 @@ See [the prefix contract](prefix-diagnostics.md) and
 - Wire fresh resource/blob authorization and retention/cleanup protocols.
 - Test overflow, denial, cancellation, missing/stale dependencies and private export.
 - Run `make validate` and actual adapter integration checks before release approval.
+
+## Retention and compaction budget
+
+BudgetPipeline.Apply and ApplyWithLimit return BudgetResult: read Messages for
+content and Decision for hard/trigger/target capacities and soft-target status.
+Move role selectors from DropHeadConfig to BudgetConfig.Retention.Roles; explicit
+MessageIDs and ContentRefs share the same mandatory-content contract. Required
+messages and complete rounds cannot be removed by summary or custom eviction.
+Impossible retention returns ErrRetentionExceedsBudget rather than empty success.
+
+Optional CompactionPolicy uses TriggerPercent and TargetPercent of the effective
+pipeline capacity after reservations. NewCompactionRecord requires the concrete
+CompactionExecution; old records lack required request evidence and must be
+explicitly retired or migrated by the host. No legacy callback adapter or record
+reader is provided. See [the complete contract](retention-budget.md).

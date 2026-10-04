@@ -34,7 +34,8 @@ func TestAcceptance_Truncation_Atomicity(t *testing.T) {
 		Budget: contexty.EffectiveInputBudget(12),
 	}, &contexty.FixedEstimator{TokensPerMessage: 5})
 	// Act.
-	out, err := pipe.Apply(ctx, msgs)
+	outBudget, err := pipe.Apply(ctx, msgs)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)

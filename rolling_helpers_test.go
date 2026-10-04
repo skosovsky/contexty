@@ -30,7 +30,8 @@ func fixtureRollingEngine(t *testing.T, calls *int) *contexty.Engine {
 	)
 	require.NoError(t, err)
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+			inputs := request.Messages
 			*calls++
 			for _, input := range inputs {
 				require.NotEqual(t, "turn-next", input.ID, "current turn cannot enter compaction")

@@ -86,3 +86,39 @@ func TestNamedView_FinalBudget(t *testing.T) {
 	require.Empty(t, text)
 	require.Equal(t, "safe", snapshot.Segment(contexty.SegmentHistory)[0].TextContent())
 }
+
+func TestAcceptance_NamedView_RequiredContent(t *testing.T) {
+	// Arrange: a formatter rewrites a retained message while remaining within budget.
+	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20),
+		Retention: contexty.RetentionPolicy{MessageIDs: []string{"input"}}}, contexty.CharTokenEstimator{})
+	engine := contexty.NewEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
+		Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
+			messages[0].Parts[0] = contexty.TextPart{Text: "changed"}
+			return messages, nil
+		}}))
+	snapshot := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory,
+		[]contexty.Message{fixtureRollingText("input", "safe")})
+	// Act.
+	text, err := engine.RenderView(context.Background(), snapshot, "named")
+	// Assert: the rewrite is rejected, and the snapshot remains unchanged.
+	require.ErrorIs(t, err, contexty.ErrInvalidRetention)
+	require.Empty(t, text)
+	require.Equal(t, "safe", snapshot.Segment(contexty.SegmentHistory)[0].TextContent())
+}
+
+func TestAcceptance_NamedView_RequiredOrder(t *testing.T) {
+	// Arrange: a formatter preserves required content but reverses its chronology.
+	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20),
+		Retention: contexty.RetentionPolicy{MessageIDs: []string{"a", "b"}}}, contexty.CharTokenEstimator{})
+	engine := contexty.NewEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
+		Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
+			return []contexty.Message{messages[1], messages[0]}, nil
+		}}))
+	snapshot := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory,
+		[]contexty.Message{fixtureRollingText("a", "first"), fixtureRollingText("b", "second")})
+	// Act.
+	text, err := engine.RenderView(context.Background(), snapshot, "named")
+	// Assert: same bytes in a changed order still violate retention.
+	require.ErrorIs(t, err, contexty.ErrInvalidRetention)
+	require.Empty(t, text)
+}

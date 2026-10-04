@@ -34,7 +34,7 @@ func TestLineage_Stages(t *testing.T) {
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{
 				Budget: contexty.EffectiveInputBudget(12),
-				Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+				Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					msg := contexty.TextMessage(contexty.RoleAssistant, "sum")
 					msg.ID = "summary"
 					return msg, nil

@@ -44,6 +44,17 @@ func TestCompaction_Capture(t *testing.T) {
 	main, target := compiled.Compactions[0], compiled.Compactions[1]
 	require.Equal(t, contexty.EffectiveInputBudget(7), main.Budget)
 	require.Equal(t, contexty.EffectiveInputBudget(3), target.Budget)
+	require.Equal(t, 7, main.Execution.Summary.MaxTokens)
+	require.Equal(t, 7, main.Execution.Summary.TargetTokens)
+	require.Equal(t, 3, target.Execution.Summary.MaxTokens)
+	require.Equal(t, main.Profile.Policy, main.Execution.Summary.Purpose)
+	for _, proposal := range compiled.Compactions {
+		wire, encodeErr := contexty.EncodeCompactionRecord(proposal)
+		require.NoError(t, encodeErr)
+		restored, decodeErr := contexty.DecodeCompactionRecord(wire)
+		require.NoError(t, decodeErr)
+		require.Equal(t, proposal.Execution, restored.Execution)
+	}
 	require.Len(t, main.Covered, 2)
 	require.Len(t, target.Covered, 1)
 	require.Equal(t, "main-summary", target.Covered[0].ID)
@@ -175,7 +186,7 @@ func TestCompaction_CaptureIdleProfile(t *testing.T) {
 	require.NoError(t, err)
 	calls := 0
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			calls++
 			return contexty.Message{}, nil
 		})}, reporter, contexty.WithCompactionCapture(profile))
@@ -209,7 +220,7 @@ func TestCompaction_CaptureRequiresConfiguration(t *testing.T) {
 	profile := fixtureCompactionFixture(t).Profile
 	calls := 0
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			calls++
 			return contexty.Message{}, nil
 		})},
@@ -242,7 +253,7 @@ func TestCompaction_CaptureProfileMismatch(t *testing.T) {
 			require.NoError(t, err)
 			calls := 0
 			pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-				Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+				Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					calls++
 					return contexty.Message{}, nil
 				})},

@@ -108,7 +108,8 @@ func TestRolling_SummaryTargets(t *testing.T) {
 	targetProfile := mainProfile
 	targetProfile.Policy = targetPolicy.Descriptor
 	calls := 0
-	summarizer := stubSummarizer(func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+		inputs := request.Messages
 		calls++
 		message := contexty.TextMessage(contexty.RoleSystem, "sum")
 		message.ID = "main-summary"

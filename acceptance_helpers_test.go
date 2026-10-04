@@ -158,7 +158,7 @@ type fixtureSummarizer struct {
 	summary contexty.Message
 }
 
-func (s fixtureSummarizer) Summarize(context.Context, []contexty.Message) (contexty.Message, error) {
+func (s fixtureSummarizer) Summarize(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 	return s.summary, nil
 }
 

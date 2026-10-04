@@ -239,6 +239,7 @@ func (e *Engine) compileRequest(ctx context.Context, req CompileRequest, start t
 		Estimates:         nil,
 		ArtifactEstimates: nil,
 		Compactions:       nil,
+		BudgetDecisions:   compileBudgetDecisions(compiled.Context),
 	}
 	result.Estimates, err = compileEstimateReports(compiled.Context)
 	if err != nil {
@@ -298,6 +299,7 @@ type compilePipelineResult struct {
 
 func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) context.Context {
 	ctx = startResourceCompile(ctx, req)
+	ctx = context.WithValue(ctx, budgetDecisionsKey{}, make(map[manifestChannelKey]BudgetDecision))
 	ctx = context.WithValue(ctx, finalEstimateReportsKey{}, make(map[manifestChannelKey]EstimateReport))
 	ctx = context.WithValue(ctx, artifactExclusionsKey{}, make(map[ContentRef]string))
 	ctx = context.WithValue(ctx, artifactEstimatesKey{}, make(map[ContentRef]ArtifactBudgetEstimate))
@@ -369,6 +371,9 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	}
 	payload := e.payloadFromSnapshot(snap, compilePending)
 	if e.budget != nil {
+		if err := e.budget.validateRecordedRetention(ctx, payload.History); err != nil {
+			return compilePipelineResult{}, err
+		}
 		if err := e.budget.validateSegments(ctx, payloadEstimateSegments(payload)); err != nil {
 			return compilePipelineResult{}, fmt.Errorf("contexty: final payload: %w", err)
 		}
@@ -560,11 +565,11 @@ func (e *Engine) applyBudgetHistory(
 	history := snap.Segment(SegmentHistory)
 	ctx = withBudgetIdentitySegment(ctx, SegmentHistory)
 	ctx = withBudgetObservation(ctx, e.resolveBudgetObserver(), string(SegmentHistory))
-	trimmed, err := e.budget.ApplyWithLimit(ctx, history, available)
+	budgetResult, err := e.budget.ApplyWithLimit(ctx, history, available)
 	if err != nil {
 		return ConversationSnapshot{}, err
 	}
-	trimmed, err = traceStage(ctx, "budget", history, trimmed, false)
+	trimmed, err := traceStage(ctx, "budget", history, budgetResult.Messages, false)
 	if err != nil {
 		return ConversationSnapshot{}, err
 	}

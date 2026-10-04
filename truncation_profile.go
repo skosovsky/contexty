@@ -1,7 +1,5 @@
 package contexty
 
-import "slices"
-
 const (
 	truncationDropHeadID = "contexty/truncate/drop-head"
 	truncationStrictID   = "contexty/truncate/strict"
@@ -85,10 +83,6 @@ func (p TruncationProfile) validate() error {
 	if p.Descriptor.ID == truncationDropHeadID {
 		if p.Descriptor.Revision != truncationContract || p.DropHead == nil || p.DropHead.KeepTurnAtomicity == nil ||
 			p.DropHead.MinMessages < 0 {
-			return ErrInvalidRecordingComponent
-		}
-		canonical := p.DropHead.normalized()
-		if !slices.Equal(p.DropHead.ProtectedRoles, canonical.ProtectedRoles) {
 			return ErrInvalidRecordingComponent
 		}
 		return nil
