@@ -185,12 +185,12 @@ type dropHeadState struct {
 }
 
 func (s *dropHeadStrategy) usesFastPath() bool {
-	return len(s.cfg.ProtectedRoles) == 0 && !s.cfg.keepTurnAtomicity()
+	return !s.cfg.keepTurnAtomicity()
 }
 
 func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit int) []Message {
 	// Binary search (suffix-based: "keep from index i") is only valid when we are free to
-	// drop any prefix by index. ProtectedRoles and KeepTurnAtomicity require removing the
+	// drop any prefix by index. KeepTurnAtomicity requires removing the
 	// first droppable message or atomic tool-turn instead of an arbitrary prefix.
 	suffixSum := make([]int, len(weights)+1)
 	for i, weight := range slices.Backward(weights) {
@@ -211,12 +211,11 @@ func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit in
 }
 
 func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHeadState, limit int) ([]Message, error) {
-	protected := s.protectedRoleSet()
 	for state.total > limit {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("contexty: drop head: %w", err)
 		}
-		startIdx := s.findFirstDroppableIndex(state, protected)
+		startIdx := s.findFirstDroppableIndex(state)
 		if startIdx == -1 {
 			break
 		}
@@ -256,28 +255,11 @@ func (s *dropHeadStrategy) enforceMinMessages(msgs []Message) []Message {
 	return msgs
 }
 
-func (s *dropHeadStrategy) protectedRoleSet() map[string]struct{} {
-	if len(s.cfg.ProtectedRoles) == 0 {
-		return nil
-	}
-	protected := make(map[string]struct{}, len(s.cfg.ProtectedRoles))
-	for _, role := range s.cfg.ProtectedRoles {
-		protected[role] = struct{}{}
-	}
-	return protected
-}
-
-func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState, protected map[string]struct{}) int {
+func (s *dropHeadStrategy) findFirstDroppableIndex(state dropHeadState) int {
 	for idx := state.searchStart; idx < len(state.msgs); idx++ {
-		if state.deleted[idx] {
-			continue
+		if !state.deleted[idx] {
+			return idx
 		}
-		if protected != nil {
-			if _, ok := protected[string(state.msgs[idx].Role)]; ok {
-				continue
-			}
-		}
-		return idx
 	}
 	return -1
 }

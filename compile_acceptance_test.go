@@ -78,13 +78,14 @@ func TestAcceptance_Unified_Budgeting(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget: contexty.EffectiveInputBudget(15),
 		Summarizer: stubSummarizer(
-			func(context.Context, []contexty.Message) (contexty.Message, error) {
+			func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				return contexty.TextMessage(contexty.RoleSystem, "sum"), nil
 			},
 		),
 	}, &contexty.FixedEstimator{TokensPerMessage: 10})
 	// Act.
-	out, err := pipe.Apply(ctx, msgs)
+	outBudget, err := pipe.Apply(ctx, msgs)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)
@@ -514,7 +515,7 @@ func TestAcceptance_Summarize_TransformationByMessageID(t *testing.T) {
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(25),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					return contexty.Message{
 						ID:    "summary-1",
 						Role:  contexty.RoleSystem,

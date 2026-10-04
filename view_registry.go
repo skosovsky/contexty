@@ -70,6 +70,7 @@ func (e *Engine) renderNamedView(
 	}
 	msgs := snap.Segment(seg)
 	working := cloneMessageSlice(msgs)
+	var required []ContentRef
 	if err := e.projectViewRoles(ctx, working); err != nil {
 		return "", err
 	}
@@ -78,7 +79,8 @@ func (e *Engine) renderNamedView(
 		if err != nil {
 			return "", fmt.Errorf("contexty: render view budget: %w", err)
 		}
-		working = trimmed
+		working = trimmed.Messages
+		required = trimmed.Decision.Required
 	}
 	if cfg.Formatter != nil {
 		if err := ctx.Err(); err != nil {
@@ -94,6 +96,9 @@ func (e *Engine) renderNamedView(
 		working = formatted
 	}
 	if cfg.Budget != nil {
+		if err := cfg.Budget.validateRequiredOutput(ctx, working, required); err != nil {
+			return "", err
+		}
 		if err := cfg.Budget.validateOutput(ctx, working); err != nil {
 			return "", err
 		}

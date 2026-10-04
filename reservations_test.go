@@ -45,7 +45,8 @@ func TestContract_Reservations(t *testing.T) {
 	// Arrange / Act / Assert: zero input capacity is explicit, not an absent limit.
 	zero := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.WindowInputBudget(5, 3, 2)},
 		contexty.CharTokenEstimator{})
-	empty, err := zero.Apply(context.Background(), []contexty.Message{message})
+	emptyBudget, err := zero.Apply(context.Background(), []contexty.Message{message})
+	empty := emptyBudget.Messages
 	require.NoError(t, err)
 	require.Empty(t, empty)
 	_, err = zero.ApplyWithLimit(context.Background(), nil, 1)

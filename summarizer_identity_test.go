@@ -13,7 +13,7 @@ func TestSummarizer_Identity(t *testing.T) {
 	// Arrange: explicit local identity, different from the generic trace stage.
 	descriptor := contexty.Descriptor{ID: "host/summary", Revision: "pinned"}
 	calls := 0
-	summarizer := stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+	summarizer := stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 		calls++
 		return fixtureRollingText("summary", "ok"), nil
 	})
@@ -60,10 +60,12 @@ func TestSummarizer_BindingFailures(t *testing.T) {
 			calls := 0
 			cfg := contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}
 			if scenario != "surplus" {
-				cfg.Summarizer = stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-					calls++
-					return contexty.Message{}, nil
-				})
+				cfg.Summarizer = stubSummarizer(
+					func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
+						calls++
+						return contexty.Message{}, nil
+					},
+				)
 			}
 			var options []contexty.BudgetPipelineOption
 			if scenario != "missing" {

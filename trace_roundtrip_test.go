@@ -45,7 +45,7 @@ func TestTrace_LabelPersistenceRoundTrip(t *testing.T) {
 	engine := contexty.NewEngine(contexty.WithTraceProfile(profile),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(10),
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+			Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				msg := contexty.TextMessage(contexty.RoleAssistant, "sum")
 				msg.ID = "summary"
 				return msg, nil

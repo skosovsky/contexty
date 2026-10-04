@@ -200,7 +200,7 @@ func TestEngine_Compile_DeferredAndResolveVar(t *testing.T) {
 	assert.Empty(t, snap.Segment(contexty.SegmentMemory))
 }
 
-func TestBudgetPipeline_SummarizeThenTruncate(t *testing.T) {
+func TestBudgetPipeline_SummaryWithinCapacity(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	msgs := []contexty.Message{
@@ -209,13 +209,14 @@ func TestBudgetPipeline_SummarizeThenTruncate(t *testing.T) {
 	}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget: contexty.EffectiveInputBudget(15),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			return contexty.TextMessage(contexty.RoleSystem, "sum"), nil
 		}),
 		TruncateStrategy: contexty.NewDropTailStrategy(),
 	}, contexty.CharTokenEstimator{})
 	// Act.
-	out, err := pipe.Apply(ctx, msgs)
+	outBudget, err := pipe.Apply(ctx, msgs)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)

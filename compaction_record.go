@@ -18,6 +18,41 @@ type CompactionProfile struct {
 	Privacy    Descriptor `json:"privacy"`
 }
 
+// CompactionExecution records the concrete request and retention configuration.
+type CompactionExecution struct {
+	Summary   SummaryBudget     `json:"summary"`
+	Retention RetentionPolicy   `json:"retention"`
+	Policy    *CompactionPolicy `json:"policy,omitempty"`
+	Required  []ContentRef      `json:"required,omitempty"`
+}
+
+func (e CompactionExecution) clone() CompactionExecution {
+	e.Retention = e.Retention.clone()
+	e.Policy = cloneCompactionPolicy(e.Policy)
+	e.Required = slices.Clone(e.Required)
+	return e
+}
+
+func (e CompactionExecution) validate() error {
+	if err := e.Summary.validate(); err != nil {
+		return err
+	}
+	if err := e.Retention.validate(); err != nil {
+		return err
+	}
+	if e.Policy != nil {
+		if err := e.Policy.Validate(); err != nil {
+			return err
+		}
+	}
+	for _, ref := range e.Required {
+		if err := ref.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (p CompactionProfile) validate() error {
 	for _, descriptor := range []Descriptor{p.Model, p.Summarizer, p.Estimator, p.Policy, p.Encoding, p.Privacy} {
 		if err := descriptor.Validate(); err != nil {
@@ -38,24 +73,46 @@ func cloneCompactionProfile(profile *CompactionProfile) *CompactionProfile {
 // CompactionRecord records a summary decision, not an accepted whole compilation.
 // Result is local saved content, never an isolated export or a read capability.
 type CompactionRecord struct {
-	ID          string            `json:"id"`
-	Digest      string            `json:"digest"`
-	Profile     CompactionProfile `json:"profile"`
-	Covered     []ContentRef      `json:"covered"`
-	Output      ContentRef        `json:"output"`
-	Lineage     Lineage           `json:"lineage"`
-	Budget      BudgetRequest     `json:"budget"`
-	State       RecordState       `json:"state"`
-	DecisionRef string            `json:"decision_ref,omitempty"`
-	Result      *SavedContent     `json:"result,omitempty"`
-	Estimate    *EstimateReport   `json:"estimate,omitempty"`
+	Execution   CompactionExecution `json:"execution"`
+	ID          string              `json:"id"`
+	Digest      string              `json:"digest"`
+	Profile     CompactionProfile   `json:"profile"`
+	Covered     []ContentRef        `json:"covered"`
+	Output      ContentRef          `json:"output"`
+	Lineage     Lineage             `json:"lineage"`
+	Budget      BudgetRequest       `json:"budget"`
+	State       RecordState         `json:"state"`
+	DecisionRef string              `json:"decision_ref,omitempty"`
+	Result      *SavedContent       `json:"result,omitempty"`
+	Estimate    *EstimateReport     `json:"estimate,omitempty"`
 }
 
 // NewCompactionRecord preserves references only when result is omitted by host.
-func NewCompactionRecord(id string, profile CompactionProfile, covered []ContentRef, output ContentRef,
-	lineage Lineage, budget BudgetRequest, result *SavedContent, estimate *EstimateReport) (CompactionRecord, error) {
-	record := CompactionRecord{ID: id, Digest: "", Profile: profile, Covered: slices.Clone(covered), Output: output,
-		Lineage: lineage.Clone(), Budget: budget, State: RecordProposed, DecisionRef: "", Result: nil, Estimate: nil}
+func NewCompactionRecord(
+	id string,
+	profile CompactionProfile,
+	covered []ContentRef,
+	output ContentRef,
+	lineage Lineage,
+	budget BudgetRequest,
+	execution CompactionExecution,
+	result *SavedContent,
+	estimate *EstimateReport,
+) (CompactionRecord, error) {
+	record := CompactionRecord{
+		ID:          id,
+		Digest:      "",
+		Profile:     profile,
+		Covered:     slices.Clone(covered),
+		Output:      output,
+		Lineage:     lineage.Clone(),
+		Budget:      budget,
+		Execution:   execution.clone(),
+		State:       RecordProposed,
+		DecisionRef: "",
+		Result:      nil,
+		Estimate:    nil,
+	}
 	if result != nil {
 		copyResult := result.clone()
 		record.Result = &copyResult
@@ -79,6 +136,13 @@ func (r CompactionRecord) Validate() error {
 	}
 	if _, err := r.Budget.Resolve(); err != nil {
 		return err
+	}
+	if err := r.Execution.validate(); err != nil {
+		return err
+	}
+	limit, _ := r.Budget.Resolve()
+	if r.Execution.Summary.MaxTokens != limit || r.Execution.Summary.Purpose != r.Profile.Policy {
+		return ErrInvalidCompaction
 	}
 	if err := r.validateCoverage(); err != nil {
 		return err
@@ -202,6 +266,7 @@ func (r CompactionRecord) Clone() (CompactionRecord, error) {
 		return CompactionRecord{}, err
 	}
 	r.Covered = slices.Clone(r.Covered)
+	r.Execution = r.Execution.clone()
 	r.Lineage = r.Lineage.Clone()
 	if r.Result != nil {
 		result := r.Result.clone()

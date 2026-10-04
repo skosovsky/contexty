@@ -20,11 +20,13 @@ func TestBudgetPipeline_ObserverCancellation(t *testing.T) {
 			config := contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}
 			if summary {
 				input.Parts = []contexty.ContentPart{contexty.TextPart{Text: strings.Repeat("x", 20)}}
-				config.Summarizer = stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
-					result := contexty.TextMessage(contexty.RoleAssistant, "ok")
-					result.ID = "summary"
-					return result, nil
-				})
+				config.Summarizer = stubSummarizer(
+					func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
+						result := contexty.TextMessage(contexty.RoleAssistant, "ok")
+						result.ID = "summary"
+						return result, nil
+					},
+				)
 			}
 			pipe := contexty.NewBudgetPipeline(
 				config,
@@ -55,7 +57,8 @@ func TestBudgetPipeline_EvictionFinalBudget(t *testing.T) {
 		contexty.CharTokenEstimator{},
 	)
 	// Act.
-	got, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	gotBudget, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	got := gotBudget.Messages
 	// Assert: the core must reject a final over-budget result.
 	if !errors.Is(err, contexty.ErrBudgetExceeded) || len(got) != 0 {
 		t.Fatalf("want budget rejection and no output, got %v / %v", got, err)
@@ -97,7 +100,8 @@ func TestBudgetPipeline_EvictionEffectiveLimit(t *testing.T) {
 		contexty.CharTokenEstimator{},
 	)
 	// Act.
-	got, err := pipe.ApplyWithLimit(context.Background(), []contexty.Message{input}, 5)
+	gotBudget, err := pipe.ApplyWithLimit(context.Background(), []contexty.Message{input}, 5)
+	got := gotBudget.Messages
 	// Assert: checking only the configured budget would incorrectly accept 9.
 	if !errors.Is(err, contexty.ErrBudgetExceeded) || len(got) != 0 {
 		t.Fatalf("want invocation limit rejection, got %v / %v", got, err)
@@ -118,7 +122,8 @@ func TestBudgetPipeline_EvictionOwnership(t *testing.T) {
 		contexty.CharTokenEstimator{},
 	)
 	// Act.
-	got, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	gotBudget, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	got := gotBudget.Messages
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,13 +144,14 @@ func TestBudgetPipeline_SummaryOwnership(t *testing.T) {
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(10),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) { return summary, nil },
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) { return summary, nil },
 			),
 		},
 		contexty.CharTokenEstimator{},
 	)
 	// Act.
-	got, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	gotBudget, err := pipe.Apply(context.Background(), []contexty.Message{input})
+	got := gotBudget.Messages
 	if err != nil {
 		t.Fatal(err)
 	}

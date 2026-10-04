@@ -6,6 +6,7 @@ import (
 )
 
 type compactionCaptureKey struct{}
+type compactionExecutionKey struct{}
 type compactionCaptureState struct {
 	records  []CompactionRecord
 	channels []manifestChannelKey
@@ -111,7 +112,7 @@ func (p *BudgetPipeline) estimateSummary(ctx context.Context, summary Message, l
 		return 0, ErrInvalidCoverage
 	}
 	record, err := NewCompactionRecord("compaction/"+edge.ID, *p.compaction, edge.Inputs, edge.Outputs[0],
-		trace.graph, EffectiveInputBudget(limit), nil, &report)
+		trace.graph, EffectiveInputBudget(limit), capturedCompactionExecution(ctx), nil, &report)
 	if err != nil {
 		return 0, err
 	}
@@ -160,7 +161,7 @@ func compileCompactions(ctx context.Context) ([]CompactionRecord, error) {
 			result = &copyContent
 		}
 		record, err := NewCompactionRecord(proposal.ID, proposal.Profile, proposal.Covered, proposal.Output,
-			proposal.Lineage, proposal.Budget, result, proposal.Estimate)
+			proposal.Lineage, proposal.Budget, proposal.Execution, result, proposal.Estimate)
 		if err != nil {
 			return nil, err
 		}
@@ -170,4 +171,10 @@ func compileCompactions(ctx context.Context) ([]CompactionRecord, error) {
 		return nil, err
 	}
 	return records, nil
+}
+
+func capturedCompactionExecution(ctx context.Context) CompactionExecution {
+	execution, _ := ctx.Value(compactionExecutionKey{}).(CompactionExecution)
+	execution.Summary, _ = ctx.Value(summaryRequestKey{}).(SummaryBudget)
+	return execution.clone()
 }

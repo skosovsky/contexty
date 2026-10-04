@@ -109,13 +109,14 @@ func TestObserver_BudgetPipelineSummarizeAndTokens(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget: contexty.EffectiveInputBudget(10),
 		Summarizer: stubSummarizer(
-			func(context.Context, []contexty.Message) (contexty.Message, error) {
+			func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				return contexty.TextMessage(contexty.RoleSystem, "compressed"), nil
 			},
 		),
 	}, contexty.CharTokenEstimator{})
 	// Act.
-	out, err := pipe.Apply(ctx, msgs)
+	outBudget, err := pipe.Apply(ctx, msgs)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)
@@ -236,7 +237,8 @@ func TestObserver_DirectBudgetPipelineApply(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
 	// Act.
-	out, err := pipe.Apply(ctx, msgs)
+	outBudget, err := pipe.Apply(ctx, msgs)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Len(t, out, 1)

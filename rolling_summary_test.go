@@ -15,7 +15,8 @@ func TestRolling_Summary(t *testing.T) {
 	messages = append(messages, contexty.Message{ID: "tail-a", Role: contexty.RoleUser},
 		contexty.Message{ID: "tail-b", Role: contexty.RoleAssistant})
 	calls := 0
-	summarizer := stubSummarizer(func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+		inputs := request.Messages
 		calls++
 		require.Equal(t, messages[:3], inputs)
 		return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
@@ -28,7 +29,8 @@ func TestRolling_Summary(t *testing.T) {
 	)
 	policy.RecentMessages = 100 // Option freezes caller-owned configuration.
 	// Act.
-	out, err := pipeline.Apply(context.Background(), messages)
+	outBudget, err := pipeline.Apply(context.Background(), messages)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
@@ -36,7 +38,8 @@ func TestRolling_Summary(t *testing.T) {
 	require.Equal(t, "summary", out[0].ID)
 	require.Equal(t, messages[3:], out[1:])
 	// Arrange/Act/Assert: already fitting input does not trigger compaction.
-	out, err = pipeline.Apply(context.Background(), messages[3:])
+	outBudget, err = pipeline.Apply(context.Background(), messages[3:])
+	out = outBudget.Messages
 	require.NoError(t, err)
 	require.Equal(t, messages[3:], out)
 	require.Equal(t, 1, calls)
@@ -60,7 +63,8 @@ func TestRolling_SummaryRoundBoundary(t *testing.T) {
 			pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 				Budget: contexty.EffectiveInputBudget(25),
 				Summarizer: stubSummarizer(
-					func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+					func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+						inputs := request.Messages
 						calls++
 						require.Equal(t, messages[:3], inputs)
 						return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
@@ -68,7 +72,8 @@ func TestRolling_SummaryRoundBoundary(t *testing.T) {
 				),
 			}, &contexty.FixedEstimator{TokensPerMessage: 5}, contexty.WithRollingSummary(fixtureRollingPolicy(recent)))
 			// Act.
-			out, err := pipeline.Apply(context.Background(), messages)
+			outBudget, err := pipeline.Apply(context.Background(), messages)
+			out := outBudget.Messages
 			// Assert: all four tail messages survive, regardless of requested minimum.
 			require.NoError(t, err)
 			require.Equal(t, 1, calls)
@@ -107,7 +112,7 @@ func TestRolling_SummaryFailures(t *testing.T) {
 			calls := 0
 			var summarizer contexty.Summarizer
 			if tc.summary {
-				summarizer = stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+				summarizer = stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					calls++
 					return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
 				})
@@ -121,7 +126,8 @@ func TestRolling_SummaryFailures(t *testing.T) {
 				contexty.WithRollingSummary(fixtureRollingPolicy(tc.recent)),
 			)
 			// Act.
-			out, err := pipeline.Apply(context.Background(), messages)
+			outBudget, err := pipeline.Apply(context.Background(), messages)
+			out := outBudget.Messages
 			// Assert: no partial output or implicit deletion fallback.
 			require.ErrorIs(t, err, tc.want)
 			require.Nil(t, out)
@@ -136,11 +142,12 @@ func TestRolling_SummaryIdentity(t *testing.T) {
 	// Arrange: a summary reuses a preserved message identity.
 	messages := fixtureProtectedHistory()[:3]
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			return contexty.Message{ID: "keep", Role: contexty.RoleSystem}, nil
 		})}, &contexty.FixedEstimator{TokensPerMessage: 5}, contexty.WithRollingSummary(fixtureRollingPolicy(1)))
 	// Act.
-	out, err := pipeline.Apply(context.Background(), messages)
+	outBudget, err := pipeline.Apply(context.Background(), messages)
+	out := outBudget.Messages
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrInvalidRollingSummary)
 	require.Nil(t, out)
@@ -153,7 +160,7 @@ func TestRolling_SummaryConfiguration(t *testing.T) {
 	policy := fixtureRollingPolicy(1)
 	policy.Descriptor = contexty.Descriptor{}
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			calls++
 			return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
 		})}, &contexty.FixedEstimator{TokensPerMessage: 5}, contexty.WithRollingSummary(policy))
@@ -170,12 +177,13 @@ func TestRolling_SummaryConfiguration(t *testing.T) {
 	// Arrange: compaction capture pins a policy inconsistent with the selected recipe.
 	profile := fixtureCompactionFixture(t).Profile
 	pipeline = contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
-		Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+		Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 			calls++
 			return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
 		})}, contexty.CharTokenEstimator{}, contexty.WithRollingSummary(fixtureRollingPolicy(1)), contexty.WithCompactionCapture(profile))
 	// Act.
-	out, err := pipeline.Apply(context.Background(), fixtureProtectedHistory()[:3])
+	outBudget, err := pipeline.Apply(context.Background(), fixtureProtectedHistory()[:3])
+	out := outBudget.Messages
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrInvalidCompaction)
 	require.Nil(t, out)

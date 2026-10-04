@@ -183,7 +183,7 @@ func (e *Engine) compileTarget(
 		if err != nil {
 			return CompileProjection{}, fmt.Errorf("contexty: compile target %q budget: %w", name, err)
 		}
-		working = trimmed
+		working = trimmed.Messages
 		working, err = traceStage(ctx, "budget", before, working, false)
 		if err != nil {
 			return CompileProjection{}, err
@@ -205,6 +205,9 @@ func (e *Engine) compileTarget(
 	}
 	working = projected
 	if target.Budget != nil {
+		if err := target.Budget.validateRecordedRetention(ctx, working); err != nil {
+			return CompileProjection{}, err
+		}
 		if err := target.Budget.validateSegments(
 			ctx,
 			[]EstimateSegment{{Name: manifestMessagesSegment, Messages: working}},

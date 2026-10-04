@@ -30,7 +30,8 @@ func fixtureCompactionCaptureProfiles(t *testing.T, denyOutput, distinct bool) (
 	)
 	require.NoError(t, err)
 	calls := 0
-	summarizer := stubSummarizer(func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+		inputs := request.Messages
 		calls++
 		output := contexty.TextMessage(contexty.RoleSystem, "safe")
 		output.ID = "main-summary"
@@ -108,7 +109,19 @@ func fixtureCompactionFixture(t *testing.T) contexty.CompactionRecord {
 	report, err := reporter.Report(context.Background(), contexty.EstimateRequest{Budget: budget,
 		Segments: []contexty.EstimateSegment{{Name: "summary", Messages: []contexty.Message{summary}}}})
 	require.NoError(t, err)
-	record, err := contexty.NewCompactionRecord("compaction", profile, inputs, output, graph, budget, &content, &report)
+	record, err := contexty.NewCompactionRecord(
+		"compaction",
+		profile,
+		inputs,
+		output,
+		graph,
+		budget,
+		contexty.CompactionExecution{
+			Summary: contexty.SummaryBudget{MaxTokens: 10, TargetTokens: 10, Purpose: profile.Policy},
+		},
+		&content,
+		&report,
+	)
 	require.NoError(t, err)
 	return record
 }

@@ -139,7 +139,7 @@ func TestAcceptance_PersistenceProjection_IncludesSummary(t *testing.T) {
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(25),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					return contexty.Message{
 						ID:    "summary-1",
 						Role:  contexty.RoleSystem,
@@ -310,7 +310,7 @@ func TestAcceptance_PersistenceProjection_SummaryPlusTextReplacement(t *testing.
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(25),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					return contexty.Message{
 						ID:    "summary-1",
 						Role:  contexty.RoleSystem,
@@ -365,7 +365,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncated(t *testing.T) {
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(25),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					return contexty.Message{
 						ID:    "summary-1",
 						Role:  contexty.RoleSystem,
@@ -505,7 +505,8 @@ func TestAcceptance_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(25),
 			Summarizer: stubSummarizer(
-				func(_ context.Context, msgs []contexty.Message) (contexty.Message, error) {
+				func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+					msgs := request.Messages
 					return contexty.Message{
 						ID:    msgs[0].ID,
 						Role:  contexty.RoleSystem,
@@ -548,7 +549,7 @@ func TestAcceptance_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.
 	assert.Empty(t, proj)
 }
 
-func TestAcceptance_PersistenceProjection_SummaryEvictedByTruncate(t *testing.T) {
+func TestAcceptance_PersistenceProjection_OversizedSummaryRejected(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
@@ -556,7 +557,7 @@ func TestAcceptance_PersistenceProjection_SummaryEvictedByTruncate(t *testing.T)
 		contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(5),
 			Summarizer: stubSummarizer(
-				func(context.Context, []contexty.Message) (contexty.Message, error) {
+				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					return contexty.Message{
 						ID:    "summary-1",
 						Role:  contexty.RoleSystem,
@@ -586,14 +587,9 @@ func TestAcceptance_PersistenceProjection_SummaryEvictedByTruncate(t *testing.T)
 			},
 		},
 	})
-	// Assert.
-	require.NoError(t, err)
-	assert.Empty(t, result.Payload.History)
-	sumRec, ok := result.Transformations["summary-1"]
-	require.True(t, ok)
-	assert.Equal(t, contexty.ActionTruncated, sumRec.Final().Action)
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
-	assert.Empty(t, proj)
+	// Assert: an oversized summary is rejected without a persistence projection.
+	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
+	require.Zero(t, result)
 }
 
 func TestAcceptance_PersistenceProjection_DeferredPlusInPlaceFormatter(t *testing.T) {

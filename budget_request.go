@@ -54,7 +54,7 @@ func (b BudgetRequest) Resolve() (int, error) {
 
 func (e *Engine) validateInputBudgets(targets []CompileTarget) error {
 	if e.budget != nil {
-		if err := e.budget.validateRollingSummary(); err != nil {
+		if err := e.budget.validateBudgetPolicy(); err != nil {
 			return err
 		}
 		if _, err := e.budget.cfg.Budget.Resolve(); err != nil {
@@ -66,7 +66,7 @@ func (e *Engine) validateInputBudgets(targets []CompileTarget) error {
 	}
 	for _, target := range targets {
 		if target.Budget != nil {
-			if err := target.Budget.validateRollingSummary(); err != nil {
+			if err := target.Budget.validateBudgetPolicy(); err != nil {
 				return err
 			}
 			if _, err := target.Budget.cfg.Budget.Resolve(); err != nil {

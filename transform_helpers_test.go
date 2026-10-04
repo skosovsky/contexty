@@ -36,7 +36,7 @@ func fixtureCancelTransformFixture(
 		return contexty.NewEngine(), request
 	default:
 		pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1),
-			Summarizer: stubSummarizer(func(context.Context, []contexty.Message) (contexty.Message, error) {
+			Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				cancel()
 				return contexty.Message{}, callbackError
 			})}, contexty.CharTokenEstimator{})

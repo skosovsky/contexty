@@ -20,7 +20,8 @@ func TestBudget_CounterCancellation(t *testing.T) {
 	}}
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)
 	// Act.
-	result, err := pipe.Apply(ctx, []contexty.Message{contexty.TextMessage(contexty.RoleUser, "input")})
+	resultBudget, err := pipe.Apply(ctx, []contexty.Message{contexty.TextMessage(contexty.RoleUser, "input")})
+	result := resultBudget.Messages
 	// Assert.
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, result)

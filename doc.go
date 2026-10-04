@@ -13,7 +13,9 @@
 //   - CompileResult.Source + NormalizedSnapshot + Writeback + Projections + Introduced
 //   - CompileProjection.Source + InputSnapshot for target traceability
 //   - DerivePersistenceProjection for persistence
-//   - BudgetPipeline (summarize + truncate) and Engine.Compile → CompileResult
+//   - RetentionPolicy, budget-aware SummaryRequest and explicit BudgetDecision
+//   - CompactionPolicy for early compression with a soft target
+//   - BudgetPipeline (retention with summary or eviction) and Engine.Compile → CompileResult
 //   - BudgetRequest for effective input capacity or a window with reservations
 //   - TransformChain and Lineage for ordered transitions and full content identity
 //   - Host LabelProjection and codecs for Bring Your Own Types metadata

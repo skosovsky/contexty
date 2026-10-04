@@ -712,7 +712,7 @@ Profile identities match the executing summarize stage, reporter and privacy
 policy. Proposals record post-label-projection content and actual sub-budget.
 CompileResult.Compactions is populated after all output privacy decisions, so a
 later denial removes result bytes here too. Acceptance/storage are never automatic.
-Summary cost is counted once for capture; truncation/final verification remain
+Summary cost is counted once for capture; final verification remains
 separate. Rolling-tail capture records only the summarized prefix under its
 actual remaining capacity; accepted-summary resume is explicit host input.
 
@@ -757,8 +757,8 @@ before budgeting; no missing result is manufactured by the budget pipeline.
 WithRollingSummary(RollingSummaryPolicy) selects an opt-in budget recipe with a
 pinned policy descriptor and a positive minimum RecentMessages count. It requires
 a summarizer and validates before callbacks/store loading. Whole-block compression
-remains the default without this option. Under budget, no summary is generated.
-Over budget, the chronological tail is preserved unchanged; a boundary inside a
+remains the default without this option. Without a CompactionPolicy, fitting input generates no summary. With an explicit
+threshold policy, fitting input may be compacted to a soft target. When triggered, the chronological tail is preserved unchanged; a boundary inside a
 tool round expands backward to include the entire round. An earlier pending round
 expands the protected suffix further. Only the preceding prefix is summarized.
 An oversized tail returns ErrRecentTailExceedsBudget without summarization; an
@@ -782,3 +782,11 @@ restore original source/introduced bytes at that position. Source-only retained
 messages with no compiled position follow in source order; explicit current-turn
 persistence follows its existing policy. This fixes append-at-end replacement
 ordering, not a switch to persisting prompt-safe content implicitly.
+
+## Retention and soft compaction
+
+The [retention and compaction budget contract](retention-budget.md) defines
+SummaryRequest, BudgetResult/Decision, RetentionPolicy and CompactionPolicy.
+Retention applies before any compression or eviction callback, independently of
+the chosen strategy. Compaction records carry concrete request capacities and
+configuration, and compile manifests bind actual budget-stage decisions.

@@ -132,7 +132,15 @@ func TestManifest_RoundTrip(t *testing.T) {
 				TokenLimit:      100,
 				EstimatedTokens: len("PRIVATE-PAYLOAD"),
 				Request:         contexty.EffectiveInputBudget(100),
-				ReportProfile:   nil,
+				Decision: &contexty.BudgetDecision{
+					HardLimit:     100,
+					TriggerTokens: 100,
+					TargetTokens:  100,
+					BeforeTokens:  15,
+					AfterTokens:   15,
+					TargetReached: true,
+				},
+				ReportProfile: nil,
 				Estimator: contexty.EstimatorIdentity{Descriptor: contexty.Descriptor{
 					ID: "contexty/estimate/characters", Revision: "contract"}},
 				Truncation: contexty.TruncationProfile{Descriptor: contexty.Descriptor{
@@ -145,7 +153,15 @@ func TestManifest_RoundTrip(t *testing.T) {
 				TokenLimit:      50,
 				EstimatedTokens: len("PRIVATE-PAYLOAD"),
 				Request:         contexty.EffectiveInputBudget(50),
-				ReportProfile:   nil,
+				Decision: &contexty.BudgetDecision{
+					HardLimit:     50,
+					TriggerTokens: 50,
+					TargetTokens:  50,
+					BeforeTokens:  15,
+					AfterTokens:   15,
+					TargetReached: true,
+				},
+				ReportProfile: nil,
 				Estimator: contexty.EstimatorIdentity{Descriptor: contexty.Descriptor{
 					ID: "contexty/estimate/characters", Revision: "contract"}},
 				Truncation: contexty.TruncationProfile{Descriptor: contexty.Descriptor{

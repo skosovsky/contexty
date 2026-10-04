@@ -115,17 +115,20 @@ type ManifestSegment struct {
 
 // ManifestBudget records the actual input limit, not a host's descriptor claim.
 type ManifestBudget struct {
-	Kind            ManifestOutputKind    `json:"kind"`
-	Target          string                `json:"target"`
-	TokenLimit      int                   `json:"token_limit"`
-	EstimatedTokens int                   `json:"estimated_tokens"`
-	Request         BudgetRequest         `json:"request"`
-	ReportProfile   *EstimateProfile      `json:"report_profile,omitempty"`
-	RollingSummary  *RollingSummaryPolicy `json:"rolling_summary,omitempty"`
-	Compaction      *CompactionProfile    `json:"compaction,omitempty"`
-	Truncation      TruncationProfile     `json:"truncation"`
-	Summarizer      *Descriptor           `json:"summarizer,omitempty"`
-	Estimator       EstimatorIdentity     `json:"estimator"`
+	Retention        RetentionPolicy       `json:"retention"`
+	CompactionPolicy *CompactionPolicy     `json:"compaction_policy,omitempty"`
+	Decision         *BudgetDecision       `json:"decision,omitempty"`
+	Kind             ManifestOutputKind    `json:"kind"`
+	Target           string                `json:"target"`
+	TokenLimit       int                   `json:"token_limit"`
+	EstimatedTokens  int                   `json:"estimated_tokens"`
+	Request          BudgetRequest         `json:"request"`
+	ReportProfile    *EstimateProfile      `json:"report_profile,omitempty"`
+	RollingSummary   *RollingSummaryPolicy `json:"rolling_summary,omitempty"`
+	Compaction       *CompactionProfile    `json:"compaction,omitempty"`
+	Truncation       TruncationProfile     `json:"truncation"`
+	Summarizer       *Descriptor           `json:"summarizer,omitempty"`
+	Estimator        EstimatorIdentity     `json:"estimator"`
 }
 
 type manifestChannelKey struct {
@@ -515,6 +518,11 @@ func (e *Engine) manifestBudgets(ctx context.Context, targets []CompileTarget) (
 			return nil, ErrInvalidManifest
 		}
 		budgets[i].EstimatedTokens = count
+		decisions, _ := ctx.Value(budgetDecisionsKey{}).(map[manifestChannelKey]BudgetDecision)
+		if decision, exists := decisions[manifestChannelKey{kind: budget.Kind, name: budget.Target}]; exists {
+			copyDecision := decision.clone()
+			budgets[i].Decision = &copyDecision
+		}
 	}
 	return budgets, nil
 }
@@ -525,17 +533,19 @@ func newManifestBudget(kind ManifestOutputKind, name string, request BudgetReque
 		return ManifestBudget{}, err
 	}
 	return ManifestBudget{
-		Kind:            kind,
-		Target:          name,
-		TokenLimit:      limit,
-		EstimatedTokens: 0,
-		Request:         request,
-		ReportProfile:   nil,
-		RollingSummary:  nil,
-		Compaction:      nil,
-		Truncation:      TruncationProfile{Descriptor: Descriptor{ID: "", Revision: ""}, DropHead: nil},
-		Summarizer:      nil,
-		Estimator:       EstimatorIdentity{Descriptor: Descriptor{ID: "", Revision: ""}, Fixed: nil, Character: nil},
+		Kind:             kind,
+		Target:           name,
+		TokenLimit:       limit,
+		EstimatedTokens:  0,
+		Request:          request,
+		Retention:        RetentionPolicy{MessageIDs: nil, ContentRefs: nil, Roles: nil},
+		CompactionPolicy: nil, Decision: nil,
+		ReportProfile:  nil,
+		RollingSummary: nil,
+		Compaction:     nil,
+		Truncation:     TruncationProfile{Descriptor: Descriptor{ID: "", Revision: ""}, DropHead: nil},
+		Summarizer:     nil,
+		Estimator:      EstimatorIdentity{Descriptor: Descriptor{ID: "", Revision: ""}, Fixed: nil, Character: nil},
 	}, nil
 }
 
@@ -550,6 +560,8 @@ func (p *BudgetPipeline) manifestBudget(kind ManifestOutputKind, name string) (M
 		return ManifestBudget{}, err
 	}
 	budget.RollingSummary = cloneRollingSummary(p.rolling)
+	budget.Retention = p.cfg.Retention.clone()
+	budget.CompactionPolicy = cloneCompactionPolicy(p.cfg.Compaction)
 	budget.Compaction = cloneCompactionProfile(p.compaction)
 	budget.Summarizer, err = p.summarizerDescriptor()
 	if err != nil {
@@ -717,6 +729,17 @@ func validateManifestBudgets(budgets []ManifestBudget, outputs []ManifestOutput)
 }
 
 func (b ManifestBudget) validateComponents() error {
+	if err := b.Retention.validate(); err != nil {
+		return err
+	}
+	if b.CompactionPolicy != nil {
+		if err := b.CompactionPolicy.Validate(); err != nil {
+			return err
+		}
+	}
+	if err := b.validateDecision(); err != nil {
+		return err
+	}
 	if err := b.Estimator.validate(); err != nil {
 		return err
 	}
@@ -733,6 +756,26 @@ func (b ManifestBudget) validateComponents() error {
 	}
 	if b.RollingSummary != nil {
 		return b.RollingSummary.Validate()
+	}
+	return nil
+}
+
+func (b ManifestBudget) validateDecision() error {
+	if b.Decision != nil {
+		if err := b.Decision.validate(); err != nil {
+			return err
+		}
+		if b.Decision.HardLimit > b.TokenLimit {
+			return ErrInvalidBudgetRequest
+		}
+		trigger, target := b.Decision.HardLimit, b.Decision.HardLimit
+		if b.CompactionPolicy != nil {
+			trigger = budgetPercent(b.Decision.HardLimit, b.CompactionPolicy.TriggerPercent)
+			target = budgetPercent(b.Decision.HardLimit, b.CompactionPolicy.TargetPercent)
+		}
+		if b.Decision.TriggerTokens != trigger || b.Decision.TargetTokens != target {
+			return ErrInvalidBudgetRequest
+		}
 	}
 	return nil
 }

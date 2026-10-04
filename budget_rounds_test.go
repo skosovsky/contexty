@@ -28,7 +28,8 @@ func TestBudget_PendingRounds(t *testing.T) {
 			pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20),
 				TruncateStrategy: strategy.port}, &contexty.FixedEstimator{TokensPerMessage: 5})
 			// Act.
-			out, err := pipeline.Apply(context.Background(), messages)
+			outBudget, err := pipeline.Apply(context.Background(), messages)
+			out := outBudget.Messages
 			// Assert: the suffix is exact, still pending and source remains intact.
 			require.NoError(t, err)
 			require.LessOrEqual(t, len(out)*5, 20)
@@ -47,7 +48,8 @@ func TestBudget_PendingSummarization(t *testing.T) {
 	// Arrange: summarizer never sees the pending block or the recent suffix.
 	messages := fixtureProtectedHistory()
 	calls := 0
-	summarizer := stubSummarizer(func(_ context.Context, inputs []contexty.Message) (contexty.Message, error) {
+	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
+		inputs := request.Messages
 		calls++
 		require.Len(t, inputs, 3)
 		for _, input := range inputs {
@@ -59,7 +61,8 @@ func TestBudget_PendingSummarization(t *testing.T) {
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(15),
 		Summarizer: summarizer}, &contexty.FixedEstimator{TokensPerMessage: 5})
 	// Act.
-	out, err := pipeline.Apply(context.Background(), messages)
+	outBudget, err := pipeline.Apply(context.Background(), messages)
+	out := outBudget.Messages
 	// Assert.
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
@@ -70,7 +73,8 @@ func TestBudget_PendingSummarization(t *testing.T) {
 	pipeline = contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(9),
 		Summarizer: summarizer}, &contexty.FixedEstimator{TokensPerMessage: 5})
 	// Act.
-	out, err = pipeline.Apply(context.Background(), messages)
+	outBudget, err = pipeline.Apply(context.Background(), messages)
+	out = outBudget.Messages
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrPendingExceedsBudget)
 	require.Nil(t, out)
@@ -93,7 +97,8 @@ func TestBudget_RoundFailuresBeforeCallbacks(t *testing.T) {
 			estimator,
 		)
 		// Act.
-		out, err := pipeline.Apply(context.Background(), messages)
+		outBudget, err := pipeline.Apply(context.Background(), messages)
+		out := outBudget.Messages
 		// Assert.
 		require.ErrorIs(t, err, contexty.ErrInvalidToolRound)
 		require.Nil(t, out)
@@ -120,7 +125,8 @@ func TestBudget_PendingCombinedCost(t *testing.T) {
 	}
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(15)}, estimator)
 	// Act.
-	out, err := pipeline.Apply(context.Background(), fixtureProtectedHistory())
+	outBudget, err := pipeline.Apply(context.Background(), fixtureProtectedHistory())
+	out := outBudget.Messages
 	// Assert: never successful overflow, and no silent pending deletion to fit.
 	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
 	require.Nil(t, out)
@@ -226,7 +232,8 @@ func TestBudget_PendingEstimatorMutation(t *testing.T) {
 	}}
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(2)}, estimator)
 	// Act.
-	out, err := pipeline.Apply(context.Background(), messages)
+	outBudget, err := pipeline.Apply(context.Background(), messages)
+	out := outBudget.Messages
 	// Assert: pending is protected even on the early within-budget path.
 	require.NoError(t, err)
 	require.Equal(t, messages, out)
