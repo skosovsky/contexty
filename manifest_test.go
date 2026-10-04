@@ -30,7 +30,7 @@ func TestLineage_RenderedOutput(t *testing.T) {
 		Targets: []contexty.CompileTarget{{Name: "xml", View: string(contexty.ViewLLMXML)}},
 	}
 	// Act.
-	result, err := contexty.NewEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
+	result, err := fixtureEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
 	// Assert: rendering has its own identity, source links, policy and branch.
 	require.NoError(t, err)
 	projection := result.Projections["xml"]
@@ -58,7 +58,7 @@ func TestLineage_RenderedOutput(t *testing.T) {
 	memory.ID = "memory"
 	request.Tools, request.Memory = []contexty.Message{tool}, []contexty.Message{memory}
 	request.Origins = append(request.Origins, fixtureRefForMessage(t, tool), fixtureRefForMessage(t, memory))
-	result, err = contexty.NewEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
+	result, err = fixtureEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
 	require.NoError(t, err)
 	for _, record := range result.Projections["xml"].Lineage.Records {
 		if record.Stage == "render" && len(record.Outputs) > 0 {
@@ -71,11 +71,11 @@ func TestLineage_RenderedOutput(t *testing.T) {
 	}
 	// Arrange / Act / Assert: empty rendering does not invent an origin.
 	request.System, request.History, request.Memory, request.Tools, request.Origins = nil, nil, nil, nil, nil
-	result, err = contexty.NewEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
+	result, err = fixtureEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
 	require.NoError(t, err)
 	require.Empty(t, result.Projections["xml"].Lineage.Unresolved)
 	delete(profile.Stages, "render")
-	_, err = contexty.NewEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
+	_, err = fixtureEngine(contexty.WithTraceProfile(profile)).CompileSnapshot(context.Background(), request)
 	require.ErrorIs(t, err, contexty.ErrInvalidDescriptor)
 }
 
@@ -92,7 +92,7 @@ func TestManifest_RoundTrip(t *testing.T) {
 		fixtureRecordProfile("small", "xml"),
 		fixtureBinding(contexty.RecordingViewRenderer, "xml", "", 0),
 	)
-	engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(profile), contexty.WithStateStore(store), contexty.WithConversationID("thread"),
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
@@ -192,9 +192,13 @@ func TestManifest_IdentityAndPolicies(t *testing.T) {
 		Targets: []contexty.CompileTarget{{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "main"}}}
 	profile := fixtureRecordProfile("main")
 	compile := func(record contexty.RecordProfile, limit int) (contexty.CompileResult, error) {
-		return contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()), contexty.WithCompileRecording(record),
-			contexty.WithBudgetPipeline(contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(limit)}, contexty.CharTokenEstimator{}),
+		return fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()), contexty.WithCompileRecording(record),
+			contexty.WithBudgetPipeline(
+				contexty.SegmentHistory,
+				contexty.NewBudgetPipeline(
+					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(limit)},
+					contexty.CharTokenEstimator{},
+				),
 			),
 		).
 			CompileSnapshot(context.Background(), request)
@@ -219,7 +223,7 @@ func TestManifest_IdentityAndPolicies(t *testing.T) {
 	// Arrange / Act / Assert: an undeclared target or untraced compile cannot record.
 	_, err = compile(fixtureRecordProfile(), 10)
 	require.ErrorIs(t, err, contexty.ErrInvalidDescriptor)
-	_, err = contexty.NewEngine(contexty.WithCompileRecording(profile)).CompileSnapshot(context.Background(), request)
+	_, err = fixtureEngine(contexty.WithCompileRecording(profile)).CompileSnapshot(context.Background(), request)
 	require.ErrorIs(t, err, contexty.ErrInvalidManifest)
 	_, err = contexty.DecodeManifest(json.RawMessage(`{"id":"forged"}`))
 	require.Error(t, err)
@@ -240,7 +244,7 @@ func TestManifest_CurrentTurnAndDependencies(t *testing.T) {
 	request := contexty.CompileRequest{CompilationID: "deps", TurnID: "current", CurrentTurn: &turn,
 		Artifacts: []contexty.ContextArtifact{artifact}}
 	calls := 0
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(profile),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingResolver, "", "", 0)),
@@ -282,7 +286,7 @@ func TestManifest_CurrentTurnAndDependencies(t *testing.T) {
 		Memory: result.Payload.Memory}
 	noResolveProfile := fixtureRecordProfile()
 	noResolveProfile.Pipeline.Revision = "without-resolution"
-	nextResult, nextErr := contexty.NewEngine(contexty.WithTraceProfile(profile),
+	nextResult, nextErr := fixtureEngine(contexty.WithTraceProfile(profile),
 		contexty.WithCompileRecording(noResolveProfile)).CompileSnapshot(context.Background(), next)
 	require.NoError(t, nextErr)
 	require.Empty(t, nextResult.Manifest.ResolvedDependencies)
@@ -291,7 +295,7 @@ func TestManifest_CurrentTurnAndDependencies(t *testing.T) {
 	// Arrange / Act / Assert: invalid recording configuration causes no resolution.
 	bad := fixtureRecordProfile()
 	bad.Model.Revision = ""
-	engine = contexty.NewEngine(contexty.WithTraceProfile(profile), contexty.WithCompileRecording(bad),
+	engine = fixtureEngine(contexty.WithTraceProfile(profile), contexty.WithCompileRecording(bad),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{Name: "selected", Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) (contexty.DeferredResult, error) {
 				calls++

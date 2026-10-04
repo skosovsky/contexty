@@ -269,3 +269,30 @@ still matches. Native compile capture must apply the host privacy/deletion polic
 exact accepted replay must independently check the caller's current configuration
 and required saved dependencies, as described above. The standalone evidence codec
 does not perform those native capture/acceptance/replay steps itself.
+
+## Materialization and issued output
+
+`ResourceResolver.Materialization` is mandatory and pins the same host policy
+identity configured on the engine with `WithArtifactMaterialization`. The host
+chooses provider role and typed parts explicitly; retrieved instructions do not
+become system messages through a library default. Resolution reports count that
+chosen message representation. Resource append uses the agreed materializer for
+the derived artifact; each output subsequently applies its own artifact caps.
+Sources and BYOT extensions remain bound through codecs and materialization
+lineage, without inferring trust or permissions from roles.
+
+The optional engine `OutputPolicy` runs once per final semantic output after
+ordinary transformations/current-turn insertion/patches and before final checks
+and text rendering. Its accepted messages can differ from canonical resource
+artifact payloads. Accepted replay restores these revisions without callbacks.
+Raw capture, checkpoint persistence and canonical artifact export require separate
+host decisions; a redacted prompt is not approval to disclose the backing body.
+
+`ExportSelection.ArtifactPayloadRefs` explicitly approves exact canonical artifact
+revisions from `ArtifactContentRef`, independently of `MessageIDs` selecting accepted
+prompt messages. This replaces export selection `ArtifactIDs`; projection
+`ArtifactIDs` remains participation evidence. Stale, malformed or duplicate payload
+refs fail export. A payload ref grants disclosure of the original canonical typed
+body, not the output-policy representation; select only messages when handing off
+the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
+canonical body.

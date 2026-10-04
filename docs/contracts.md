@@ -204,11 +204,12 @@ not inspect trust classes or grant permissions from content/roles.
 ## Isolated export
 
 Use `ExportProjection` with an explicit `ExportSelection`, not serialization of
-the whole local `CompileProjection`. Only IDs present in `projection.Messages`
-and the projection's participating `ArtifactIDs`/`Artifacts` are selectable.
-The export API accepts no external artifact collection. Source/InputSnapshot and
-rendered Text are never copied. Missing, empty and duplicate selected IDs fail
-with `ErrInvalidExportSelection`.
+the whole local `CompileProjection`. `MessageIDs` selects accepted revisions
+present in `projection.Messages`; `ArtifactPayloadRefs` selects exact canonical
+artifact revisions belonging to that projection. The export API accepts no external
+artifact collection. Source/InputSnapshot and rendered Text are never copied.
+Missing, empty, stale or duplicate selected refs/IDs fail with
+`ErrInvalidExportSelection`.
 
 Metadata defaults to no disclosure. `ExportMetadata` separately approves actor,
 annotations, source refs, origin, cache, provenance, extension payload types,
@@ -330,7 +331,7 @@ ProjectArtifact requires matching request.Extensions decoders before any policy
 or storage callback, checks lossless labels with cancellation, and preserves them
 unchanged on inline/offload. Materialization copies labels to prompt messages;
 normal trace label policy still handles all later transforms/conflicts/upgrades.
-Preview and system role never erase or upgrade labels automatically.
+Preview and the host-selected provider role never erase or upgrade labels automatically.
 Artifact append preserves both sides' opaque labels and the union of SourceRefs;
 it does not pick a trust winner. Later host label policy reconciles conflicts.
 
@@ -660,8 +661,8 @@ separate byte/rune counter. Local estimates do not replace final output validati
 Inline binary/media is represented by `MediaPart` with explicit MIME and copied
 bytes, not by a byte-count text placeholder or a tool control contract. Its codec
 uses a hex field and rejects malformed MIME, malformed hex and unknown fields.
-Artifact materialization preserves binary content and an optional separate text
-preview. Non-text/non-JSON MIME content is media even when supplied in a text or
+`ArtifactContentParts` exposes binary content and an optional separate text
+preview without a role; the explicit host materializer selects issued typed parts. Non-text/non-JSON MIME content is media even when supplied in a text or
 JSON field. Textual/JSON artifacts retain their explicit render preview.
 Common character estimators reject media rather than silently count zero.
 EstimateReporter classifies MediaPart as media_payload; strict unsupported cost
@@ -810,3 +811,34 @@ units, artifact revisions and estimate profiles are recorded per output.
 Accepted replay restores these outcomes without executing policies or resolvers.
 Compile is atomic across outputs. See [context projections](context-projections.md)
 for composition, admission, final coverage and persistence boundaries.
+
+## Explicit materialization and final output policy
+
+Artifact-bearing compile requires a pinned `ArtifactMaterializationPolicy`;
+there is no default role. Materialization decisions bind exact artifact/message
+refs. `ResourceResolver.Materialization` must match the engine's pinned identity.
+Resource append, blob preview and local estimates use the same chosen typed
+representation. Sources/extensions remain artifact-owned; provider role does not
+establish trust or execution authority.
+
+One optional `OutputPolicy` accepts/rejects the complete final semantic payload
+for each main/named/view output after all ordinary mutations, pending insertion
+and patches. Views render only accepted bytes. It preserves IDs/order/tool
+structure while permitting typed argument/result byte projection. Exact retention
+is checked before this boundary; accepted-ref mapping, round/identity checks and
+final recount follow it. No policy means no sanitization. Built-in redaction hooks
+are removed; generic transform hooks do not replace final output acceptance.
+
+Prompt-only projection preserves Source/raw persistence. Raw capture and canonical
+artifact payload disclosure remain separate host decisions; message export uses
+accepted revisions. Records pin policy identity and decisions, and replay does
+not execute the callback. See [output-policy contract](output-policy.md).
+
+`ExportSelection.ArtifactPayloadRefs` explicitly approves exact canonical artifact
+revisions from `ArtifactContentRef`, independently of `MessageIDs` selecting accepted
+prompt messages. This replaces export selection `ArtifactIDs`; projection
+`ArtifactIDs` remains participation evidence. Stale, malformed or duplicate payload
+refs fail export. A payload ref grants disclosure of the original canonical typed
+body, not the output-policy representation; select only messages when handing off
+the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
+canonical body.

@@ -68,18 +68,18 @@ func TestRecordingComponent_CanonicalOrder(t *testing.T) {
 	profile := fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingHook, "", "", 0),
 		fixtureBinding(contexty.RecordingHook, "", "", 1))
 	options := []contexty.EngineOption{contexty.WithTraceProfile(fixtureTraceProfile()),
-		contexty.WithTransformHooks(contexty.NewRedactionHook(), contexty.NewRedactionHook())}
+		contexty.WithTransformHooks(fixtureEmailTransform(), fixtureEmailTransform())}
 	request := contexty.CompileRequest{
 		CompilationID: "canonical-components",
 		History:       []contexty.Message{fixtureRollingText("m", "input")},
 	}
 	// Act.
 	firstOptions := append(slices.Clone(options), contexty.WithCompileRecording(profile))
-	first, err := contexty.NewEngine(firstOptions...).CompileSnapshot(context.Background(), request)
+	first, err := fixtureEngine(firstOptions...).CompileSnapshot(context.Background(), request)
 	require.NoError(t, err)
 	slices.Reverse(profile.Components)
 	secondOptions := append(slices.Clone(options), contexty.WithCompileRecording(profile))
-	second, err := contexty.NewEngine(secondOptions...).CompileSnapshot(context.Background(), request)
+	second, err := fixtureEngine(secondOptions...).CompileSnapshot(context.Background(), request)
 	// Assert: canonical identity and graph are independent of binding list order.
 	require.NoError(t, err)
 	require.Equal(t, first.Manifest.Digest, second.Manifest.Digest)
@@ -113,12 +113,12 @@ func TestRecordingComponent_Failures(t *testing.T) {
 			}
 			profile := fixtureRecordProfile()
 			profile.Components = slices.Clone(tc.bindings)
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithTraceProfile(fixtureTraceProfile()),
 				contexty.WithCompileRecording(profile),
 				contexty.WithStateStore(store), contexty.WithConversationID("thread"),
 				contexty.WithTransformHooks(
-					contexty.RedactionHook{Replacer: func(text string) string { calls++; return text }},
+					fixtureTextTransform{Replacer: func(text string) string { calls++; return text }},
 				),
 			)
 			// Act.

@@ -44,7 +44,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, budget(mainLimit)))
+	engine := contexty.NewEngine(
+		contexty.WithArtifactMaterialization(*hostMaterialization()),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, budget(mainLimit)),
+	)
 	//nolint:exhaustruct_v5 // Explicit composition; unrelated compile features remain disabled.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		TurnID: "turn-1",

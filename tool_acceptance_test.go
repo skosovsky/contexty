@@ -38,7 +38,7 @@ func TestAcceptance_Tool_PartsEndToEnd(t *testing.T) {
 		t,
 		updateSegment(ctx, store, "tools", s0.Version(), contexty.SegmentHistory, msgs),
 	)
-	engine := contexty.NewEngine(contexty.WithConversationID("tools"), contexty.WithStateStore(store))
+	engine := fixtureEngine(contexty.WithConversationID("tools"), contexty.WithStateStore(store))
 	// Act.
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	// Assert.

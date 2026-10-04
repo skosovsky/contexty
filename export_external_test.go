@@ -23,7 +23,7 @@ func TestExport_PrivateEnvelope(t *testing.T) {
 	artifact.OwnerRef = &contexty.SourceRef{URI: "PRIVATE-OWNER"}
 	artifact.BoundTurnID = "PRIVATE-TURN"
 	artifact.SourceRefs = []contexty.SourceRef{{URI: "PRIVATE-ARTIFACT-HANDLE"}}
-	result, err := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile())).CompileSnapshot(
+	result, err := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile())).CompileSnapshot(
 		context.Background(), contexty.CompileRequest{
 			CompilationID: "PRIVATE-COMPILE-ID",
 			System:        []contexty.Message{private},
@@ -34,8 +34,11 @@ func TestExport_PrivateEnvelope(t *testing.T) {
 			},
 		})
 	require.NoError(t, err)
-	selection := contexty.ExportSelection{MessageIDs: []string{"public"}, ArtifactIDs: []string{artifact.ID},
-		Metadata: contexty.ExportMetadata{Lineage: true}}
+	selection := contexty.ExportSelection{
+		MessageIDs:          []string{"public"},
+		ArtifactPayloadRefs: []contexty.ContentRef{fixtureArtifactContentRef(t, artifact)},
+		Metadata:            contexty.ExportMetadata{Lineage: true},
+	}
 	projection := result.Projections["consumer"]
 	// Act: serialize the entire envelope, not just visible text.
 	envelope, err := contexty.ExportProjection(projection,
@@ -142,7 +145,9 @@ func TestExport_SelectionErrors(t *testing.T) {
 	// Act / Assert: artifact permission cannot resolve a nonexistent object.
 	_, err := contexty.ExportProjection(
 		projection,
-		contexty.ExportSelection{ArtifactIDs: []string{"missing"}},
+		contexty.ExportSelection{
+			ArtifactPayloadRefs: []contexty.ContentRef{{ID: "missing", Digest: fixtureRefForMessage(t, public).Digest}},
+		},
 		contexty.DefaultJSONSerializer(),
 	)
 	require.ErrorIs(t, err, contexty.ErrInvalidExportSelection)
@@ -155,7 +160,7 @@ func TestExport_RejectsForeignArtifact(t *testing.T) {
 	// Act.
 	envelope, err := contexty.ExportProjection(
 		projection,
-		contexty.ExportSelection{ArtifactIDs: []string{artifact.ID}},
+		contexty.ExportSelection{ArtifactPayloadRefs: []contexty.ContentRef{fixtureArtifactContentRef(t, artifact)}},
 		contexty.DefaultJSONSerializer(),
 	)
 	// Assert.

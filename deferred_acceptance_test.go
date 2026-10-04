@@ -21,7 +21,7 @@ func TestAcceptance_Deferred_NotPersisted(t *testing.T) {
 			contexty.TextMessage(contexty.RoleSystem, "sys"),
 		}),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("t"),
 		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
@@ -48,10 +48,10 @@ func TestAcceptance_Deferred_RedactionThroughCompile(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStateStore()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("t"),
 		contexty.WithStateStore(store),
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "mem",
 			Segment: contexty.SegmentMemory,
@@ -74,7 +74,7 @@ func TestAcceptance_Deferred_RedactionThroughCompile(t *testing.T) {
 func TestAcceptance_Deferred_DuplicateMessageID(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "dup-deferred",
 			Segment: contexty.SegmentHistory,

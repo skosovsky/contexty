@@ -43,7 +43,7 @@ func TestAcceptance_SelectionToolsRoundIsAtomic(t *testing.T) {
 		},
 	}
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(t.Context(), request)
+	result, err := fixtureEngine().CompileSnapshot(t.Context(), request)
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrSelectionRound)
 	require.Zero(t, result)
@@ -98,7 +98,7 @@ func TestAcceptance_SelectionRequiredRefsSurviveTransformationsExactly(t *testin
 				},
 			}}
 			// Act.
-			result, err := contexty.NewEngine().CompileSnapshot(t.Context(), request)
+			result, err := fixtureEngine().CompileSnapshot(t.Context(), request)
 			// Assert.
 			require.ErrorIs(t, err, contexty.ErrMandatorySelection)
 			require.Zero(t, result)
@@ -122,7 +122,7 @@ func TestAcceptance_SelectionCurrentTurnAllowsExplicitPromptReplacement(t *testi
 		Targets: []contexty.CompileTarget{{Name: "consumer", IncludeCurrentTurn: true, Selection: &policy}},
 	}
 	// Act.
-	result, err := contexty.NewEngine(contexty.WithSelectionPolicy(policy)).CompileSnapshot(t.Context(), request)
+	result, err := fixtureEngine(contexty.WithSelectionPolicy(policy)).CompileSnapshot(t.Context(), request)
 	// Assert.
 	require.NoError(t, err)
 	require.Equal(t, "REDACTED", result.Payload.History[0].TextContent())
@@ -139,7 +139,10 @@ func TestAcceptance_SelectionMandatoryOverflowIsAtomic(t *testing.T) {
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1)},
 		&contexty.FixedEstimator{TokensPerMessage: 2})
 	// Act.
-	result, err := contexty.NewEngine(contexty.WithSelectionPolicy(policy), contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).
+	result, err := fixtureEngine(
+		contexty.WithSelectionPolicy(policy),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+	).
 		CompileSnapshot(
 			t.Context(), contexty.CompileRequest{History: []contexty.Message{message}})
 	// Assert.
@@ -167,7 +170,10 @@ func TestAcceptance_SelectionPrioritySharesCapacityAcrossHistoryAndArtifacts(t *
 	request := contexty.CompileRequest{History: []contexty.Message{fixtureRollingText("history", "earlier")},
 		Artifacts: []contexty.ContextArtifact{artifact.ContextArtifact}}
 	// Act.
-	result, err := contexty.NewEngine(contexty.WithSelectionPolicy(policy), contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).
+	result, err := fixtureEngine(
+		contexty.WithSelectionPolicy(policy),
+		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+	).
 		CompileSnapshot(t.Context(), request)
 	// Assert.
 	require.NoError(t, err)
@@ -209,7 +215,7 @@ func TestAcceptance_SelectionOutputsPinDifferentModelProfiles(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
 		consumerReporter,
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, mainBudget),
 		contexty.WithTraceProfile(
 			fixtureTraceProfile(),
@@ -247,7 +253,7 @@ func TestAcceptance_SelectionSharedResourceResolvesOnce(t *testing.T) {
 	t.Parallel()
 	// Arrange: two independent consumers share one authorized resource resolution.
 	block, reads := fixtureResourceBlock(t)
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	request := contexty.CompileRequest{Targets: []contexty.CompileTarget{
 		{Name: "one", IncludeArtifacts: true}, {Name: "two", IncludeArtifacts: true},
 	}}
@@ -289,9 +295,9 @@ func fixtureSelectionFinalRoundRequest(target bool, removal string) (*contexty.E
 		}
 	}
 	request := contexty.CompileRequest{Tools: fixtureSelectionToolRound()}
-	engine := contexty.NewEngine(contexty.WithSegmentFormatter(contexty.SegmentTools, formatter))
+	engine := fixtureEngine(contexty.WithSegmentFormatter(contexty.SegmentTools, formatter))
 	if target {
-		engine = contexty.NewEngine()
+		engine = fixtureEngine()
 		request.Targets = []contexty.CompileTarget{
 			{Name: "consumer", Segments: []contexty.SegmentName{contexty.SegmentTools}, Formatter: formatter},
 		}
@@ -340,7 +346,7 @@ func TestAcceptance_SelectionPendingRoundCannotLoseSemanticParts(t *testing.T) {
 				{Name: "consumer", IncludeCurrentTurn: true, Formatter: formatter},
 			}}
 			// Act.
-			result, err := contexty.NewEngine().CompileSnapshot(t.Context(), request)
+			result, err := fixtureEngine().CompileSnapshot(t.Context(), request)
 			// Assert: stable IDs cannot disguise loss of pending tool semantics.
 			require.Error(t, err)
 			require.Zero(t, result)
@@ -362,7 +368,7 @@ func TestAcceptance_SelectionPendingInFlightCallCannotLoseToolSemantics(t *testi
 		},
 	}}
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(t.Context(), request)
+	result, err := fixtureEngine().CompileSnapshot(t.Context(), request)
 	// Assert: pending tool semantics remain mandatory even when the message ID survives.
 	require.Error(t, err)
 	require.Zero(t, result)
@@ -380,7 +386,7 @@ func TestAcceptance_SelectionConsumerArtifactTurnLifecycle(t *testing.T) {
 				{Name: "one", IncludeArtifacts: true}, {Name: "two", IncludeArtifacts: true},
 			}}
 			// Act.
-			result, err := contexty.NewEngine(contexty.WithDeferredBlocks(block)).CompileSnapshot(t.Context(), request)
+			result, err := fixtureEngine(contexty.WithDeferredBlocks(block)).CompileSnapshot(t.Context(), request)
 			// Assert: every consumer obeys the same preparation lifecycle without reading again.
 			require.NoError(t, err)
 			require.Equal(t, 1, *reads)
@@ -410,7 +416,7 @@ func TestAcceptance_SelectionConsumersCannotBypassResourceAuthorization(t *testi
 		}}, body)
 	require.NoError(t, err)
 	resolver.Reader = reader
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
 	compileRequest := contexty.CompileRequest{Targets: []contexty.CompileTarget{
 		{Name: "one", IncludeArtifacts: true}, {Name: "two", IncludeArtifacts: true},
 	}}

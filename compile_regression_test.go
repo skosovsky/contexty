@@ -38,7 +38,7 @@ func TestCompile_CallbackCancellationDominance(t *testing.T) {
 			message := contexty.TextMessage(contexty.RoleUser, "input")
 			message.ID = "input"
 			// Act.
-			_, err := contexty.NewEngine(options...).
+			_, err := fixtureEngine(options...).
 				CompileSnapshot(ctx, contexty.CompileRequest{CompilationID: "audit-cancel", History: []contexty.Message{message}})
 			// Assert.
 			if !errors.Is(err, context.Canceled) {

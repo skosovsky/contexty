@@ -7,9 +7,9 @@ import (
 // Allocation guardrails for hot paths. Thresholds include headroom
 // for CI variance; tighten when optimizing benchmarks.
 const (
-	maxAllocsRender    = 400
-	maxAllocsRedaction = 750
-	maxAllocsTruncate  = 550
+	maxAllocsRender        = 400
+	maxAllocsHostTransform = 750
+	maxAllocsTruncate      = 550
 )
 
 func TestBenchGuardrails_Render(t *testing.T) {
@@ -21,12 +21,12 @@ func TestBenchGuardrails_Render(t *testing.T) {
 	}
 }
 
-func TestBenchGuardrails_Redaction(t *testing.T) {
+func TestBenchGuardrails_HostTextTransform(t *testing.T) {
 	// Act.
-	result := testing.Benchmark(BenchmarkRedactionHook)
+	result := testing.Benchmark(BenchmarkHostTextTransform)
 	// Assert.
-	if result.AllocsPerOp() > maxAllocsRedaction {
-		t.Fatalf("redaction allocs/op %d exceeds guardrail %d", result.AllocsPerOp(), maxAllocsRedaction)
+	if result.AllocsPerOp() > maxAllocsHostTransform {
+		t.Fatalf("host transform allocs/op %d exceeds guardrail %d", result.AllocsPerOp(), maxAllocsHostTransform)
 	}
 }
 

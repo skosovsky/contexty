@@ -29,7 +29,7 @@ func TestTextReplacement_Identity(t *testing.T) {
 		),
 	}}
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(context.Background(), req)
+	result, err := fixtureEngine().CompileSnapshot(context.Background(), req)
 	// Assert: ordered replacement, metadata and persistence remain independent.
 	require.NoError(t, err)
 	require.Equal(t, "final", result.Payload.History[0].TextContent())
@@ -60,7 +60,7 @@ func TestTextReplacement_Failures(t *testing.T) {
 			req := contexty.CompileRequest{History: []contexty.Message{input},
 				Options: []contexty.CompileOption{contexty.WithTextReplacement(scenario.value)}}
 			// Act.
-			result, err := contexty.NewEngine().CompileSnapshot(context.Background(), req)
+			result, err := fixtureEngine().CompileSnapshot(context.Background(), req)
 			// Assert: exact replacement never falls back to another message.
 			require.ErrorIs(t, err, scenario.want)
 			require.Zero(t, result)
@@ -76,7 +76,7 @@ func TestTextReplacement_BudgetRemoval(t *testing.T) {
 		message.ID = id
 		history = append(history, message)
 	}
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(25)},
 			&contexty.FixedEstimator{TokensPerMessage: 10})))
 	// Act.

@@ -30,7 +30,7 @@ func TestResourceArtifact_Lifecycle(t *testing.T) {
 			block, calls := fixtureResourceBlockWithProjection(t, func(artifact *contexty.ContextArtifact) {
 				artifact.Lifecycle, artifact.BoundTurnID, artifact.Persistence = scenario.lifecycle, scenario.boundTurn, scenario.persistence
 			})
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 			// Act: compile then encode the exact admitted artifact set as a checkpoint.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{TurnID: "turn"})
 			require.NoError(t, err)
@@ -58,7 +58,7 @@ func TestResourceArtifact_AdmissionBudget(t *testing.T) {
 			block, calls := fixtureResourceBlockWithProjection(t, func(artifact *contexty.ContextArtifact) {
 				artifact.Budget = &contexty.ArtifactBudgetPolicy{TokenLimit: limit}
 			})
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithDeferredBlocks(block),
 				contexty.WithTraceProfile(fixtureTraceProfile()),
 				contexty.WithCompileRecording(
@@ -89,7 +89,7 @@ func TestResourceArtifact_AdmissionBudget(t *testing.T) {
 func TestResourceArtifact_IdentityAndOperationIsolation(t *testing.T) {
 	// Arrange: selection is reusable; explicit same-ID replacement owns a new revision.
 	block, calls := fixtureResourceBlock(t)
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	input := contexty.NewMemoryBlock("projected", contexty.TextPayload("existing")).ContextArtifact
 	// Act: replace an input revision, then run two independent compiles.
 	replaced, err := engine.CompileSnapshot(

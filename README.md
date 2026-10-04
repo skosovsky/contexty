@@ -89,7 +89,7 @@ classifier := result.Projections["classifier_history"]
 
 `CompileResult.Source` is an immutable freeze of normalized input messages (before pipeline mutations). `CompileResult.NormalizedSnapshot` and `CompileResult.Writeback` expose durable ID normalization and checkpoint writeback intent. `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceProjection` for checkpoint persistence instead of parsing `Transformations`.
 
-**Pipeline order:** normalize IDs/current turn → freeze Source → historical argument projection → authorized deferred resolution/merge → freeze shared prepared candidates → independently for main and each target: scope/selection/admission → pre-budget patches → hooks/role projection/segment formatters → history budgeting with protected current turn → post-budget patches → final rendering/recount. Compile options and shared resolvers run once; output selection runs once per output.
+**Pipeline order:** normalize IDs/current turn → freeze Source → historical argument projection → authorized deferred resolution/merge → freeze shared prepared candidates → independently for main and each target: scope/selection/admission → pre-budget patches → hooks/role projection/segment formatters → history budgeting with protected current turn → post-budget patches → final OutputPolicy → accepted-content checks/recount → rendering. Compile options and shared resolvers run once; output selection runs once per output.
 
 The current clear-break contract is summarized below and in the [migration guide](docs/migration.md).
 
@@ -113,7 +113,6 @@ The current clear-break contract is summarized below and in the [migration guide
 
 ```go
 engine := contexty.NewEngine(
-    contexty.WithTransformHooks(contexty.NewRedactionHook()),
     contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 )
 result, _ := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -365,18 +364,37 @@ engine := contexty.NewEngine(
 )
 ```
 
-## Redaction hooks
+## Final output policy
+
+Configure one `OutputPolicy` to validate or project every final semantic output.
+It receives owned typed payload segments after ordinary hooks, formatting, current
+turn insertion and post-budget patches. Main, named targets and view targets each
+invoke it once; text views render the accepted content. Host code owns any redaction
+of text, tool JSON/results, media or extension values. No configured policy implies
+no sanitization.
 
 ```go
-engine := contexty.NewEngine(
-    contexty.WithStateStore(store),
-    contexty.WithConversationID("chat-1"),
-    contexty.WithTransformHooks(contexty.NewRedactionHook()),
-)
-result, _ := engine.Compile(ctx, contexty.CompileRequest{})
+engine := contexty.NewEngine(contexty.WithOutputPolicy(contexty.OutputPolicy{
+    Identity: contexty.Descriptor{ID: "host/output-validation", Revision: "1"},
+    Project: func(ctx context.Context, input contexty.OutputPolicyInput) (contexty.AbstractPayload, error) {
+        // Validate/project every typed channel here using the host's domain rules.
+        return input.Payload, ctx.Err()
+    },
+}))
 ```
 
-Hooks run after deferred resolution and before segment formatters and budgeting. For ad-hoc transforms on a snapshot, use `TransformPipeline`.
+The callback may reject or transform content; it cannot insert, remove or reorder
+messages or change tool topology/IDs. Tool argument/result bytes may be transformed.
+Exact retention is checked before the boundary, then accepted refs and final budget
+are checked afterward. Prompt-only changes preserve Source and configured raw
+current-turn persistence. Saved raw capture requires its own host decision.
+`ExportSelection.MessageIDs` exports accepted prompt messages;
+`ArtifactPayloadRefs` explicitly discloses exact canonical artifact bodies, which
+may contain bytes absent from the accepted prompt.
+`NewRedactionHook` and `RedactionHook` are removed. Generic transform hooks remain
+ordinary pipeline stages; they do not replace this final boundary.
+
+See [output and materialization contracts](docs/output-policy.md).
 
 ## Budget pipeline and truncation
 
@@ -524,6 +542,29 @@ When using a custom `Summarizer`, do not reuse a truncated message ID for the su
 **Canonical tool-turn layout** for atomic truncation: `RoleAssistant` with `ToolCallPart`(s), then `RoleTool` message(s) with matching `ToolResultPart.ToolCallID`. Use `ToolRoundFromMessages` / `ToolRound.Validate` for first-class validation. `ToolTurnUsesCanonicalLayout` remains a lightweight layout predicate.
 
 ## Context Artifacts and Deltas
+
+Artifact-bearing compilation requires `WithArtifactMaterialization`. There is no
+default provider role, including no implicit system role for retrieved text.
+The host returns an explicit role and typed parts; sources and extensions remain
+bound to the artifact. Message-only compilation needs no artifact policy.
+
+```go
+materialization := contexty.ArtifactMaterializationPolicy{
+    Identity: contexty.Descriptor{ID: "host/retrieval-data", Revision: "1"},
+    Materialize: func(ctx context.Context, artifact contexty.ContextArtifact) (contexty.ArtifactRepresentation, error) {
+        parts, err := contexty.ArtifactContentParts(artifact)
+        if err != nil { return contexty.ArtifactRepresentation{}, err }
+        return contexty.ArtifactRepresentation{Role: contexty.RoleUser, Parts: parts}, ctx.Err()
+    },
+}
+engine := contexty.NewEngine(contexty.WithArtifactMaterialization(materialization))
+```
+
+This is an explicit host representation decision, not a trust classification or
+tool authorization. A `ResourceResolver.Materialization` must use the same pinned
+policy identity as the engine; resource append, blob previews and artifact counts
+use that agreed typed representation.
+
 
 Use artifacts for retrieval and memory lifecycle instead of host-side run metadata:
 
@@ -804,3 +845,12 @@ are lossless and retain transient artifacts; they use `contexty/conversation/1`
 independently of OCC revisions. Redis checkpoint keys use a new encoded namespace
 with conversation-specific Cluster hash tags. See [checkpoint contract](docs/checkpoint-store.md)
 and [host reconciliation example](examples/resilient_store) for unknown network outcomes.
+
+`ExportSelection.ArtifactPayloadRefs` explicitly approves exact canonical artifact
+revisions from `ArtifactContentRef`, independently of `MessageIDs` selecting accepted
+prompt messages. This replaces export selection `ArtifactIDs`; projection
+`ArtifactIDs` remains participation evidence. Stale, malformed or duplicate payload
+refs fail export. A payload ref grants disclosure of the original canonical typed
+body, not the output-policy representation; select only messages when handing off
+the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
+canonical body.

@@ -41,7 +41,7 @@ func TestArtifact_CommonBudget(t *testing.T) {
 					return len(messages) * tc.cost, nil
 				},
 			}
-			engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
 			// Act.
 			result, err := engine.CompileSnapshot(
@@ -82,7 +82,7 @@ func TestArtifact_EstimateFailure(t *testing.T) {
 				}
 				return 0, sentinel
 			}}
-			engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
 			artifact := contexty.NewMemoryBlock("a", contexty.TextPayload("body")).ContextArtifact.
 				WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 10})
@@ -115,7 +115,7 @@ func TestArtifact_ExclusionEvidence(t *testing.T) {
 	}}
 	artifact := contexty.NewMemoryBlock("a", contexty.TextPayload("x")).ContextArtifact.
 		WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 2})
-	engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(

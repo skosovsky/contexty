@@ -19,7 +19,7 @@ func TestResourceAppend_FinalMainBudget(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(7)},
 		contexty.CharTokenEstimator{},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
@@ -58,7 +58,7 @@ func TestResourceAppend_TargetFinalBudget(t *testing.T) {
 			},
 		},
 	}}
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	// Act / Assert: post-format target overflow fails atomically.
 	compiled, err := engine.CompileSnapshot(context.Background(), request)
 	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
@@ -108,7 +108,7 @@ func TestResourceAppend_CheckpointLifecycle(t *testing.T) {
 				}
 			})
 			old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 			// Act: persist the final artifact set rather than introduced ordinary messages.
 			compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 				TurnID: "turn", Artifacts: []contexty.ContextArtifact{old},

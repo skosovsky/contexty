@@ -1,6 +1,7 @@
 package contexty
 
 import (
+	"context"
 	"mime"
 	"slices"
 	"strings"
@@ -320,30 +321,13 @@ func artifactShouldPersist(artifact ContextArtifact) bool {
 	}
 }
 
-func artifactMessage(artifact ContextArtifact) (Message, error) {
-	if err := validateArtifactBlob(artifact); err != nil {
-		return Message{}, err
-	}
-	parts, err := artifactParts(artifact.Payload)
-	if err != nil {
-		return Message{}, err
-	}
-	return Message{
-		ID:         "artifact:" + artifact.ID,
-		Role:       RoleSystem,
-		Parts:      parts,
-		SourceRefs: cloneSourceRefs(artifact.SourceRefs),
-		Extensions: cloneExtensions(artifact.Extensions),
-	}, nil
-}
-
-func artifactMessages(artifacts []ContextArtifact) ([]Message, error) {
+func artifactMessages(ctx context.Context, artifacts []ContextArtifact) ([]Message, error) {
 	if len(artifacts) == 0 {
 		return nil, nil
 	}
 	out := make([]Message, 0, len(artifacts))
 	for _, artifact := range artifacts {
-		message, err := artifactMessage(artifact)
+		message, err := artifactMessage(ctx, artifact)
 		if err != nil {
 			return nil, err
 		}

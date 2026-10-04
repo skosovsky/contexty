@@ -71,7 +71,7 @@ func TestObserver_EstimatorOwnership(t *testing.T) {
 	}}
 	_, request := fixtureFinalCancellationRequest(false, counter)
 	observer := &contexty.RecordingObserver{}
-	engine := contexty.NewEngine(contexty.WithObserver(observer), contexty.WithBudgetPipeline(contexty.SegmentHistory,
+	engine := fixtureEngine(contexty.WithObserver(observer), contexty.WithBudgetPipeline(contexty.SegmentHistory,
 		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), request)

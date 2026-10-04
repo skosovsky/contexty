@@ -36,7 +36,7 @@ func fixtureAdapterResourceBlock(
 }
 
 func fixtureDedupRecordingEngine(block contexty.DeferredBlock) *contexty.Engine {
-	return contexty.NewEngine(
+	return fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
@@ -214,7 +214,7 @@ func fixtureIndependentResourceRecord(
 			},
 		),
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(trace),
 		contexty.WithDeferredBlocks(block),
 		contexty.WithCompileRecording(fixtureBindings(
@@ -268,7 +268,7 @@ func fixtureIndependentResourceRequest(t *testing.T, appendInput bool) contexty.
 func fixtureResourceRecordingEngine(t *testing.T, policy contexty.RecordContentPolicy) (*contexty.Engine, *int) {
 	t.Helper()
 	block, calls := fixtureResourceBlock(t)
-	return contexty.NewEngine(
+	return fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
@@ -312,6 +312,7 @@ func fixtureResourceFixture(
 	)
 	require.NoError(t, err)
 	resolver := contexty.ResourceResolver{
+		Materialization:    fixtureMaterialization(),
 		ReaderIdentity:     contexty.Descriptor{ID: "host-reader", Revision: "pinned"},
 		ProjectionIdentity: contexty.Descriptor{ID: "host-preview", Revision: "pinned"},
 		Reader: fixtureResourceReader(

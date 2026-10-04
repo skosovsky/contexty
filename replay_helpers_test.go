@@ -72,7 +72,7 @@ func fixtureReplayBlobFixture(t *testing.T) (*fixtureReplayBlobBackend, contexty
 	}
 	prepared, err := offloader.ProjectArtifact(context.Background(), fixtureBlobArtifactRequest())
 	require.NoError(t, err)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(
@@ -111,7 +111,7 @@ func fixtureHistoricalBlobRecord(
 		call.ArgumentsBlob = &blob
 		request.History[0].Parts[index] = call
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("copy")),
 		contexty.WithCompileContentCapture(
@@ -150,7 +150,7 @@ func fixtureSimpleRecord(t *testing.T) (contexty.SavedCompileRecord, contexty.Re
 	t.Helper()
 	message := contexty.TextMessage(contexty.RoleUser, "safe")
 	message.ID = "m"
-	result, err := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	result, err := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent)),

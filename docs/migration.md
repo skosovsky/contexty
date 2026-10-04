@@ -306,3 +306,35 @@ allowlist addresses only the projection's participating artifacts. Do not send
 Choose one output for persistence and apply host persistence policy explicitly;
 there is no automatic union of summaries or checkpoint projections. See
 [the complete contract](context-projections.md).
+
+## Explicit materialization and final output acceptance
+
+Configure `WithArtifactMaterialization(ArtifactMaterializationPolicy{...})` for
+artifact-bearing compile. Return an explicit provider role and typed parts; the
+old implicit `RoleSystem` materialization is removed. `ArtifactContentParts`
+provides role-free typed payloads. Message-only compile requires no artifact policy.
+Configure `ResourceResolver.Materialization` with the same pinned identity as the
+engine; materialization identity participates in resource/replay configuration.
+
+Replace `NewRedactionHook`/`RedactionHook` with a host-owned `OutputPolicy` when a
+complete final prompt projection or validation is required. Generic hooks remain
+ordinary stages. `WithOutputPolicy` applies once per main/named/view output after
+all ordinary mutations and pending/post-budget patches, before final accepted-ref
+checks, recount and rendering. Preserve IDs, segment order and tool topology;
+argument/result bytes may change. No opt-in means no sanitization guarantee.
+
+Exact required revisions are validated before the boundary; the explicitly
+accepted projection supplies their final ref mapping. Prompt changes do not change
+Source, raw current-turn persistence or private capture policies. Message export
+returns accepted revisions. Canonical artifact payload disclosure is independent
+of prompt sanitization; do not assume its bytes were redacted by OutputPolicy.
+See [the full output-policy contract](output-policy.md).
+
+`ExportSelection.ArtifactPayloadRefs` explicitly approves exact canonical artifact
+revisions from `ArtifactContentRef`, independently of `MessageIDs` selecting accepted
+prompt messages. This replaces export selection `ArtifactIDs`; projection
+`ArtifactIDs` remains participation evidence. Stale, malformed or duplicate payload
+refs fail export. A payload ref grants disclosure of the original canonical typed
+body, not the output-policy representation; select only messages when handing off
+the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
+canonical body.

@@ -33,9 +33,9 @@ func TestTrace_Configuration(t *testing.T) {
 	options := []contexty.EngineOption{contexty.WithCompileRecording(profile),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(func(context.Context, contexty.CaptureCandidate) (bool, error) { return true, nil }))}
-	first := contexty.NewEngine(append(slices.Clone(options), contexty.WithTraceProfile(trace))...)
+	first := fixtureEngine(append(slices.Clone(options), contexty.WithTraceProfile(trace))...)
 	slices.Reverse(trace.Codecs)
-	second := contexty.NewEngine(append(slices.Clone(options), contexty.WithTraceProfile(trace))...)
+	second := fixtureEngine(append(slices.Clone(options), contexty.WithTraceProfile(trace))...)
 	trace.Codecs[0].Descriptor.Revision = "mutated"
 	trace.Labels.RequiredTypes[0] = "mutated"
 	registry.Register("late", func(data []byte) (contexty.Extension, error) {
@@ -126,7 +126,7 @@ func TestCodec_BindingFailures(t *testing.T) {
 				ConversationStateStore: contexty.NewMemoryConversationStateStore(),
 				reads:                  &reads,
 			}
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithTraceProfile(trace),
 				contexty.WithCompileRecording(fixtureRecordProfile()),
 				contexty.WithStateStore(store),

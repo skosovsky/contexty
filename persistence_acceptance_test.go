@@ -21,7 +21,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncatedByDropHead(t *testing.T)
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 15},
 	)
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -54,8 +54,8 @@ func TestAcceptance_PersistenceProjection_KeepsOriginalOnRedaction(t *testing.T)
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -77,7 +77,7 @@ func TestAcceptance_PersistenceProjection_ExcludesPending(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
@@ -103,7 +103,7 @@ func TestAcceptance_PersistenceProjection_ReplacedByFormatter(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(context.Context, []contexty.Message) ([]contexty.Message, error) {
@@ -150,7 +150,7 @@ func TestAcceptance_PersistenceProjection_IncludesSummary(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -184,7 +184,7 @@ func TestAcceptance_PersistenceProjection_TextReplacement(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
@@ -210,7 +210,7 @@ func TestAcceptance_PersistenceProjection_MemorySegment(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "facts",
 			Segment: contexty.SegmentMemory,
@@ -243,8 +243,8 @@ func TestAcceptance_PersistenceProjection_DeferredPlusHook(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "contact",
 			Segment: contexty.SegmentMemory,
@@ -273,7 +273,7 @@ func TestAcceptance_PersistenceProjection_DeferredPlusPreBudgetPatch(t *testing.
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "hint",
 			Segment: contexty.SegmentSystem,
@@ -321,7 +321,7 @@ func TestAcceptance_PersistenceProjection_SummaryPlusTextReplacement(t *testing.
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -376,7 +376,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncated(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -416,7 +416,7 @@ func TestAcceptance_PersistenceProjection_InPlaceFormatter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
@@ -451,7 +451,7 @@ func TestAcceptance_PersistenceProjection_ReplacedByHook(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTransformHooks(replaceHistoryHook{}),
 	)
 	// Act.
@@ -475,7 +475,7 @@ func TestAcceptance_PersistenceProjection_PreBudgetPatchNonHistory(t *testing.T)
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Memory: []contexty.Message{{
@@ -517,7 +517,7 @@ func TestAcceptance_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -569,7 +569,7 @@ func TestAcceptance_PersistenceProjection_OversizedSummaryRejected(t *testing.T)
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -597,7 +597,7 @@ func TestAcceptance_PersistenceProjection_DeferredPlusInPlaceFormatter(t *testin
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
@@ -637,7 +637,7 @@ func TestAcceptance_PersistenceProjection_PartialHookReplaceOrder(t *testing.T) 
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTransformHooks(partialReplaceHistoryHook{}),
 	)
 	// Act.
@@ -669,8 +669,8 @@ func TestAcceptance_PersistenceProjection_ToolsSegment(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "tool-facts",
 			Segment: contexty.SegmentTools,
@@ -715,7 +715,7 @@ func TestAcceptance_PersistenceProjection_DropsBudgetEvicted(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -887,7 +887,7 @@ func TestAcceptance_Conversation_DeltaStateCodecAndStore(t *testing.T) {
 	assert.True(t, contexty.ToolTurnUsesCanonicalLayout(stored.Segment(contexty.SegmentHistory), 1))
 	require.Len(t, stored.ToolRounds(), 1)
 
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("conversation-1"),
 		contexty.WithStateStore(store),
 	)

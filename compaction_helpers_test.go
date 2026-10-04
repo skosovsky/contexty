@@ -54,7 +54,7 @@ func fixtureCompactionCaptureProfiles(t *testing.T, denyOutput, distinct bool) (
 		return !denyOutput || candidate.Purpose != contexty.CaptureOutput ||
 			candidate.Content.Ref.ID != "main-summary", nil
 	})
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("small")),
 		contexty.WithCompileContentCapture(

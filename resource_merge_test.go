@@ -20,7 +20,7 @@ func TestResource_ReplaceByOrigin(t *testing.T) {
 	other := contexty.NewRetrievalDocument("other", contexty.TextPayload("other document")).ContextArtifact
 	other.Lifecycle = contexty.ArtifactLifecyclePersistent
 	other.SourceRefs = []contexty.SourceRef{{ID: "other-source"}}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
@@ -83,7 +83,7 @@ func TestResource_InactiveReplacementPreservesExisting(t *testing.T) {
 	old := contexty.NewRetrievalDocument("old", contexty.TextPayload("still active")).ContextArtifact
 	old.Lifecycle = contexty.ArtifactLifecyclePersistent
 	old.SourceRefs = []contexty.SourceRef{{ID: "opaque-source"}}
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	// Act / Assert: admission precedes replacement; no inactive result can evict a source.
 	compiled, err := engine.CompileSnapshot(
 		context.Background(),
@@ -99,7 +99,7 @@ func TestResource_SameIDReplacementEvidence(t *testing.T) {
 	// Arrange: same display/occurrence identity does not mean the old content revision is retained.
 	block, calls := fixtureResourceBlock(t)
 	old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old revision")).ContextArtifact
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
@@ -177,7 +177,7 @@ func TestResource_SequentialOriginReplacement(t *testing.T) {
 				}
 				blocks = []contexty.DeferredBlock{combined}
 			}
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(blocks...))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(blocks...))
 			// Act / Assert: stale projections cannot remain in the collected callback messages or snapshot.
 			compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 			require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestResource_GenericMessageCollision(t *testing.T) {
 		result.Messages = []contexty.Message{result.Resources[0].Message.Clone()}
 		return result, nil
 	}
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	// Act.
 	compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 	// Assert: fail atomically, never silently discard host content by ID.
@@ -227,7 +227,7 @@ func TestResource_ReplacementSurvivesLaterDeferredBlock(t *testing.T) {
 		},
 	}
 	old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block, later))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block, later))
 	// Act.
 	compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		Artifacts: []contexty.ContextArtifact{old},

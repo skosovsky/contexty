@@ -33,19 +33,21 @@ type AbstractPayload struct {
 
 // Engine compiles conversation snapshots into CompileResult.
 type Engine struct {
-	selection      *SelectionPolicy
-	stateStore     ConversationStateStore
-	hooks          []TransformHook
-	budget         *BudgetPipeline
-	deferred       []DeferredBlock
-	formatters     map[SegmentName]SegmentFormatter
-	views          map[string]ViewConfiguration
-	roleProjection RoleProjectionPolicy
-	conversationID string
-	observer       Observer
-	trace          *TraceProfile
-	recording      *RecordProfile
-	capture        *recordCaptureOptions
+	artifactMaterialization *ArtifactMaterializationPolicy
+	outputPolicy            *OutputPolicy
+	selection               *SelectionPolicy
+	stateStore              ConversationStateStore
+	hooks                   []TransformHook
+	budget                  *BudgetPipeline
+	deferred                []DeferredBlock
+	formatters              map[SegmentName]SegmentFormatter
+	views                   map[string]ViewConfiguration
+	roleProjection          RoleProjectionPolicy
+	conversationID          string
+	observer                Observer
+	trace                   *TraceProfile
+	recording               *RecordProfile
+	capture                 *recordCaptureOptions
 }
 
 // EngineOption configures the compile engine.
@@ -102,19 +104,21 @@ func WithRoleProjectionPolicy(policy RoleProjectionPolicy) EngineOption {
 // NewEngine creates a compile engine.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
-		selection:      nil,
-		stateStore:     nil,
-		hooks:          nil,
-		budget:         nil,
-		deferred:       nil,
-		formatters:     nil,
-		views:          defaultViewRegistry(),
-		roleProjection: nil,
-		conversationID: "",
-		observer:       nil,
-		trace:          nil,
-		recording:      nil,
-		capture:        nil,
+		selection:               nil,
+		artifactMaterialization: nil,
+		outputPolicy:            nil,
+		stateStore:              nil,
+		hooks:                   nil,
+		budget:                  nil,
+		deferred:                nil,
+		formatters:              nil,
+		views:                   defaultViewRegistry(),
+		roleProjection:          nil,
+		conversationID:          "",
+		observer:                nil,
+		trace:                   nil,
+		recording:               nil,
+		capture:                 nil,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -318,6 +322,7 @@ type compilePipelineResult struct {
 
 func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) context.Context {
 	ctx = startResourceCompile(ctx, req)
+	ctx = context.WithValue(ctx, outputPolicyDecisionsKey{}, make(map[manifestChannelKey]OutputPolicyDecision))
 	ctx = context.WithValue(ctx, budgetDecisionsKey{}, make(map[manifestChannelKey]BudgetDecision))
 	ctx = context.WithValue(ctx, finalEstimateReportsKey{}, make(map[manifestChannelKey]EstimateReport))
 	ctx = context.WithValue(ctx, artifactExclusionsKey{}, make(map[ContentRef]string))
@@ -331,6 +336,20 @@ func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) c
 }
 
 func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (preparedCompile, error) {
+	codec := DefaultJSONSerializer()
+	if e.trace != nil {
+		codec = e.trace.Codec
+	}
+	materializationCtx, materializationErr := initializeArtifactMaterializationContext(
+		ctx,
+		e.artifactMaterialization,
+		codec,
+	)
+	if materializationErr != nil {
+		return preparedCompile{}, materializationErr
+	}
+	ctx = materializationCtx
+
 	ctx = e.startCompileEvidence(ctx, req)
 	ctx = context.WithValue(ctx, outputConfigurationKey{}, e.outputConfigurations(req))
 	ctx = context.WithValue(ctx, sharedPreparationKey{}, true)
@@ -439,26 +458,17 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	if err != nil {
 		return compilePipelineResult{}, err
 	}
-	if roundErr := validateFinalSelectionRounds(snap); roundErr != nil {
-		return compilePipelineResult{}, roundErr
-	}
 	payload := e.payloadFromSnapshot(snap, compilePending)
+	payload, err = e.acceptSemanticOutput(ctx, payload, e.budget, mainSelection, e.selection)
+	if err != nil {
+		return compilePipelineResult{}, err
+	}
+	snap = payloadSnapshot(payload).WithVersion(snap.Version()).WithArtifacts(activeArtifacts)
 	activeArtifacts, err = finalParticipatingArtifacts(ctx, activeArtifacts, payload.FlattenMessages())
 	if err != nil {
 		return compilePipelineResult{}, err
 	}
 	snap = snap.WithArtifacts(activeArtifacts)
-	if err := validateMandatorySelection(ctx, mainSelection, e.selection, payload.FlattenMessages()); err != nil {
-		return compilePipelineResult{}, err
-	}
-	if e.budget != nil {
-		if err := e.budget.validateRecordedRetention(ctx, payload.History); err != nil {
-			return compilePipelineResult{}, err
-		}
-		if err := e.budget.validateSegments(ctx, payloadEstimateSegments(payload)); err != nil {
-			return compilePipelineResult{}, fmt.Errorf("contexty: final payload: %w", err)
-		}
-	}
 	return compilePipelineResult{
 		Selection:          mainSelection,
 		PreparedContext:    preparedContext,
@@ -580,7 +590,7 @@ func (e *Engine) snapshotWithActiveArtifacts(
 		return ConversationSnapshot{}, nil, err
 	}
 	snap = snap.WithArtifacts(activeArtifacts)
-	artifactMsgs, err := artifactMessages(activeArtifacts)
+	artifactMsgs, err := artifactMessages(ctx, activeArtifacts)
 	if err != nil {
 		return ConversationSnapshot{}, nil, err
 	}

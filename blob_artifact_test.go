@@ -35,7 +35,7 @@ func TestBlob_ArtifactCompileAndResume(t *testing.T) {
 	}
 	profile := fixtureTraceProfile()
 	profile.RequireOrigins = true
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(profile),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(
@@ -98,7 +98,9 @@ func TestBlob_ArtifactCompileAndResume(t *testing.T) {
 	}
 	exported, err := contexty.ExportProjection(
 		projection,
-		contexty.ExportSelection{ArtifactIDs: []string{"large"}},
+		contexty.ExportSelection{
+			ArtifactPayloadRefs: []contexty.ContentRef{fixtureArtifactContentRef(t, result.Artifacts[0])},
+		},
 		contexty.DefaultJSONSerializer(),
 	)
 	require.NoError(t, err)
@@ -157,7 +159,7 @@ func TestBlob_ArtifactTampering(t *testing.T) {
 				artifacts = append(artifacts, artifact.Clone())
 			}
 			// Act.
-			result, compileErr := contexty.NewEngine().
+			result, compileErr := fixtureEngine().
 				CompileSnapshot(context.Background(), contexty.CompileRequest{Artifacts: artifacts})
 			// Assert: corruption never reaches a prompt or silently drops metadata.
 			require.ErrorIs(t, compileErr, want)

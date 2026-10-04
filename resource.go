@@ -9,6 +9,7 @@ import (
 )
 
 const resourceEstimateSegment = "resource"
+const traceStageResourceMaterialize = "resource-materialize"
 
 var (
 	ErrInvalidResource     = errors.New("contexty: invalid selected resource")
@@ -115,6 +116,7 @@ type ResolvedResource struct {
 
 // ResourceResolver carries caller-owned ports; no global registry or discovery.
 type ResourceResolver struct {
+	Materialization     *ArtifactMaterializationPolicy
 	Reader              ResourceReader
 	ReaderIdentity      Descriptor
 	Projection          ResourceProjectionPolicy
@@ -132,6 +134,7 @@ func (r ResourceResolver) Resolve(ctx context.Context, request ResourceResolveRe
 	if err := r.validate(request); err != nil {
 		return ResolvedResource{}, err
 	}
+	ctx = withArtifactMaterialization(ctx, r.Materialization, r.Reporter.codec)
 	r.Labels.Registry = r.Labels.Registry.snapshot()
 	r.Labels.RequiredTypes = slices.Clone(r.Labels.RequiredTypes)
 	r.Codecs = cloneCodecBindings(r.Codecs)
@@ -210,9 +213,12 @@ func validateResourceArtifact(artifact ContextArtifact) error {
 	if artifact.Budget != nil && artifact.Budget.TokenLimit < 0 {
 		return ErrInvalidResource
 	}
+	if err := validateArtifactBlob(artifact); err != nil {
+		return fmt.Errorf("%w: %w", ErrResourceUnsupported, err)
+	}
 	switch artifact.Kind {
 	case ArtifactKindRetrievalDocument, ArtifactKindMemoryBlock:
-		_, err := artifactMessage(artifact)
+		_, err := artifactParts(artifact.Payload)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrResourceUnsupported, err)
 		}
@@ -247,11 +253,11 @@ func (r ResourceResolver) project(
 		return ResolvedResource{}, err
 	}
 	projected := artifact.Clone()
-	source, err := artifactMessage(body.Artifact)
+	source, err := artifactSourceMessage(body.Artifact)
 	if err != nil {
 		return ResolvedResource{}, err
 	}
-	message, err := artifactMessage(artifact)
+	message, err := artifactSourceMessage(artifact)
 	if err != nil {
 		return ResolvedResource{}, err
 	}
@@ -260,6 +266,10 @@ func (r ResourceResolver) project(
 		return ResolvedResource{}, err
 	}
 	artifact.Extensions, artifact.SourceRefs = cloneExtensions(message.Extensions), cloneSourceRefs(message.SourceRefs)
+	message, err = artifactMessage(ctx, artifact)
+	if err != nil {
+		return ResolvedResource{}, err
+	}
 	report, err := r.Reporter.Report(
 		ctx,
 		EstimateRequest{Segments: []EstimateSegment{{Name: resourceEstimateSegment, Messages: []Message{message}}},
@@ -340,13 +350,13 @@ func resourceLineageRefs(request ResourceResolveRequest, configuration ResourceC
 			Outputs: []ContentRef{output}, DecisionRef: decision, Stage: "resource-labels"},
 		{
 			ID:        message.Occurrence,
-			Transform: resourceMaterializationIdentity(),
+			Transform: configuration.Materialization,
 			Inputs: []ContentRef{
 				output,
 			},
 			Outputs:     []ContentRef{message},
 			DecisionRef: "",
-			Stage:       "resource-materialize",
+			Stage:       traceStageResourceMaterialize,
 		},
 	}, Unresolved: nil}
 	if err = graph.Validate(); err != nil {

@@ -47,7 +47,7 @@ func traceArtifactSources(ctx context.Context, artifacts []ContextArtifact) erro
 		} else {
 			trace.graph.Unresolved = uniqueContentRefs(append(trace.graph.Unresolved, input))
 		}
-		message, err := artifactMessage(artifact)
+		message, err := artifactMessage(ctx, artifact)
 		if err != nil {
 			return err
 		}
@@ -55,7 +55,18 @@ func traceArtifactSources(ctx context.Context, artifacts []ContextArtifact) erro
 		if err != nil {
 			return err
 		}
-		if err := trace.materialize(ctx, traceStageArtifact, input, output, message); err != nil {
+		descriptor, err := materializationPolicyIdentity(ctx)
+		if err != nil {
+			return err
+		}
+		if err := trace.materializeWithDescriptor(
+			ctx,
+			traceStageArtifact,
+			input,
+			output,
+			message,
+			descriptor,
+		); err != nil {
 			return err
 		}
 	}
@@ -65,15 +76,25 @@ func traceArtifactSources(ctx context.Context, artifacts []ContextArtifact) erro
 // Materialization records caller-owned typed input, not an authorization decision.
 // Actual label projection follows this step and must still enforce host policy.
 func (t *compileTrace) materialize(ctx context.Context, stage string, input, output ContentRef, message Message) error {
+	descriptor, declared := t.profile.Stages[stage]
+	if !declared {
+		return fmt.Errorf("%w: stage %s", ErrInvalidDescriptor, stage)
+	}
+	return t.materializeWithDescriptor(ctx, stage, input, output, message, descriptor)
+}
+
+func (t *compileTrace) materializeWithDescriptor(
+	ctx context.Context,
+	stage string,
+	input, output ContentRef,
+	message Message,
+	descriptor Descriptor,
+) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if err := t.profile.Labels.validateLabels(ctx, message.Extensions, true); err != nil {
 		return err
-	}
-	descriptor, declared := t.profile.Stages[stage]
-	if !declared {
-		return fmt.Errorf("%w: stage %s", ErrInvalidDescriptor, stage)
 	}
 	if err := descriptor.Validate(); err != nil {
 		return err

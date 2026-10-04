@@ -95,7 +95,7 @@ func TestMedia_ArtifactReplay(t *testing.T) {
 	payload := contexty.BinaryPayload([]byte{0, 255, 3}, "application/pdf")
 	payload.Text = "preview"
 	artifact := contexty.NewMemoryBlock("document", payload).ContextArtifact
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(
@@ -143,7 +143,7 @@ func TestMedia_ViewsAndInvalidArtifact(t *testing.T) {
 	}
 	for _, mimeType := range []string{"", "broken"} {
 		artifact := contexty.NewMemoryBlock("invalid", contexty.BinaryPayload([]byte{1}, mimeType)).ContextArtifact
-		result, err := contexty.NewEngine().
+		result, err := fixtureEngine().
 			CompileSnapshot(context.Background(), contexty.CompileRequest{Artifacts: []contexty.ContextArtifact{artifact}})
 		require.ErrorIs(t, err, contexty.ErrInvalidMediaPart)
 		require.Zero(t, result)
@@ -172,7 +172,7 @@ func TestMedia_ArtifactBudget(t *testing.T) {
 				WithBudget(
 					contexty.ArtifactBudgetPolicy{TokenLimit: 7},
 				)
-			engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)}, reporter)))
 			// Act.
 			compiled, err := engine.CompileSnapshot(

@@ -53,7 +53,7 @@ func fixtureTraceStageFixture() (contexty.CompileRequest, []contexty.EngineOptio
 				message.ID = "deferred"
 				return contexty.DeferredResult{Messages: []contexty.Message{message}}, nil
 			}}),
-		contexty.WithTransformHooks(contexty.RedactionHook{Replacer: func(text string) string { return text + "!" }}),
+		contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(text string) string { return text + "!" }}),
 		contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(func(contexty.Message) (contexty.Role, error) {
 			return contexty.RoleUser, nil
 		})),

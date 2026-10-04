@@ -130,7 +130,7 @@ func TestRolling_SummaryTargets(t *testing.T) {
 		contexty.WithRollingSummary(targetPolicy),
 		contexty.WithCompactionCapture(targetProfile),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
 		contexty.WithTraceProfile(
 			fixtureTraceProfile(),

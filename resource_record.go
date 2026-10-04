@@ -181,16 +181,11 @@ func validateResolvedEstimate(ctx context.Context, resource ResolvedResource, co
 		len(resource.Estimate.Segments[0].Messages) != 1 {
 		return ErrInvalidEstimateReport
 	}
-	materialized, err := artifactMessage(resource.Artifact)
-	if err != nil {
-		return err
-	}
-	expected, err := MessageContentRef(materialized, codec.Messages)
-	if canceled := ctx.Err(); canceled != nil {
-		return canceled
-	}
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrReplayCodec, err)
+	if materializationErr := validateMaterializedArtifactMessage(
+		resource.Artifact,
+		resource.Message,
+	); materializationErr != nil {
+		return materializationErr
 	}
 	actual, err := MessageContentRef(resource.Message, codec.Messages)
 	if canceled := ctx.Err(); canceled != nil {
@@ -199,7 +194,7 @@ func validateResolvedEstimate(ctx context.Context, resource ResolvedResource, co
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrReplayCodec, err)
 	}
-	if expected != actual || actual != resource.Estimate.Segments[0].Messages[0] {
+	if actual != resource.Estimate.Segments[0].Messages[0] {
 		return ErrStaleEstimate
 	}
 	return ctx.Err()

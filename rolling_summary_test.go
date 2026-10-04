@@ -156,7 +156,7 @@ func TestRolling_SummaryIdentity(t *testing.T) {
 func TestRolling_SummaryConfiguration(t *testing.T) {
 	// Arrange: invalid target recipe must fail before any engine callback executes.
 	calls := 0
-	hook := contexty.RedactionHook{Replacer: func(text string) string { calls++; return text }}
+	hook := fixtureTextTransform{Replacer: func(text string) string { calls++; return text }}
 	policy := fixtureRollingPolicy(1)
 	policy.Descriptor = contexty.Descriptor{}
 	pipeline := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
@@ -164,7 +164,7 @@ func TestRolling_SummaryConfiguration(t *testing.T) {
 			calls++
 			return contexty.Message{ID: "summary", Role: contexty.RoleSystem}, nil
 		})}, &contexty.FixedEstimator{TokensPerMessage: 5}, contexty.WithRollingSummary(policy))
-	engine := contexty.NewEngine(contexty.WithTransformHooks(hook))
+	engine := fixtureEngine(contexty.WithTransformHooks(hook))
 	// Act.
 	_, err := engine.CompileSnapshot(
 		context.Background(),

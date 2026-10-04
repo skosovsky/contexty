@@ -21,7 +21,7 @@ func TestStatelessCompile(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "hello"),
 		contexty.TextMessage(contexty.RoleUser, "world"),
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -47,8 +47,8 @@ func TestStatelessCompile_RedactionAndBudget(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	req := reqHistory([]contexty.Message{
@@ -81,7 +81,7 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 		contexty.WithBudgetObserver(rec),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)
@@ -98,7 +98,7 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 func TestStatelessCompile_DeferredBlocks(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "hint",
 			Segment: contexty.SegmentSystem,
@@ -129,7 +129,7 @@ func TestStatelessCompile_IgnoresStoreAndConversationID(t *testing.T) {
 	}
 	require.NoError(t, updateSegment(ctx, store, convID, s0.Version(), contexty.SegmentHistory, storeMsgs))
 
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithStateStore(store),
 		contexty.WithConversationID(convID),
 	)
@@ -160,7 +160,7 @@ func TestStatelessCompile_ContextPropagation(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 		contexty.WithBudgetObserver(rec),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(rec),
 	)

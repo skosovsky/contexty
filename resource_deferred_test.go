@@ -14,7 +14,7 @@ func TestResource_DeferredNative(t *testing.T) {
 	block, calls := fixtureResourceBlock(t)
 	profile := fixtureTraceProfile()
 	profile.RequireOrigins = true
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block), contexty.WithTraceProfile(profile))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block), contexty.WithTraceProfile(profile))
 	original := block.Resources[0]
 	block.Resources[0].ID = "caller mutation"
 	block.Resources[0].Configuration.Estimate.Capabilities[contexty.EstimateText] = contexty.EstimateUnknown
@@ -80,7 +80,7 @@ func TestResource_DeferredBindingFailures(t *testing.T) {
 				}
 				return result, nil
 			}
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 			// Act / Assert: no unselected dependency or partial prompt can escape.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 			require.Error(t, err)
@@ -109,7 +109,7 @@ func TestResource_DeferredPreflight(t *testing.T) {
 			case "duplicate":
 				blocks = append(blocks, block)
 			}
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(blocks...))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(blocks...))
 			// Act / Assert: invalid declaration cannot execute even the first block.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 			require.Error(t, err)
@@ -122,7 +122,7 @@ func TestResource_DeferredPreflight(t *testing.T) {
 func TestResource_DeferredManifestConfiguration(t *testing.T) {
 	// Arrange: declarations become immutable manifest configuration before any I/O.
 	block, calls := fixtureResourceBlock(t)
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block),
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile(),
 			fixtureBinding(contexty.RecordingResolver, "", "", 0))))

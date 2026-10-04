@@ -36,7 +36,7 @@ func TestExact_Replay(t *testing.T) {
 		}
 		return true, nil
 	})
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(
 			fixtureRecordProfile("small", "xml"),
@@ -53,7 +53,7 @@ func TestExact_Replay(t *testing.T) {
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"}, policy),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithTransformHooks(
-			contexty.RedactionHook{Replacer: func(text string) string { hooks++; return text + "!" }},
+			fixtureTextTransform{Replacer: func(text string) string { hooks++; return text + "!" }},
 		),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{Name: "chosen", Segment: contexty.SegmentMemory,
 			Resolve: func(context.Context) (contexty.DeferredResult, error) {
@@ -170,7 +170,7 @@ func TestReplay_RequiresCodecs(t *testing.T) {
 	message := contexty.TextMessage(contexty.RoleUser, "labeled")
 	message.ID = "m"
 	message.Extensions = []contexty.Extension{fixtureWireExtension{wire: `{"label":"host-owned"}`}}
-	result, err := contexty.NewEngine(
+	result, err := fixtureEngine(
 		contexty.WithTraceProfile(trace),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingLabelPolicy, "", "", 0)),
@@ -201,7 +201,7 @@ func TestCapture_PolicyCancellation(t *testing.T) {
 		cancel()
 		return true, nil
 	})
-	engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"}, policy))
 	// Act / Assert: no partial record is returned after cancellation.
@@ -222,11 +222,11 @@ func TestRecompute_CreatesNewRecord(t *testing.T) {
 	profile.Pipeline.Revision = "changed"
 	profile = fixtureBindings(profile, fixtureBinding(contexty.RecordingHook, "", "", 0))
 	calls := 0
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(profile),
 		contexty.WithTransformHooks(
-			contexty.RedactionHook{Replacer: func(text string) string { calls++; return text + "!" }},
+			fixtureTextTransform{Replacer: func(text string) string { calls++; return text + "!" }},
 		),
 	)
 	request := contexty.CompileRequest{CompilationID: "next", History: []contexty.Message{message}}
@@ -308,13 +308,13 @@ func TestReplay_Privacy(t *testing.T) {
 	policy := fixtureContentPolicy(func(_ context.Context, candidate contexty.CaptureCandidate) (bool, error) {
 		return !bytes.Contains(candidate.Content.Wire, []byte("SECRET-RAW")), nil
 	})
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingHook, "", "", 0)),
 		),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"}, policy),
-		contexty.WithTransformHooks(contexty.RedactionHook{Replacer: func(string) string { return "safe" }}),
+		contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(string) string { return "safe" }}),
 	)
 	compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "private",
 		History: []contexty.Message{message}})
@@ -335,7 +335,7 @@ func TestReplay_Privacy(t *testing.T) {
 	purposePolicy := fixtureContentPolicy(func(_ context.Context, candidate contexty.CaptureCandidate) (bool, error) {
 		return candidate.Purpose != contexty.CaptureInput, nil
 	})
-	engine = contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine = fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"}, purposePolicy))
 	compiled, err = engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "unchanged",
