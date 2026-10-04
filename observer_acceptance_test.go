@@ -42,7 +42,7 @@ func TestAcceptance_Observer_EvictionTelemetry(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 		contexty.WithBudgetObserver(rec),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("evict-obs"),
 		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
@@ -71,7 +71,7 @@ func TestAcceptance_Observer_CompileTelemetry(t *testing.T) {
 		t,
 		updateSegment(ctx, store, "compile-obs", s0.Version(), contexty.SegmentHistory, history),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("compile-obs"),
 		contexty.WithStateStore(store),
 		contexty.WithObserver(rec),
@@ -103,7 +103,7 @@ func TestAcceptance_Observer_DoesNotBreakCompile(t *testing.T) {
 		est,
 		contexty.WithBudgetObserver(rec),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("obs-passive"),
 		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),

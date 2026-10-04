@@ -23,7 +23,7 @@ func TestHistoricalArguments_MultipleCalls(t *testing.T) {
 		},
 		Extensions: []contexty.Extension{fixtureWireExtension{wire: `{"approval_digest":"active-original"}`}},
 	}
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(
+	engine := fixtureEngine(contexty.WithBudgetPipeline(
 		contexty.SegmentHistory,
 		contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
@@ -70,7 +70,7 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 			}
 			return contexty.LabelDecision{Extensions: labels}, nil
 		})}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(trace),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile("copy"), fixtureBinding(contexty.RecordingLabelPolicy, "", "", 0)),
@@ -193,8 +193,8 @@ func TestHistoricalArguments_CompilePreflight(t *testing.T) {
 				options = append(options, options[0])
 			}
 			calls := 0
-			engine := contexty.NewEngine(
-				contexty.WithTransformHooks(contexty.RedactionHook{Replacer: func(text string) string {
+			engine := fixtureEngine(
+				contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(text string) string {
 					calls++
 					return text
 				}}),

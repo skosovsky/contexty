@@ -5,11 +5,12 @@ import "encoding/json"
 // ResourceConfiguration pins every configured interpretation, including unused
 // codecs. It contains no registry handles, authorization scopes or executions.
 type ResourceConfiguration struct {
-	Reader     Descriptor         `json:"reader"`
-	Projection Descriptor         `json:"projection"`
-	Labels     Descriptor         `json:"labels"`
-	Estimate   EstimateProfile    `json:"estimate"`
-	Trace      TraceConfiguration `json:"trace"`
+	Materialization Descriptor         `json:"materialization"`
+	Reader          Descriptor         `json:"reader"`
+	Projection      Descriptor         `json:"projection"`
+	Labels          Descriptor         `json:"labels"`
+	Estimate        EstimateProfile    `json:"estimate"`
+	Trace           TraceConfiguration `json:"trace"`
 }
 
 func (c ResourceConfiguration) Clone() ResourceConfiguration {
@@ -19,7 +20,7 @@ func (c ResourceConfiguration) Clone() ResourceConfiguration {
 }
 
 func (c ResourceConfiguration) Validate() error {
-	for _, descriptor := range []Descriptor{c.Reader, c.Projection, c.Labels} {
+	for _, descriptor := range []Descriptor{c.Reader, c.Projection, c.Labels, c.Materialization} {
 		if err := descriptor.Validate(); err != nil {
 			return err
 		}
@@ -56,6 +57,9 @@ func (r ResourceResolver) Configuration() (ResourceConfiguration, error) {
 	if r.Reporter == nil || nilInterfaceValue(r.Reporter.estimator) {
 		return ResourceConfiguration{}, ErrInvalidEstimateReport
 	}
+	if err := validateMaterializationPolicy(r.Materialization); err != nil {
+		return ResourceConfiguration{}, err
+	}
 	identity := r.LabelPolicyIdentity
 	if nilInterfaceValue(r.Labels.Policy) {
 		if r.Labels.Policy != nil || identity != (Descriptor{ID: "", Revision: ""}) ||
@@ -76,8 +80,14 @@ func (r ResourceResolver) Configuration() (ResourceConfiguration, error) {
 	if err != nil {
 		return ResourceConfiguration{}, err
 	}
-	configuration := ResourceConfiguration{Reader: r.ReaderIdentity, Projection: r.ProjectionIdentity,
-		Labels: identity, Estimate: r.Reporter.profile.clone(), Trace: trace}
+	configuration := ResourceConfiguration{
+		Materialization: r.Materialization.Identity,
+		Reader:          r.ReaderIdentity,
+		Projection:      r.ProjectionIdentity,
+		Labels:          identity,
+		Estimate:        r.Reporter.profile.clone(),
+		Trace:           trace,
+	}
 	if err = configuration.Validate(); err != nil {
 		return ResourceConfiguration{}, err
 	}

@@ -154,13 +154,13 @@ func TestViews_DifferentProjections(t *testing.T) {
 	assert.Contains(t, flat, "system: rules")
 }
 
-func TestRedactionHook_CopyOnWrite(t *testing.T) {
+func TestHostTextTransform_CopyOnWrite(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	orig := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "a@b.com"),
 	})
-	masked, err := contexty.NewRedactionHook().Transform(ctx, orig)
+	masked, err := fixtureEmailTransform().Transform(ctx, orig)
 	require.NoError(t, err)
 	assert.Equal(t, "[REDACTED]", masked.Segment(contexty.SegmentHistory)[0].TextContent())
 	// Act / Assert: exercise the contract and check its result.
@@ -175,7 +175,7 @@ func TestEngine_Compile_DeferredAndResolveVar(t *testing.T) {
 	_ = updateSegment(ctx, store, "t", s0.Version(), contexty.SegmentSystem, []contexty.Message{
 		contexty.TextMessage(contexty.RoleSystem, "sys"),
 	})
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("t"),
 		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{

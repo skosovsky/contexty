@@ -21,12 +21,12 @@ func TestLineage_Stages(t *testing.T) {
 	profile := fixtureTraceProfile()
 	profile.RequireOrigins = true
 	refs := []contexty.ContentRef{fixtureRefForMessage(t, a), fixtureRefForMessage(t, b)}
-	hook := contexty.RedactionHook{Replacer: func(text string) string { return text + "!" }}
+	hook := fixtureTextTransform{Replacer: func(text string) string { return text + "!" }}
 	formatter := func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
 		msgs[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "safe"}}
 		return msgs, nil
 	}
-	engine := contexty.NewEngine(contexty.WithTraceProfile(profile),
+	engine := fixtureEngine(contexty.WithTraceProfile(profile),
 		contexty.WithTransformHooks(hook, hook),
 		contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(func(contexty.Message) (contexty.Role, error) {
 			return contexty.RoleUser, nil
@@ -84,7 +84,7 @@ func TestTrace_MissingOrigins(t *testing.T) {
 	// Arrange: strict origins cannot be invented for legacy inputs.
 	profile := fixtureTraceProfile()
 	profile.RequireOrigins = true
-	engine := contexty.NewEngine(contexty.WithTraceProfile(profile))
+	engine := fixtureEngine(contexty.WithTraceProfile(profile))
 	msg := contexty.TextMessage(contexty.RoleUser, "legacy")
 	msg.ID = "legacy"
 	req := contexty.CompileRequest{CompilationID: "missing", History: []contexty.Message{msg}}
@@ -95,7 +95,7 @@ func TestTrace_MissingOrigins(t *testing.T) {
 
 	// Arrange: permissive tracing still exposes the unresolved reference.
 	profile.RequireOrigins = false
-	engine = contexty.NewEngine(contexty.WithTraceProfile(profile))
+	engine = fixtureEngine(contexty.WithTraceProfile(profile))
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), req)
 	// Assert: no false original-source record.
@@ -116,7 +116,7 @@ func TestTrace_ExplicitMapping(t *testing.T) {
 	}
 	req := contexty.CompileRequest{CompilationID: "mapping", History: []contexty.Message{msg}}
 	makeEngine := func() *contexty.Engine {
-		return contexty.NewEngine(
+		return fixtureEngine(
 			contexty.WithTraceProfile(profile),
 			contexty.WithSegmentFormatter(contexty.SegmentHistory, formatter),
 		)

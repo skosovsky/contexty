@@ -40,7 +40,7 @@ func fixtureRollingEngine(t *testing.T, calls *int) *contexty.Engine {
 			message.ID = "summary-" + strconv.Itoa(*calls)
 			return message, nil
 		})}, reporter, contexty.WithRollingSummary(policy), contexty.WithCompactionCapture(profile))
-	return contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeline),
+	return fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeline),
 		contexty.WithTraceProfile(fixtureTraceProfile()), contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(profile.Privacy, fixtureContentPolicy(fixtureAllowContent)))
 }

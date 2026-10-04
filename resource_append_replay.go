@@ -75,7 +75,7 @@ func validateReplayAppendContent(ctx context.Context, existing, incoming, derive
 	if incoming.MergePolicy != PolicyAppend || incoming.Lifecycle == ArtifactLifecycleEphemeral {
 		return ErrResourceMismatch
 	}
-	if _, err := resourceAppendInputs(existing, incoming); err != nil {
+	if err := validateAppendArtifacts(existing, incoming); err != nil {
 		return err
 	}
 	expected := appendArtifactPayload(existing, incoming)
@@ -92,17 +92,30 @@ func validateReplayAppendContent(ctx context.Context, existing, incoming, derive
 	if err != nil {
 		return err
 	}
-	materialized, err := artifactMessage(derived)
-	if err != nil {
-		return err
-	}
-	ref, err := MessageContentRef(materialized, codec)
-	if err != nil || ref != merge.Message {
-		return ErrReplayContentMismatch
+	if materializationErr := validateMaterializedArtifactMessage(derived, message); materializationErr != nil {
+		return materializationErr
 	}
 	actual, err := MessageContentRef(message, codec)
 	if err != nil || actual != merge.Message {
 		return ErrReplayContentMismatch
 	}
 	return ctx.Err()
+}
+
+func validateAppendArtifacts(existing, incoming ContextArtifact) error {
+	for _, artifact := range []ContextArtifact{existing, incoming} {
+		if artifact.Blob != nil {
+			return ErrResourceUnsupported
+		}
+		parts, err := artifactParts(artifact.Payload)
+		if err != nil {
+			return err
+		}
+		for _, part := range parts {
+			if _, text := part.(TextPart); !text {
+				return ErrResourceUnsupported
+			}
+		}
+	}
+	return nil
 }

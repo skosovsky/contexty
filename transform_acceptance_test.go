@@ -20,7 +20,7 @@ func TestAcceptance_Transformations_ByMessageID(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	req := contexty.CompileRequest{History: []contexty.Message{

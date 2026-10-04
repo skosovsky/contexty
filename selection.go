@@ -872,7 +872,7 @@ func finalParticipatingArtifacts(
 		return nil, err
 	}
 	output := ManifestOutput{
-		Kind:              "",
+		OutputPolicy: nil, Kind: "",
 		Name:              "",
 		Segments:          []ManifestSegment{segment},
 		Lineage:           traceGraph(ctx),

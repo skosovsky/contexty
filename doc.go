@@ -6,6 +6,8 @@
 //   - MessageIdentityPolicy and CompileWritebackIntent for durable normalization
 //   - Typed tool payloads and canonical ToolRound validation
 //   - ContextArtifact lifecycle, ownership, and typed artifact codecs
+//   - ArtifactMaterializationPolicy for explicit provider role and typed parts
+//   - OutputPolicy for the complete final prompt-only projection/validation boundary
 //   - ConversationState and ConversationDelta for immutable transitions
 //   - ConversationStateStore with optimistic concurrency
 //   - CompileTarget and CompileProjection for independent explicit outputs from shared preparation
@@ -33,6 +35,9 @@
 // empty state and use its current token before writing; old tokens remain stale.
 // Source, prompt-safe output and persistence projections are separate owned
 // snapshots. Host ports receive owned values and cancellation stops compilation.
+// No configured OutputPolicy implies no sanitization. Artifact messages require
+// an explicit host materialization policy; provider roles do not establish trust.
+// Raw capture and persistence are separate from prompt acceptance.
 // Remote execution, discovery, permissions, durable record/blob storage and
 // deletion policy are application responsibilities, not inferred from content.
 //

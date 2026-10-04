@@ -29,7 +29,7 @@ func TestContract_Reservations(t *testing.T) {
 		contexty.WindowInputBudget(20, 7, 3), contexty.EffectiveInputBudget(10),
 	} {
 		// Act.
-		engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+		engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 			contexty.WithCompileRecording(fixtureRecordProfile("target")),
 			contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
 				contexty.BudgetConfig{Budget: budget}, contexty.CharTokenEstimator{})))
@@ -84,11 +84,11 @@ func TestInvalid_Reservations(t *testing.T) {
 				calls++
 				return contexty.DeferredResult{Messages: nil}, nil
 			}})
-		engine := contexty.NewEngine(deferred, contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+		engine := fixtureEngine(deferred, contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 		_, err = engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 		require.ErrorIs(t, err, contexty.ErrInvalidBudgetRequest)
 		require.Zero(t, calls)
-		engine = contexty.NewEngine(deferred)
+		engine = fixtureEngine(deferred)
 		_, err = engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 			Targets: []contexty.CompileTarget{
 				{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "bad", Budget: pipe},

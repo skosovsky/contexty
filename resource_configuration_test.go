@@ -16,7 +16,7 @@ func TestResource_ConfigurationIdentity(t *testing.T) {
 	require.NoError(t, err)
 	baselineRef, err := baseline.Configuration.Ref()
 	require.NoError(t, err)
-	for _, field := range []string{"reader", "projection", "labels", "codec", "encoding"} {
+	for _, field := range []string{"reader", "projection", "labels", "materialization", "codec", "encoding"} {
 		t.Run(field, func(t *testing.T) {
 			changed, changedRequest, _ := fixtureLabeledResourceFixture(t)
 			switch field {
@@ -24,6 +24,8 @@ func TestResource_ConfigurationIdentity(t *testing.T) {
 				changed.ReaderIdentity.Revision = "changed"
 			case "projection":
 				changed.ProjectionIdentity.Revision = "changed"
+			case "materialization":
+				changed.Materialization.Identity.Revision = "changed"
 			case "labels":
 				changed.LabelPolicyIdentity.Revision = "changed"
 			case "codec":

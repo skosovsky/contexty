@@ -49,7 +49,7 @@ func TestAcceptance_Truncation_Atomicity(t *testing.T) {
 func TestAcceptance_Budget_PreflightReservesPendingAndSystem(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -116,7 +116,7 @@ func TestAcceptance_BudgetSummary_IdentityIgnoresObserverState(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 1},
 	)
 	// Act.
-	withoutObserver, err := contexty.NewEngine(
+	withoutObserver, err := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeWithoutObserver),
 	).CompileSnapshot(ctx, req)
 	// Assert.
@@ -127,7 +127,7 @@ func TestAcceptance_BudgetSummary_IdentityIgnoresObserverState(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 1},
 		contexty.WithBudgetObserver(fixtureObserver{}),
 	)
-	withObserver, err := contexty.NewEngine(
+	withObserver, err := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeWithObserver),
 	).CompileSnapshot(ctx, req)
 	require.NoError(t, err)

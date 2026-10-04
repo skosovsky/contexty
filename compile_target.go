@@ -190,9 +190,8 @@ func (e *Engine) compileTarget(
 	}
 	name := strings.TrimSpace(target.Name)
 	ctx = preparedTargetContext(ctx, source, snap, name, transforms)
-	localTransforms := cloneTransformRecords(transforms)
 	if target.View != "" {
-		return compileTextViewTarget(ctx, snap, target, localTransforms)
+		return e.compileTextViewTarget(ctx, snap, target)
 	}
 	input := snap.AllSegmentsSnapshot()
 	scoped, selectedArtifacts, err := scopeTargetSnapshot(snap, target, artifacts)
@@ -202,8 +201,6 @@ func (e *Engine) compileTarget(
 	if exclusionErr := initializeTargetArtifactExclusions(ctx, artifacts); exclusionErr != nil {
 		return CompileProjection{}, exclusionErr
 	}
-	localEngine := *e
-	localEngine.budget = target.Budget
 	prepared, _ := ctx.Value(preparedOutputKey{}).(preparedOutput)
 	var pending []Message
 	if target.IncludeCurrentTurn {
@@ -227,19 +224,12 @@ func (e *Engine) compileTarget(
 	if err != nil {
 		return CompileProjection{}, err
 	}
-	scoped, err = localEngine.applyTransformsAndBudget(
-		ctx,
-		source,
-		scoped,
-		pending,
-		recorder,
-		localOptions,
-	)
+	scoped, err = e.applyTargetStages(ctx, source, target, scoped, pending, localOptions)
 	if err != nil {
 		return CompileProjection{}, err
 	}
 	working := snapshotAllMessages(scoped)
-	localTransforms = recorder.snapshot()
+	localTransforms := recorder.snapshot()
 	estimates, err := compileArtifactEstimates(ctx, artifacts)
 	if err != nil {
 		return CompileProjection{}, err
@@ -249,11 +239,21 @@ func (e *Engine) compileTarget(
 		return CompileProjection{}, err
 	}
 
-	scoped, selectedArtifacts, exclusions, err := finishTargetSnapshot(
+	scoped, working, localTransforms, err = e.acceptTargetSemantic(
 		ctx,
 		scoped,
 		target,
 		selection,
+		working,
+		localTransforms,
+	)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	scoped, selectedArtifacts, exclusions, err := finishTargetSnapshot(
+		ctx,
+		scoped,
+		target,
 		selectedArtifacts,
 		artifacts,
 		working,
@@ -279,6 +279,53 @@ func (e *Engine) compileTarget(
 	}, nil
 }
 
+func (e *Engine) applyTargetStages(
+	ctx context.Context,
+	source CompileRequest,
+	target CompileTarget,
+	scoped ConversationSnapshot,
+	pending []Message,
+	options compileOptions,
+) (ConversationSnapshot, error) {
+	localEngine := *e
+	localEngine.budget = target.Budget
+	return localEngine.applyTransformsAndBudget(ctx, source, scoped, pending, transformRecorderFrom(ctx), options)
+}
+
+func (e *Engine) acceptTargetSemantic(
+	ctx context.Context,
+	scoped ConversationSnapshot,
+	target CompileTarget,
+	selection *SelectionDecision,
+	working []Message,
+	localTransforms map[string]TransformChain,
+) (ConversationSnapshot, []Message, map[string]TransformChain, error) {
+	recorder := transformRecorderFrom(ctx)
+	selectedArtifacts := scoped.Artifacts()
+	semantic := snapshotWithFinalMessages(scoped, working)
+	if target.Formatter != nil {
+		semantic = EmptySnapshot().WithSegment(SegmentHistory, working)
+	}
+	recorder.records = cloneTransformRecords(localTransforms)
+	if recorder.records == nil {
+		recorder.records = make(map[string]TransformChain)
+	}
+	accepted, policyErr := e.acceptSemanticOutput(
+		ctx,
+		snapshotPayload(semantic),
+		target.Budget,
+		selection,
+		target.Selection,
+	)
+	if policyErr != nil {
+		return ConversationSnapshot{}, nil, nil, policyErr
+	}
+	scoped = payloadSnapshot(accepted).WithVersion(scoped.Version()).WithArtifacts(selectedArtifacts)
+	working = snapshotAllMessages(scoped)
+	localTransforms = recorder.snapshot()
+	return scoped, working, localTransforms, nil
+}
+
 func initializeTargetArtifactExclusions(ctx context.Context, artifacts []ContextArtifact) error {
 	exclusionsMap, _ := ctx.Value(artifactExclusionsKey{}).(map[ContentRef]string)
 	for _, artifact := range artifacts {
@@ -295,13 +342,9 @@ func finishTargetSnapshot(
 	ctx context.Context,
 	scoped ConversationSnapshot,
 	target CompileTarget,
-	selection *SelectionDecision,
 	selectedArtifacts, artifacts []ContextArtifact,
 	working []Message,
 ) (ConversationSnapshot, []ContextArtifact, []ArtifactExclusion, error) {
-	if err := validateMandatorySelection(ctx, selection, target.Selection, working); err != nil {
-		return ConversationSnapshot{}, nil, nil, err
-	}
 	selectedArtifacts, err := finalParticipatingArtifacts(ctx, selectedArtifacts, working)
 	if err != nil {
 		return ConversationSnapshot{}, nil, nil, err
@@ -352,9 +395,15 @@ func preparedTargetContext(
 	return ctx
 }
 
-func compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, target CompileTarget,
-	transforms map[string]TransformChain,
+func (e *Engine) compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, target CompileTarget,
 ) (CompileProjection, error) {
+	input := snap.AllSegmentsSnapshot()
+	accepted, policyErr := e.acceptSemanticOutput(ctx, snapshotPayload(snap), nil, nil, nil)
+	if policyErr != nil {
+		return CompileProjection{}, policyErr
+	}
+	snap = payloadSnapshot(accepted).WithVersion(snap.Version()).WithArtifacts(snap.Artifacts())
+	transforms := transformRecorderFrom(ctx).snapshot()
 	ctx = withRecordingComponent(
 		ctx,
 		recordingKey(RecordingViewRenderer, strings.TrimSpace(target.Name), "", 0),
@@ -376,7 +425,7 @@ func compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, targe
 	return CompileProjection{
 		Name: strings.TrimSpace(target.Name), Text: text, Messages: nil,
 		Transformations: transforms, Source: emptyCompileRequest(),
-		InputSnapshot: snap.AllSegmentsSnapshot(), ArtifactIDs: artifactIDs(snap.Artifacts()),
+		InputSnapshot: input, ArtifactIDs: artifactIDs(snap.Artifacts()),
 		Lineage: traceGraph(ctx), Rendered: rendered,
 		Snapshot: snap.AllSegmentsSnapshot(), Selection: nil, Artifacts: cloneArtifacts(snap.Artifacts()),
 		ArtifactEstimates: nil, ExcludedArtifacts: nil,
@@ -594,16 +643,6 @@ func finishTargetMessages(
 		return nil, err
 	}
 	working = projected
-	if target.Budget != nil {
-		if err := target.Budget.validateRecordedRetention(ctx, working); err != nil {
-			return nil, err
-		}
-		if err := target.Budget.validateSegments(
-			ctx,
-			[]EstimateSegment{{Name: manifestMessagesSegment, Messages: working}},
-		); err != nil {
-			return nil, fmt.Errorf("contexty: compile target %q final budget: %w", target.Name, err)
-		}
-	}
+
 	return working, nil
 }

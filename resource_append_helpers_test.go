@@ -73,7 +73,7 @@ func fixtureAppendSequenceEngine(blocks []contexty.DeferredBlock, strict bool) *
 	if len(blocks) > 1 {
 		bindings = append(bindings, fixtureBinding(contexty.RecordingResolver, "", "", 1))
 	}
-	return contexty.NewEngine(
+	return fixtureEngine(
 		contexty.WithDeferredBlocks(blocks...),
 		contexty.WithTraceProfile(trace),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile("memory"), bindings...)),

@@ -36,7 +36,7 @@ func TestRole_CallbackOwnership(t *testing.T) {
 	// Arrange: the role-only port tries to modify content and provenance.
 	input := fixtureRollingText("input", "safe")
 	input.SourceRefs = []contexty.SourceRef{{ID: "source"}}
-	engine := contexty.NewEngine(contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(
+	engine := fixtureEngine(contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(
 		func(message contexty.Message) (contexty.Role, error) {
 			message.Parts[0] = contexty.TextPart{Text: "mutated"}
 			message.SourceRefs[0].ID = "mutated"
@@ -92,7 +92,7 @@ func TestSummarizer_CallbackOwnership(t *testing.T) {
 			fixtureMutateMessage(messages[0])
 			return fixtureRollingText("summary", "sum"), nil
 		})}, contexty.CharTokenEstimator{}, contexty.WithSummarizerDescriptor(profile.Stages["summarize"]))
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(profile),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)

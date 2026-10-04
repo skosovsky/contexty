@@ -19,7 +19,7 @@ func TestAcceptance_IndependentPreparedOutputs(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(5)},
 		&contexty.FixedEstimator{TokensPerMessage: 5},
 	)
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 	// Act.
 	result, err := engine.CompileSnapshot(t.Context(), contexty.CompileRequest{History: history,
 		Targets: []contexty.CompileTarget{

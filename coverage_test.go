@@ -18,7 +18,7 @@ func TestManifest_Coverage(t *testing.T) {
 	recent.ID = "recent"
 	system := contexty.TextMessage(contexty.RoleSystem, "sys")
 	system.ID = "system"
-	engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile("history", "empty"),
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
@@ -112,7 +112,7 @@ func TestCoverage_Materialization(t *testing.T) {
 			fixtureArtifactContentRef(t, oversized),
 		},
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(profile),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 	)
@@ -139,9 +139,16 @@ func TestCoverage_Materialization(t *testing.T) {
 	for _, stage := range []string{"prompt-template", "artifact"} {
 		bad := fixtureTraceProfile()
 		delete(bad.Stages, stage)
-		_, compileErr := contexty.NewEngine(contexty.WithTraceProfile(bad)).
-			CompileSnapshot(context.Background(), request)
-		require.ErrorIs(t, compileErr, contexty.ErrInvalidDescriptor)
+		options := []contexty.EngineOption{contexty.WithTraceProfile(bad)}
+		want := contexty.ErrInvalidDescriptor
+		if stage == "artifact" {
+			materialization := fixtureMaterialization()
+			materialization.Identity = contexty.Descriptor{}
+			options = append(options, contexty.WithArtifactMaterialization(*materialization))
+			want = contexty.ErrInvalidArtifactMaterialization
+		}
+		_, compileErr := fixtureEngine(options...).CompileSnapshot(context.Background(), request)
+		require.ErrorIs(t, compileErr, want)
 	}
 }
 
@@ -151,7 +158,7 @@ func TestCoverage_Summary(t *testing.T) {
 	a.ID = "a"
 	b := contexty.TextMessage(contexty.RoleUser, "second-long")
 	b.ID = "b"
-	engine := contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile("history", "empty"),
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(

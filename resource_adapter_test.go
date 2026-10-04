@@ -49,7 +49,7 @@ func TestResource_AdapterNativeFailures(t *testing.T) {
 				}}, bodies...)
 			require.NoError(t, err)
 			resolver.Reader = reader
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
 			// Act / Assert: no missing/error placeholder, permissions or partial prompt.
 			result, compileErr := engine.CompileSnapshot(ctx, contexty.CompileRequest{})
 			require.ErrorIs(t, compileErr, map[string]error{"missing": contexty.ErrResourceMissing,
@@ -88,7 +88,7 @@ func TestResource_AdapterNativeSelection(t *testing.T) {
 			return artifact, projectErr
 		},
 	)
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(fixtureAdapterResourceBlock(t, resolver, request)))
 	// Act: two targets consume the single selected body with no additional reads.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{

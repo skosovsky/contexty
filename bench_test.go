@@ -21,14 +21,14 @@ func BenchmarkRender_LLMXML(b *testing.B) {
 	}
 }
 
-func BenchmarkRedactionHook(b *testing.B) {
+func BenchmarkHostTextTransform(b *testing.B) {
 	ctx := context.Background()
 	msgs := make([]contexty.Message, 50)
 	for i := range msgs {
 		msgs[i] = contexty.TextMessage(contexty.RoleUser, "user@example.com says hello")
 	}
 	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, msgs)
-	hook := contexty.NewRedactionHook()
+	hook := fixtureEmailTransform()
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {

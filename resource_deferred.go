@@ -84,6 +84,14 @@ func (e *Engine) resolvedDeferredMessages(
 			return nil, err
 		}
 		resource = frozen
+		if err = registerMaterializedArtifact(
+			ctx,
+			resource.Artifact,
+			resource.Message,
+			resource.Configuration.Materialization,
+		); err != nil {
+			return nil, err
+		}
 		if err = traceDeferredResource(ctx, resource); err != nil {
 			return nil, err
 		}

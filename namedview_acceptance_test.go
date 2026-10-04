@@ -22,7 +22,7 @@ func TestAcceptance_NamedView_WithBudget(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 15},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView("classifier", contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
 			Budget:        pipe,
@@ -45,7 +45,7 @@ func TestAcceptance_NamedView_FormatterInjected(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView("wrapped", contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
 			Formatter: func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
@@ -75,7 +75,7 @@ func TestAcceptance_NamedView_FormatterReceivesContextAndCanFail(t *testing.T) {
 	t.Parallel()
 	expectedErr := errors.New("view formatter failed")
 	ctx := context.WithValue(context.Background(), formatterContextKey{}, "view-trace")
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView("ctx-view", contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
 			Formatter: func(ctx context.Context, msgs []contexty.Message) ([]contexty.Message, error) {

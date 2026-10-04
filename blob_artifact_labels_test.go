@@ -48,7 +48,7 @@ func TestBlob_ArtifactLabels(t *testing.T) {
 			}
 			return contexty.LabelDecision{Extensions: labels}, nil
 		})}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(trace),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingLabelPolicy, "", "", 0)),
@@ -103,7 +103,9 @@ func TestBlob_ArtifactLabels(t *testing.T) {
 		ArtifactIDs: []string{"large"},
 	}
 	for _, disclose := range []bool{false, true} {
-		selection := contexty.ExportSelection{ArtifactIDs: []string{"large"}}
+		selection := contexty.ExportSelection{
+			ArtifactPayloadRefs: []contexty.ContentRef{fixtureArtifactContentRef(t, result.Artifacts[0])},
+		}
 		if disclose {
 			selection.Metadata.ExtensionTypes = []string{"fixture-label"}
 		}

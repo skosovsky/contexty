@@ -23,7 +23,7 @@ func fixtureOwnedCompile(t *testing.T) (contexty.CompileRequest, contexty.Compil
 		Targets: []contexty.CompileTarget{{Name: "first", Segments: []contexty.SegmentName{contexty.SegmentHistory}},
 			{Name: "second", Segments: []contexty.SegmentName{contexty.SegmentHistory}}},
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("first", "second")),
 		contexty.WithCompileContentCapture(

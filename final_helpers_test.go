@@ -22,10 +22,10 @@ func fixtureFinalCancellationRequest(
 					return messages, nil
 				}},
 		}
-		return contexty.NewEngine(), request
+		return fixtureEngine(), request
 	}
 	request.Options = []contexty.CompileOption{contexty.WithTextReplacement(contexty.TextReplacement{
 		Segment: contexty.SegmentHistory, MessageID: "input", Text: "final",
 	})}
-	return contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)), request
+	return fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)), request
 }

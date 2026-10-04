@@ -23,7 +23,7 @@ func fixtureArtifactProjectionEvidence(t *testing.T) contexty.CompileResult {
 	targetReporter, err := contexty.NewEstimateReporter(&contexty.FixedEstimator{TokensPerMessage: 5}, targetProfile,
 		contexty.DefaultJSONSerializer())
 	require.NoError(t, err)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("consumer")),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
@@ -114,7 +114,7 @@ func TestAcceptance_ArtifactGlobalPackingBelowLocalCap(t *testing.T) {
 			}
 			return plan, nil
 		}}
-	engine := contexty.NewEngine(contexty.WithSelectionPolicy(policy),
+	engine := fixtureEngine(contexty.WithSelectionPolicy(policy),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{
 				Budget: contexty.EffectiveInputBudget(1),

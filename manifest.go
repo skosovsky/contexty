@@ -101,6 +101,15 @@ func (e *Engine) validateCompileConfiguration(request CompileRequest) error {
 }
 
 func (e *Engine) validateOutputPolicies(request CompileRequest) error {
+	if e.artifactMaterialization != nil || len(request.Artifacts) > 0 {
+		if err := validateMaterializationPolicy(e.artifactMaterialization); err != nil {
+			return err
+		}
+	}
+	if err := validateOutputPolicy(e.outputPolicy); err != nil {
+		return err
+	}
+
 	if e.selection != nil {
 		if selectionErr := e.selection.validate(); selectionErr != nil {
 			return selectionErr
@@ -167,6 +176,7 @@ const (
 // ManifestOutput identifies one compiled channel and its transformation evidence.
 // Text is a reference to rendered content, never the rendered payload itself.
 type ManifestOutput struct {
+	OutputPolicy      *OutputPolicyDecision     `json:"output_policy,omitempty"`
 	Kind              ManifestOutputKind        `json:"kind"`
 	Name              string                    `json:"name"`
 	Segments          []ManifestSegment         `json:"segments"`
@@ -186,32 +196,33 @@ type ManifestOutput struct {
 // CompileManifest is local reproducibility metadata, not an isolated export.
 // It intentionally contains no raw content, callbacks, codecs or backend handles.
 type CompileManifest struct {
-	PreparedInputs       []ManifestSegment        `json:"prepared_inputs"`
-	Resources            []ResourceResolution     `json:"resources"`
-	ID                   string                   `json:"id"`
-	TurnID               string                   `json:"turn_id"`
-	Digest               string                   `json:"digest"`
-	SourceRevision       int64                    `json:"source_revision"`
-	Encoding             Descriptor               `json:"encoding"`
-	Profile              RecordProfile            `json:"profile"`
-	Stages               map[string]Descriptor    `json:"stages"`
-	Inputs               []ManifestSegment        `json:"inputs"`
-	Budgets              []ManifestBudget         `json:"budgets"`
-	Outputs              []ManifestOutput         `json:"outputs"`
-	ResolvedDependencies []ContentRef             `json:"resolved_dependencies"`
-	Artifacts            []ContentRef             `json:"artifacts"`
-	Privacy              *Descriptor              `json:"privacy,omitempty"`
-	InheritedTransforms  []string                 `json:"inherited_transforms"`
-	TransformResults     []ContentRef             `json:"transform_results"`
-	PreviousRecord       *ContentRef              `json:"previous_record,omitempty"`
-	Coverage             []ManifestCoverage       `json:"coverage"`
-	ExcludedArtifacts    []ArtifactExclusion      `json:"excluded_artifacts"`
-	EstimateReports      []ManifestEstimateReport `json:"estimate_reports"`
-	ArtifactBudgets      []ArtifactBudgetRequest  `json:"artifact_budgets"`
-	ArtifactEstimates    []ArtifactBudgetEstimate `json:"artifact_estimates"`
-	Compactions          []ManifestCompaction     `json:"compactions"`
-	TraceConfiguration   TraceConfiguration       `json:"trace_configuration"`
-	CompileConfiguration CompileConfiguration     `json:"compile_configuration"`
+	Materializations     []ArtifactMaterializationDecision `json:"materializations"`
+	PreparedInputs       []ManifestSegment                 `json:"prepared_inputs"`
+	Resources            []ResourceResolution              `json:"resources"`
+	ID                   string                            `json:"id"`
+	TurnID               string                            `json:"turn_id"`
+	Digest               string                            `json:"digest"`
+	SourceRevision       int64                             `json:"source_revision"`
+	Encoding             Descriptor                        `json:"encoding"`
+	Profile              RecordProfile                     `json:"profile"`
+	Stages               map[string]Descriptor             `json:"stages"`
+	Inputs               []ManifestSegment                 `json:"inputs"`
+	Budgets              []ManifestBudget                  `json:"budgets"`
+	Outputs              []ManifestOutput                  `json:"outputs"`
+	ResolvedDependencies []ContentRef                      `json:"resolved_dependencies"`
+	Artifacts            []ContentRef                      `json:"artifacts"`
+	Privacy              *Descriptor                       `json:"privacy,omitempty"`
+	InheritedTransforms  []string                          `json:"inherited_transforms"`
+	TransformResults     []ContentRef                      `json:"transform_results"`
+	PreviousRecord       *ContentRef                       `json:"previous_record,omitempty"`
+	Coverage             []ManifestCoverage                `json:"coverage"`
+	ExcludedArtifacts    []ArtifactExclusion               `json:"excluded_artifacts"`
+	EstimateReports      []ManifestEstimateReport          `json:"estimate_reports"`
+	ArtifactBudgets      []ArtifactBudgetRequest           `json:"artifact_budgets"`
+	ArtifactEstimates    []ArtifactBudgetEstimate          `json:"artifact_estimates"`
+	Compactions          []ManifestCompaction              `json:"compactions"`
+	TraceConfiguration   TraceConfiguration                `json:"trace_configuration"`
+	CompileConfiguration CompileConfiguration              `json:"compile_configuration"`
 }
 
 func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult) (CompileManifest, error) {
@@ -237,7 +248,7 @@ func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult)
 	if preparedErr != nil {
 		return CompileManifest{}, preparedErr
 	}
-	outputs, err := manifestOutputs(result, e.trace.Codec)
+	outputs, err := manifestOutputs(ctx, result, e.trace.Codec)
 	if err != nil {
 		return CompileManifest{}, err
 	}
@@ -264,6 +275,7 @@ func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult)
 		return CompileManifest{}, err
 	}
 	manifest := CompileManifest{
+		Materializations:     materializationDecisions(ctx),
 		PreparedInputs:       preparedInputs,
 		Resources:            nil,
 		ID:                   result.Source.CompilationID,
@@ -438,7 +450,7 @@ func preparedManifestInputs(
 	return append(inputs, pending), nil
 }
 
-func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutput, error) {
+func manifestOutputs(ctx context.Context, result CompileResult, codec JSONSerializer) ([]ManifestOutput, error) {
 	snap := EmptySnapshot().WithSegment(SegmentSystem, result.Payload.System).
 		WithSegment(SegmentHistory, result.Payload.History).WithSegment(SegmentTools, result.Payload.Tools).
 		WithSegment(SegmentMemory, result.Payload.Memory)
@@ -449,6 +461,7 @@ func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutp
 	outputs := []ManifestOutput{
 		{
 			Selection:    result.Selection.clone(),
+			OutputPolicy: compileOutputPolicyDecision(ctx, ManifestMainOutput, string(ManifestMainOutput)),
 			ArtifactRefs: nil, ArtifactEstimates: nil, ArtifactBudgets: nil, ExcludedArtifacts: nil,
 			Kind:            ManifestMainOutput,
 			Name:            string(ManifestMainOutput),
@@ -482,6 +495,7 @@ func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutp
 		}
 		output := ManifestOutput{
 			Selection:         projection.Selection.clone(),
+			OutputPolicy:      compileOutputPolicyDecision(ctx, ManifestTargetOutput, name),
 			ArtifactRefs:      append([]ContentRef(nil), artifactRefs...),
 			ArtifactEstimates: cloneValidArtifactEstimates(projection.ArtifactEstimates),
 			ArtifactBudgets:   artifactRequestsFromEstimates(projection.ArtifactEstimates),
@@ -734,6 +748,9 @@ func (m CompileManifest) validateConfiguration() error {
 		return err
 	}
 	if err := m.CompileConfiguration.validate(m.Profile); err != nil {
+		return err
+	}
+	if err := validateManifestPolicyEvidence(m); err != nil {
 		return err
 	}
 	return m.TraceConfiguration.validate()

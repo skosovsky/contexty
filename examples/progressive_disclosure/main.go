@@ -61,7 +61,10 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := contexty.NewEngine(
+		contexty.WithArtifactMaterialization(*hostMaterialization()),
+		contexty.WithDeferredBlocks(block),
+	)
 	result, err := engine.CompileSnapshot(
 		ctx,
 		contexty.CompileRequest{ //nolint:exhaustruct_v5 // optional inputs omitted
@@ -70,7 +73,7 @@ func run(ctx context.Context) error {
 					Name:         "selected",
 					Segments:     []contexty.SegmentName{contexty.SegmentMemory},
 					View:         "",
-					ArtifactRefs: nil, IncludeCurrentTurn: false, IncludeArtifacts: false, Selection: nil,
+					ArtifactRefs: nil, IncludeCurrentTurn: false, IncludeArtifacts: true, Selection: nil,
 					Budget:    nil,
 					Formatter: nil,
 				},
@@ -134,12 +137,16 @@ func resourceBlock(
 	if err != nil {
 		return contexty.DeferredBlock{}, err
 	}
-	resolver := contexty.ResourceResolver{ //nolint:exhaustruct_v5 // no host label policy or extra codecs
-		Reader:             reader,
-		ReaderIdentity:     contexty.Descriptor{ID: "host-reader", Revision: pinnedIdentity},
-		Projection:         previewPolicy{},
-		ProjectionIdentity: contexty.Descriptor{ID: "host-preview", Revision: pinnedIdentity},
-		Reporter:           reporter,
+	resolver := contexty.ResourceResolver{
+		Materialization:     hostMaterialization(),
+		Reader:              reader,
+		ReaderIdentity:      contexty.Descriptor{ID: "host-reader", Revision: pinnedIdentity},
+		Projection:          previewPolicy{},
+		ProjectionIdentity:  contexty.Descriptor{ID: "host-preview", Revision: pinnedIdentity},
+		Labels:              contexty.LabelProjection{Registry: nil, Policy: nil, RequiredTypes: nil},
+		LabelPolicyIdentity: contexty.Descriptor{ID: "", Revision: ""},
+		Codecs:              nil,
+		Reporter:            reporter,
 	}
 	request := contexty.ResourceResolveRequest{ID: "selected-read", Read: contexty.ResourceReadRequest{
 		ScopeRef: "current-read",

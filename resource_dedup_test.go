@@ -32,7 +32,7 @@ func TestResource_SameIDDeduplication(t *testing.T) {
 			})
 			old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old revision")).ContextArtifact
 			old.SourceRefs = []contexty.SourceRef{{ID: scenario.source}}
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 			// Act.
 			compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 				Artifacts: []contexty.ContextArtifact{old},

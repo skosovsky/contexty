@@ -26,15 +26,17 @@ type ExportMetadata struct {
 	Lineage              bool
 }
 
-// ExportSelection approves exact output IDs, artifacts and lineage content refs.
+// ExportSelection approves exact output message IDs and canonical artifact payload revisions.
+// ArtifactPayloadRefs explicitly approve the original artifact payload, even when
+// its materialized prompt message was transformed by an output policy.
 // Selecting an ID does not approve historical revisions with the same ID.
 // LineageRefs approve only metadata references, not their source payloads.
 type ExportSelection struct {
-	MessageIDs         []string
-	ArtifactIDs        []string
-	LineageRefs        []ContentRef
-	Metadata           ExportMetadata
-	AllowOpaqueDigests bool
+	MessageIDs          []string
+	ArtifactPayloadRefs []ContentRef
+	LineageRefs         []ContentRef
+	Metadata            ExportMetadata
+	AllowOpaqueDigests  bool
 }
 
 // ExportLineageRecord exposes only approved references. OmittedInputs explicitly
@@ -67,7 +69,9 @@ type exportedArtifact struct {
 }
 
 // ExportProjection selects content only from a named output, never from Source
-// or InputSnapshot. All selected IDs must exist and be unique. Metadata defaults
+// or InputSnapshot. Artifact payload refs must exactly match canonical participating
+// artifacts; they are separate from permission to export accepted prompt messages.
+// All selected IDs must exist and be unique. Metadata defaults
 // to no disclosure; lineage digests of excluded content require separate consent.
 // Text is intentionally not copied: it may render a wider context than Messages.
 func ExportProjection(projection CompileProjection,
@@ -80,8 +84,8 @@ func ExportProjection(projection CompileProjection,
 	if err != nil {
 		return ExportEnvelope{}, err
 	}
-	for _, id := range selection.ArtifactIDs {
-		if !slices.Contains(projection.ArtifactIDs, id) {
+	for _, ref := range selection.ArtifactPayloadRefs {
+		if !slices.Contains(projection.ArtifactIDs, ref.ID) {
 			return ExportEnvelope{}, ErrInvalidExportSelection
 		}
 	}
@@ -92,8 +96,11 @@ func ExportProjection(projection CompileProjection,
 	out := ExportEnvelope{Messages: selected.wires, Artifacts: artifactWire, Lineage: nil}
 	if selection.Metadata.Lineage {
 		out.Lineage, err = exportLineage(projection.Lineage, selected, selection)
+		if err != nil {
+			return ExportEnvelope{}, err
+		}
 	}
-	return out, err
+	return out, nil
 }
 
 type exportedMessages struct {
@@ -193,18 +200,25 @@ func exportArtifacts(
 	selection ExportSelection,
 	registry *ExtensionRegistry,
 ) ([]json.RawMessage, error) {
-	if err := validateExportIDs(selection.ArtifactIDs); err != nil {
+	if err := validateExportArtifactRefs(selection.ArtifactPayloadRefs); err != nil {
 		return nil, err
 	}
 	if err := validateUniqueArtifactIDs(artifacts); err != nil {
 		return nil, err
 	}
 	var result []json.RawMessage
-	for _, id := range selection.ArtifactIDs {
+	for _, ref := range selection.ArtifactPayloadRefs {
 		found := false
 		for _, artifact := range artifacts {
-			if artifact.ID != id {
+			if artifact.ID != ref.ID {
 				continue
+			}
+			canonical, err := ArtifactContentRef(artifact)
+			if err != nil {
+				return nil, err
+			}
+			if ref != canonical {
+				return nil, fmt.Errorf("%w: artifact %q revision mismatch", ErrInvalidExportSelection, ref.ID)
 			}
 			found = true
 			wire, err := exportArtifactWire(artifact, selection.Metadata, registry)
@@ -214,10 +228,21 @@ func exportArtifacts(
 			result = append(result, wire)
 		}
 		if !found {
-			return nil, fmt.Errorf("%w: artifact %q missing", ErrInvalidExportSelection, id)
+			return nil, fmt.Errorf("%w: artifact %q missing", ErrInvalidExportSelection, ref.ID)
 		}
 	}
 	return result, nil
+}
+
+func validateExportArtifactRefs(refs []ContentRef) error {
+	ids := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		if err := ref.Validate(); err != nil || ref.Occurrence != "" {
+			return ErrInvalidExportSelection
+		}
+		ids = append(ids, ref.ID)
+	}
+	return validateExportIDs(ids)
 }
 
 func exportArtifactWire(artifact ContextArtifact, policy ExportMetadata, registry *ExtensionRegistry) ([]byte, error) {

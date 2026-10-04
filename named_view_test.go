@@ -34,7 +34,7 @@ func TestNamedView_CallbackCancellation(t *testing.T) {
 			snapshot := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory,
 				[]contexty.Message{fixtureRollingText("input", "safe")})
 			// Act.
-			text, err := contexty.NewEngine(options...).RenderView(ctx, snapshot, "named")
+			text, err := fixtureEngine(options...).RenderView(ctx, snapshot, "named")
 			// Assert.
 			require.ErrorIs(t, err, context.Canceled)
 			require.Empty(t, text)
@@ -47,7 +47,7 @@ func TestNamedView_CallbackCancellation(t *testing.T) {
 
 func TestNamedView_RoleOwnership(t *testing.T) {
 	// Arrange: a role policy tries to modify content, but only its role result counts.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView("named", contexty.ViewConfiguration{}),
 		contexty.WithRoleProjectionPolicy(
 			contexty.RoleProjectionFunc(func(message contexty.Message) (contexty.Role, error) {
@@ -72,7 +72,7 @@ func TestNamedView_FinalBudget(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4)},
 		contexty.CharTokenEstimator{},
 	)
-	engine := contexty.NewEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
+	engine := fixtureEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
 		Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
 			messages[0].Parts[0] = contexty.TextPart{Text: "expanded beyond budget"}
 			return messages, nil
@@ -91,7 +91,7 @@ func TestAcceptance_NamedView_RequiredContent(t *testing.T) {
 	// Arrange: a formatter rewrites a retained message while remaining within budget.
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20),
 		Retention: contexty.RetentionPolicy{MessageIDs: []string{"input"}}}, contexty.CharTokenEstimator{})
-	engine := contexty.NewEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
+	engine := fixtureEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
 		Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
 			messages[0].Parts[0] = contexty.TextPart{Text: "changed"}
 			return messages, nil
@@ -110,7 +110,7 @@ func TestAcceptance_NamedView_RequiredOrder(t *testing.T) {
 	// Arrange: a formatter preserves required content but reverses its chronology.
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20),
 		Retention: contexty.RetentionPolicy{MessageIDs: []string{"a", "b"}}}, contexty.CharTokenEstimator{})
-	engine := contexty.NewEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
+	engine := fixtureEngine(contexty.WithNamedView("named", contexty.ViewConfiguration{Budget: pipe,
 		Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
 			return []contexty.Message{messages[1], messages[0]}, nil
 		}}))

@@ -49,7 +49,7 @@ func TestCompile_EstimateReport(t *testing.T) {
 				},
 			},
 		}}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(
 			fixtureRecordProfile("target"),
@@ -66,7 +66,7 @@ func TestCompile_EstimateReport(t *testing.T) {
 			fixtureContentPolicy(fixtureAllowContent),
 		),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, mainBudget),
-		contexty.WithTransformHooks(contexty.RedactionHook{Replacer: func(text string) string { return text + "!" }}),
+		contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(text string) string { return text + "!" }}),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, request)
@@ -143,11 +143,11 @@ func TestCompile_EstimateFailures(t *testing.T) {
 		},
 	}
 	// Act / Assert: no partial output or misleading successful report escapes.
-	result, err := contexty.NewEngine().CompileSnapshot(context.Background(), request)
+	result, err := fixtureEngine().CompileSnapshot(context.Background(), request)
 	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
 	require.Zero(t, result)
 	// Arrange / Act / Assert: reporting works without recording; media strictness also applies before truncation.
-	plain, err := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
+	plain, err := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
 		context.Background(), contexty.CompileRequest{History: []contexty.Message{message}})
 	require.NoError(t, err)
 	require.Nil(t, plain.Manifest)
@@ -155,7 +155,7 @@ func TestCompile_EstimateFailures(t *testing.T) {
 	require.Equal(t, 1, plain.Estimates[0].Report.Total)
 	media := message.Clone()
 	media.Parts = []contexty.ContentPart{contexty.ImagePart{URL: "private-url"}}
-	result, err = contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
+	result, err = fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
 		context.Background(), contexty.CompileRequest{History: []contexty.Message{media}})
 	require.ErrorIs(t, err, contexty.ErrUnknownEstimateCost)
 	require.Zero(t, result)
@@ -179,7 +179,7 @@ func TestCompile_EstimateFailures(t *testing.T) {
 			contexty.DefaultJSONSerializer(),
 		)
 		require.NoError(t, createErr)
-		engine := contexty.NewEngine(deferred, contexty.WithTraceProfile(fixtureTraceProfile()),
+		engine := fixtureEngine(deferred, contexty.WithTraceProfile(fixtureTraceProfile()),
 			contexty.WithCompileRecording(fixtureRecordProfile()), contexty.WithBudgetPipeline(contexty.SegmentHistory,
 				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}, bad)))
 		_, compileErr := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "bad"})

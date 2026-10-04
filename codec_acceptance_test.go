@@ -57,7 +57,7 @@ func TestAcceptance_Provenance_ThroughCompile(t *testing.T) {
 			[]contexty.Message{msg},
 		),
 	)
-	engine := contexty.NewEngine(contexty.WithConversationID("t"), contexty.WithStateStore(store))
+	engine := fixtureEngine(contexty.WithConversationID("t"), contexty.WithStateStore(store))
 	// Act.
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	// Assert.

@@ -21,7 +21,7 @@ func TestCompile_Configuration(t *testing.T) {
 			return contexty.DeferredResult{Messages: []contexty.Message{fixtureRollingText("resolved", "safe")}}, nil
 		}},
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
 			fixtureBindings(fixtureRecordProfile(), fixtureBinding(contexty.RecordingResolver, "", "", 1)),
@@ -118,7 +118,7 @@ func TestDeferred_ConfigurationFailures(t *testing.T) {
 				ConversationStateStore: contexty.NewMemoryConversationStateStore(),
 				reads:                  &reads,
 			}
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithTraceProfile(fixtureTraceProfile()),
 				contexty.WithDeferredBlocks(block),
 				contexty.WithCompileRecording(

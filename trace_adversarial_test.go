@@ -20,7 +20,7 @@ func TestTrace_MappingOccurrence(t *testing.T) {
 		ref.Occurrence = "forged-unavailable-producer"
 		return map[string][]contexty.ContentRef{"derived": {ref}}, err
 	}
-	engine := contexty.NewEngine(contexty.WithTraceProfile(profile),
+	engine := fixtureEngine(contexty.WithTraceProfile(profile),
 		contexty.WithSegmentFormatter(contexty.SegmentHistory,
 			func(_ context.Context, inputs []contexty.Message) ([]contexty.Message, error) {
 				inputs[0].ID = "derived"
@@ -48,7 +48,7 @@ func TestTrace_MappingRemovalCancellation(t *testing.T) {
 		}
 		return map[string][]contexty.ContentRef{}, nil
 	}
-	engine := contexty.NewEngine(contexty.WithTraceProfile(profile),
+	engine := fixtureEngine(contexty.WithTraceProfile(profile),
 		contexty.WithSegmentFormatter(contexty.SegmentHistory,
 			func(context.Context, []contexty.Message) ([]contexty.Message, error) {
 				return nil, nil
@@ -70,7 +70,7 @@ func TestTrace_StageDescriptors(t *testing.T) {
 		"budget", "prompt", "patch", "project", "render", "prompt-template", "artifact"}
 	request, options := fixtureTraceStageFixture()
 	profile := fixtureTraceProfile()
-	engine := contexty.NewEngine(append(options, contexty.WithTraceProfile(profile))...)
+	engine := fixtureEngine(append(options, contexty.WithTraceProfile(profile))...)
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), request)
 	// Assert: baseline actually reaches every stage; no vacuous failure cases.
@@ -92,11 +92,20 @@ func TestTrace_StageDescriptors(t *testing.T) {
 			// Arrange: remove one necessary descriptor, retaining all execution stages.
 			broken := fixtureTraceProfile()
 			delete(broken.Stages, stage)
-			brokenEngine := contexty.NewEngine(append(options, contexty.WithTraceProfile(broken))...)
+			brokenOptions := append([]contexty.EngineOption(nil), options...)
+			brokenOptions = append(brokenOptions, contexty.WithTraceProfile(broken))
+			want := contexty.ErrInvalidDescriptor
+			if stage == "artifact" {
+				materialization := fixtureMaterialization()
+				materialization.Identity = contexty.Descriptor{}
+				brokenOptions = append(brokenOptions, contexty.WithArtifactMaterialization(*materialization))
+				want = contexty.ErrInvalidArtifactMaterialization
+			}
+			brokenEngine := fixtureEngine(brokenOptions...)
 			// Act.
 			partial, stageErr := brokenEngine.CompileSnapshot(context.Background(), request)
 			// Assert: all main/target stages fail atomically without pinned identity.
-			require.ErrorIs(t, stageErr, contexty.ErrInvalidDescriptor)
+			require.ErrorIs(t, stageErr, want)
 			require.Zero(t, partial)
 		})
 	}
@@ -162,8 +171,8 @@ func TestTrace_InvalidInputs(t *testing.T) {
 			req := contexty.CompileRequest{CompilationID: "invalid-input", History: []contexty.Message{input}}
 			scenario.change(&profile, &req)
 			callbacks := 0
-			engine := contexty.NewEngine(contexty.WithTraceProfile(profile), contexty.WithTransformHooks(
-				contexty.RedactionHook{Replacer: func(text string) string { callbacks++; return text }},
+			engine := fixtureEngine(contexty.WithTraceProfile(profile), contexty.WithTransformHooks(
+				fixtureTextTransform{Replacer: func(text string) string { callbacks++; return text }},
 			))
 			// Act.
 			result, err := engine.CompileSnapshot(context.Background(), req)
@@ -183,7 +192,7 @@ func TestTrace_GeneratedRoot(t *testing.T) {
 			profile.RequireOrigins = strict
 			generated := contexty.TextMessage(contexty.RoleSystem, "host-generated")
 			generated.ID = "generated"
-			engine := contexty.NewEngine(contexty.WithTraceProfile(profile), contexty.WithTransformHooks(
+			engine := fixtureEngine(contexty.WithTraceProfile(profile), contexty.WithTransformHooks(
 				fixtureTransformHook{
 					fn: func(_ context.Context, snapshot contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
 						return snapshot.WithSegment(contexty.SegmentSystem, []contexty.Message{generated}), nil
@@ -227,7 +236,7 @@ func TestTrace_TargetStageFailures(t *testing.T) {
 			if stage == "render" {
 				target = contexty.CompileTarget{Name: "branch", View: string(contexty.ViewLLMXML)}
 			}
-			engine := contexty.NewEngine(contexty.WithTraceProfile(profile))
+			engine := fixtureEngine(contexty.WithTraceProfile(profile))
 			// Act.
 			result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 				CompilationID: "target-stages",

@@ -14,7 +14,7 @@ func TestDeferred_ResultCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hooks := 0
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(contexty.DeferredBlock{
+	engine := fixtureEngine(contexty.WithDeferredBlocks(contexty.DeferredBlock{
 		Name: "selected", Resolve: func(context.Context) (contexty.DeferredResult, error) {
 			cancel()
 			return contexty.DeferredResult{
@@ -38,7 +38,7 @@ func TestDeferred_ResultIsolation(t *testing.T) {
 	message := fixtureRollingText("deferred", "safe")
 	message.SourceRefs = []contexty.SourceRef{{ID: "source"}}
 	messages := []contexty.Message{message}
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(contexty.DeferredBlock{
+	engine := fixtureEngine(contexty.WithDeferredBlocks(contexty.DeferredBlock{
 		Name: "selected", Resolve: func(context.Context) (contexty.DeferredResult, error) {
 			return contexty.DeferredResult{Messages: messages}, nil
 		},

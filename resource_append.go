@@ -17,10 +17,6 @@ type ResourceArtifactMerge struct {
 const resourceIntrinsicRevision = "intrinsic"
 const resourceAppendMaterializeStage = "resource-append-materialize"
 
-func resourceMaterializationIdentity() Descriptor {
-	return Descriptor{ID: "contexty/artifact-materialize", Revision: resourceIntrinsicRevision}
-}
-
 type resourceAppendProjection struct {
 	artifact ContextArtifact
 	message  Message
@@ -30,12 +26,12 @@ type resourceAppendProjection struct {
 func (e *Engine) projectResourceAppend(ctx context.Context, resource ResolvedResource,
 	existing ContextArtifact,
 ) (resourceAppendProjection, error) {
-	inputs, err := resourceAppendInputs(existing, resource.Artifact)
+	inputs, err := resourceAppendInputs(ctx, existing, resource.Artifact)
 	if err != nil {
 		return resourceAppendProjection{}, err
 	}
 	artifact := appendArtifactPayload(existing, resource.Artifact)
-	message, err := artifactMessage(artifact)
+	message, err := artifactSourceMessage(artifact)
 	if err != nil {
 		return resourceAppendProjection{}, err
 	}
@@ -54,6 +50,10 @@ func (e *Engine) projectResourceAppend(ctx context.Context, resource ResolvedRes
 	}
 	artifact.Extensions = cloneExtensions(message.Extensions)
 	artifact.SourceRefs = cloneSourceRefs(message.SourceRefs)
+	message, err = artifactMessage(ctx, artifact)
+	if err != nil {
+		return resourceAppendProjection{}, err
+	}
 	record, err := resourceAppendLineage(
 		ctx,
 		resource.ID,
@@ -70,20 +70,15 @@ func (e *Engine) projectResourceAppend(ctx context.Context, resource ResolvedRes
 	return resourceAppendProjection{artifact: artifact, message: message, record: record}, ctx.Err()
 }
 
-func resourceAppendInputs(existing, incoming ContextArtifact) ([]Message, error) {
+func resourceAppendInputs(ctx context.Context, existing, incoming ContextArtifact) ([]Message, error) {
+	if err := validateAppendArtifacts(existing, incoming); err != nil {
+		return nil, err
+	}
 	var messages []Message
 	for _, artifact := range []ContextArtifact{existing, incoming} {
-		if artifact.Blob != nil {
-			return nil, ErrResourceUnsupported
-		}
-		message, err := artifactMessage(artifact)
+		message, err := artifactMessage(ctx, artifact)
 		if err != nil {
 			return nil, err
-		}
-		for _, part := range message.Parts {
-			if _, text := part.(TextPart); !text {
-				return nil, ErrResourceUnsupported
-			}
 		}
 		messages = append(messages, message)
 	}
@@ -118,6 +113,10 @@ func resourceAppendLineage(ctx context.Context, id string, existing, incoming, a
 	if err != nil {
 		return ResourceArtifactMerge{}, err
 	}
+	policy, err := materializationPolicyIdentity(ctx)
+	if err != nil {
+		return ResourceArtifactMerge{}, err
+	}
 	derived, rendered := output, materialized
 	derived.Occurrence, rendered.Occurrence = id+"/append", id+"/append-materialize"
 	graph := Lineage{Records: []LineageRecord{
@@ -131,7 +130,7 @@ func resourceAppendLineage(ctx context.Context, id string, existing, incoming, a
 		},
 		{
 			ID:        rendered.Occurrence,
-			Transform: resourceMaterializationIdentity(),
+			Transform: policy,
 			Inputs: []ContentRef{
 				derived,
 			},
@@ -163,7 +162,7 @@ func (r ResourceArtifactMerge) Validate(id, artifactID string) error {
 			uniqueContentRefs(r.Inputs),
 		) || !slices.Equal(first.Outputs, []ContentRef{derived}) ||
 		second.ID != rendered.Occurrence || second.Stage != resourceAppendMaterializeStage || second.DecisionRef != "" ||
-		second.Transform != resourceMaterializationIdentity() ||
+		second.Transform.Validate() != nil ||
 		!slices.Equal(second.Inputs, []ContentRef{derived}) || !slices.Equal(second.Outputs, []ContentRef{rendered}) {
 		return ErrInvalidLineage
 	}

@@ -62,7 +62,7 @@ func artifactSelectionReason(
 	if !artifactVisibleInTurn(turnID, artifact) {
 		return artifactInactiveReason, nil
 	}
-	message, err := artifactMessage(artifact)
+	message, err := artifactMessage(ctx, artifact)
 	if err != nil {
 		return "", err
 	}

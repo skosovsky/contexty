@@ -7,7 +7,7 @@ import (
 )
 
 func fixtureTruncationEngine(pipe *contexty.BudgetPipeline) *contexty.Engine {
-	return contexty.NewEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	return fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},

@@ -52,7 +52,7 @@ func TestPrefix_NativeOffload(t *testing.T) {
 	recipe.Boundaries = []contexty.PrefixBoundary{{ID: "completed-round", AfterMessageID: request.History[1].ID}}
 	previous, err := contexty.BuildPrefixManifest(context.Background(), request.History, recipe)
 	require.NoError(t, err)
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
 			contexty.CharTokenEstimator{})))
 	compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{

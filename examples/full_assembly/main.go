@@ -44,11 +44,12 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		}, &contexty.FixedEstimator{TokensPerMessage: fixedTokensPerMsg})
 
 	engine := contexty.NewEngine(
+		contexty.WithArtifactMaterialization(*hostMaterialization()),
 		contexty.WithConversationID("demo"),
 		contexty.WithStateStore(store),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 		contexty.WithObserver(compileObserver{}),
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+		contexty.WithOutputPolicy(*hostEmailPolicy()),
 		contexty.WithDeferredBlocks(
 			contexty.DeferredBlock{
 				Resources:     nil,

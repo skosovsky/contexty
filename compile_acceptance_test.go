@@ -57,7 +57,7 @@ func TestAcceptance_Metadata_Isolation(t *testing.T) {
 			[]contexty.Message{msg},
 		),
 	)
-	engine := contexty.NewEngine(contexty.WithConversationID("meta"), contexty.WithStateStore(store))
+	engine := fixtureEngine(contexty.WithConversationID("meta"), contexty.WithStateStore(store))
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
 	require.NoError(t, err)
 	payload := result.Payload
@@ -115,7 +115,7 @@ func TestAcceptance_Structural_Sharing(t *testing.T) {
 	orig := base.WithSegment(contexty.SegmentHistory, []contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "a@b.com"),
 	})
-	masked, err := contexty.NewRedactionHook().Transform(ctx, orig)
+	masked, err := fixtureEmailTransform().Transform(ctx, orig)
 	require.NoError(t, err)
 	assert.Equal(t, "a@b.com", orig.Segment(contexty.SegmentHistory)[0].TextContent())
 	// Act / Assert: exercise the contract and check its result.
@@ -133,7 +133,7 @@ func TestAcceptance_Compile_Determinism(t *testing.T) {
 			contexty.TextMessage(contexty.RoleUser, "stable"),
 		}),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("det"),
 		contexty.WithStateStore(store),
 	)
@@ -164,7 +164,7 @@ func TestAcceptance_CompileResult_ImmutableContract(t *testing.T) {
 		Role:  contexty.RoleUser,
 		Parts: []contexty.ContentPart{contexty.TextPart{Text: "current turn"}},
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -190,7 +190,7 @@ func TestAcceptance_Segment_FormatterInjectedByHost(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	// Act.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
@@ -229,7 +229,7 @@ func TestAcceptance_Pending_NeverEvicted(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	pending := contexty.Message{
@@ -259,7 +259,7 @@ func TestAcceptance_Pending_NeverEvicted(t *testing.T) {
 func TestAcceptance_Pending_ExceedsBudget(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -312,7 +312,7 @@ func TestAcceptance_Formatter_AffectsTokenBudget(t *testing.T) {
 		},
 	}
 	// Act.
-	without, err := contexty.NewEngine(
+	without, err := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(basePipe, est),
@@ -329,7 +329,7 @@ func TestAcceptance_Formatter_AffectsTokenBudget(t *testing.T) {
 		}
 		return append(cloneMsgs(msgs), extra), nil
 	}
-	with, err := contexty.NewEngine(
+	with, err := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(basePipe, est),
@@ -344,7 +344,7 @@ func TestAcceptance_Formatter_SameIDRecordsFormatted(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	// Act.
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {
@@ -374,7 +374,7 @@ func TestAcceptance_Compile_SnapshotSelfContained(t *testing.T) {
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStateStore()
 	_, _ = loadState(ctx, store, "ignored")
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithStateStore(store),
 		contexty.WithConversationID("ignored"),
 		contexty.WithBudgetPipeline(
@@ -414,7 +414,7 @@ func TestAcceptance_Compile_SnapshotSelfContained(t *testing.T) {
 func TestAcceptance_Pending_HistoryIDCollision(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	dup := contexty.Message{
 		ID:    "dup-id",
 		Role:  contexty.RoleUser,
@@ -432,7 +432,7 @@ func TestAcceptance_Pending_HistoryIDCollision(t *testing.T) {
 func TestAcceptance_Duplicate_MessageIDWithinHistory(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	_, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -455,7 +455,7 @@ func TestAcceptance_Duplicate_MessageIDWithinHistory(t *testing.T) {
 func TestAcceptance_Strict_SystemExceedsBudget(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -477,7 +477,7 @@ func TestAcceptance_Strict_SystemExceedsBudget(t *testing.T) {
 func TestAcceptance_Formatter_ReplacedByFormatter(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(context.Context, []contexty.Message) ([]contexty.Message, error) {
@@ -526,7 +526,7 @@ func TestAcceptance_Summarize_TransformationByMessageID(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
 	// Act.
@@ -567,7 +567,7 @@ func TestAcceptance_Merge_PolicyReplaceByOrigin(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "persona",
 			Segment:     contexty.SegmentSystem,
@@ -604,7 +604,7 @@ func TestAcceptance_Merge_PolicyDeduplicateByLayer(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "layer-dedup",
 			Segment:     contexty.SegmentMemory,
@@ -638,7 +638,7 @@ func TestAcceptance_Merge_PolicyAppendDefault(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "append",
 			Segment: contexty.SegmentMemory,
@@ -668,7 +668,7 @@ func TestAcceptance_MergePolicyReplaceByOrigin_PersistenceProjection(t *testing.
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "persona",
 			Segment:     contexty.SegmentSystem,
@@ -709,7 +709,7 @@ func TestAcceptance_MergePolicyDeduplicateByLayer_PersistenceProjection(t *testi
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "layer-dedup",
 			Segment:     contexty.SegmentMemory,
@@ -747,8 +747,8 @@ func TestAcceptance_IntroducedBaseline_DeferredAndHook(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "contact",
 			Segment: contexty.SegmentMemory,
@@ -775,7 +775,7 @@ func TestAcceptance_MergePolicyReplaceByOrigin_SkipsMessagesWithoutOrigin(t *tes
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "no-origin",
 			Segment:     contexty.SegmentSystem,
@@ -811,7 +811,7 @@ func TestAcceptance_Recorder_StructuralFormattedNotOverwrittenByPassed(t *testin
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:        "persona",
 			Segment:     contexty.SegmentSystem,
@@ -858,8 +858,8 @@ func TestAcceptance_Introduced_BaselineBeforeHooksAndPatches(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "facts",
 			Segment: contexty.SegmentMemory,
@@ -970,7 +970,7 @@ func TestAcceptance_Actor_ProjectionAndSourceRefsRoundTrip(t *testing.T) {
 	require.Len(t, got.SourceRefs, 1)
 	assert.Equal(t, "stable-1", got.SourceRefs[0].CheckpointID)
 
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithRoleProjectionPolicy(
 			contexty.RoleProjectionFunc(func(msg contexty.Message) (contexty.Role, error) {
 				if msg.Actor != nil && msg.Actor.Kind == "alert" {
@@ -995,7 +995,7 @@ func TestAcceptance_Context_AwareFormatterReceivesContextAndPropagatesError(t *t
 	t.Parallel()
 	expectedErr := errors.New("formatter failed")
 	ctx := context.WithValue(context.Background(), formatterContextKey{}, "trace-1")
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSegmentFormatter(
 			contexty.SegmentMemory,
 			func(ctx context.Context, _ []contexty.Message) ([]contexty.Message, error) {
@@ -1041,7 +1041,7 @@ func TestAcceptance_Context_ArtifactsLifecycleAndBudgetPreflight(t *testing.T) {
 		contexty.TextPayload("this artifact is too large"),
 	).ContextArtifact.WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 3})
 
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(
 			contexty.SegmentHistory,
 			contexty.NewBudgetPipeline(
@@ -1168,7 +1168,7 @@ func TestAcceptance_CurrentTurn_PromptProjectionAndPersistence(t *testing.T) {
 	turn := contexty.NewCurrentTurn(raw).WithPromptSafe(promptSafe)
 
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		TurnID: "turn-1",
 		History: []contexty.Message{{
 			ID:    "h1",
@@ -1213,7 +1213,7 @@ func TestAcceptance_CurrentTurn_CanPersistPromptSafeText(t *testing.T) {
 		WithPersistence(contexty.CurrentTurnPersistPromptSafe)
 
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		CurrentTurn:            &turn,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1237,7 +1237,7 @@ func TestAcceptance_CurrentTurn_CanSkipPersistenceAndRejectInvalidPolicy(t *test
 		WithPersistence(contexty.CurrentTurnPersistNone)
 
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		CurrentTurn:            &turn,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1249,7 +1249,7 @@ func TestAcceptance_CurrentTurn_CanSkipPersistenceAndRejectInvalidPolicy(t *test
 
 	invalid := contexty.NewCurrentTurn(contexty.TextMessage(contexty.RoleUser, "raw text")).
 		WithPersistence(contexty.CurrentTurnPersistencePolicy("persist_promt_safe"))
-	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err = fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		CurrentTurn:            &invalid,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1264,7 +1264,7 @@ func TestAcceptance_DurableIdentity_PolicyAndWritebackIntent(t *testing.T) {
 	msg := contexty.TextMessage(contexty.RoleUser, "needs durable id")
 
 	// Act.
-	_, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History:                []contexty.Message{msg},
 		RequireDurableIdentity: true,
 	})
@@ -1272,13 +1272,13 @@ func TestAcceptance_DurableIdentity_PolicyAndWritebackIntent(t *testing.T) {
 	require.ErrorIs(t, err, contexty.ErrMissingIdentityPolicy)
 
 	policy := contexty.NewStableMessageIdentityPolicy("stable")
-	first, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	first, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History:                []contexty.Message{msg},
 		IdentityPolicy:         policy,
 		RequireDurableIdentity: true,
 	})
 	require.NoError(t, err)
-	second, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	second, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History:                []contexty.Message{msg},
 		IdentityPolicy:         policy,
 		RequireDurableIdentity: true,
@@ -1326,7 +1326,7 @@ func TestAcceptance_DurableIdentity_UsesHistoryOffsetForPending(t *testing.T) {
 	msg := contexty.TextMessage(contexty.RoleUser, "same content")
 
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History:                []contexty.Message{msg},
 		Pending:                []contexty.Message{msg},
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
@@ -1357,7 +1357,7 @@ func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
 	}
 
 	// Act.
-	_, err := contexty.NewEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err := fixtureEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1368,7 +1368,7 @@ func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrMissingIdentityPolicy)
 
-	first, err := contexty.NewEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
+	first, err := fixtureEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1378,7 +1378,7 @@ func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
 		RequireDurableIdentity: true,
 	})
 	require.NoError(t, err)
-	second, err := contexty.NewEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
+	second, err := fixtureEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1513,7 +1513,7 @@ func TestAcceptance_Typed_ArtifactReplaceByOriginUsesSourceMetadata(t *testing.T
 	assert.Equal(t, "new", artifacts[0].Payload.PlainText())
 
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(context.Background(), contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(context.Background(), contexty.CompileRequest{
 		Artifacts: []contexty.ContextArtifact{oldArtifact, newArtifact},
 	})
 	// Assert.
@@ -1560,7 +1560,7 @@ func TestAcceptance_Compile_MergesStoreAndRequestArtifactsBeforeValidation(t *te
 	}))
 
 	// Act.
-	result, err := contexty.NewEngine(
+	result, err := fixtureEngine(
 		contexty.WithStateStore(store),
 		contexty.WithConversationID("chat-1"),
 	).Compile(ctx, contexty.CompileRequest{
@@ -1581,7 +1581,7 @@ func TestAcceptance_Multi_TargetCompileOutput(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1654,7 +1654,7 @@ func TestAcceptance_Projection_InputSnapshotUsesPreparedState(t *testing.T) {
 	}
 
 	// Act.
-	result, err := contexty.NewEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine(contexty.WithTransformHooks(hook)).CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1723,10 +1723,10 @@ func TestAcceptance_Target_TraceabilityAndIdentityPolicy(t *testing.T) {
 		},
 	}
 	// Act.
-	first, err := contexty.NewEngine().CompileSnapshot(ctx, req)
+	first, err := fixtureEngine().CompileSnapshot(ctx, req)
 	// Assert.
 	require.NoError(t, err)
-	second, err := contexty.NewEngine().CompileSnapshot(ctx, req)
+	second, err := fixtureEngine().CompileSnapshot(ctx, req)
 	require.NoError(t, err)
 
 	budgeted := first.Projections["budgeted"]
@@ -1754,7 +1754,7 @@ func TestAcceptance_Target_BudgetSummaryTraceability(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	result, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
 			{
 				ID:    "h1",
@@ -1812,7 +1812,7 @@ func TestAcceptance_Target_GeneratedIDsFailClosedWithoutPolicy(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	_, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1840,7 +1840,7 @@ func TestAcceptance_Target_FormatterDuplicateIDsFailClosed(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	_, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
 			Role:  contexty.RoleUser,
@@ -1878,7 +1878,7 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	// Act.
-	_, err := contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
 				Name:      "dup",
@@ -1900,7 +1900,7 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, contexty.ErrDuplicateCompileTarget)
 
-	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err = fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
 				Name:      "unknown_view",
@@ -1913,7 +1913,7 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	})
 	require.ErrorIs(t, err, contexty.ErrUnknownCompileTargetView)
 
-	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err = fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
 				Name:      "bad_segment",
@@ -1926,7 +1926,7 @@ func TestAcceptance_CompileTarget_Validation(t *testing.T) {
 	})
 	require.ErrorIs(t, err, contexty.ErrInvalidCompileTargetSegment)
 
-	_, err = contexty.NewEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+	_, err = fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
 			{
 				Name:      "view_conflict",

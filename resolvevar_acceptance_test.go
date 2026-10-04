@@ -21,7 +21,7 @@ func TestAcceptance_ResolveVar_NotPersisted(t *testing.T) {
 			contexty.TextMessage(contexty.RoleSystem, "sys"),
 		}),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("ov"),
 		contexty.WithStateStore(store),
 	)
@@ -42,7 +42,7 @@ func TestAcceptance_ResolveVar_InDeferredResolve(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	store := contexty.NewMemoryConversationStateStore()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("ov"),
 		contexty.WithStateStore(store),
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
@@ -72,7 +72,7 @@ func TestAcceptance_ResolveVar_InDeferred(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "locale",
 			Segment: contexty.SegmentMemory,
@@ -100,7 +100,7 @@ func TestAcceptance_ResolveVar_MapClone(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	var captured, fresh map[string]string
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(contexty.DeferredBlock{
 			Name:    "vars",
 			Segment: contexty.SegmentMemory,

@@ -38,7 +38,7 @@ func TestAcceptance_SelectionPriorityAndChronology(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(2)},
 		&contexty.FixedEstimator{TokensPerMessage: 1},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithSelectionPolicy(policy),
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 	)
@@ -88,7 +88,7 @@ func TestAcceptance_SelectionRejectsInvalidPlans(t *testing.T) {
 				},
 			}
 			// Act.
-			result, err := contexty.NewEngine(contexty.WithSelectionPolicy(policy)).
+			result, err := fixtureEngine(contexty.WithSelectionPolicy(policy)).
 				CompileSnapshot(t.Context(), contexty.CompileRequest{CurrentTurn: &turn})
 			// Assert.
 			require.ErrorIs(t, err, scenario.want)
@@ -110,7 +110,7 @@ func TestAcceptance_SelectionRejectsRawTurnAndPartialRound(t *testing.T) {
 		},
 	}
 	// Act / Assert.
-	result, err := contexty.NewEngine(contexty.WithSelectionPolicy(policy)).
+	result, err := fixtureEngine(contexty.WithSelectionPolicy(policy)).
 		CompileSnapshot(t.Context(), contexty.CompileRequest{CurrentTurn: &turn})
 	require.ErrorIs(t, err, contexty.ErrUnavailableCandidate)
 	require.Zero(t, result)
@@ -133,7 +133,7 @@ func TestAcceptance_SelectionRejectsRawTurnAndPartialRound(t *testing.T) {
 		return []contexty.SelectionChoice{{Ref: fixtureRefForMessage(t, candidates[0].Messages[1])}}, nil
 	}
 	// Act / Assert.
-	result, err = contexty.NewEngine(contexty.WithSelectionPolicy(policy)).
+	result, err = fixtureEngine(contexty.WithSelectionPolicy(policy)).
 		CompileSnapshot(t.Context(), contexty.CompileRequest{History: []contexty.Message{assistant, answer}})
 	require.ErrorIs(t, err, contexty.ErrSelectionRound)
 	require.Zero(t, result)
@@ -163,7 +163,7 @@ func TestAcceptance_ArtifactAdmissionUsesEachOutputEstimator(t *testing.T) {
 			return []contexty.SelectionChoice{{Ref: ref}}, nil
 		},
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("consumer")),
@@ -202,7 +202,7 @@ func TestAcceptance_ArtifactAdmissionUsesEachOutputEstimator(t *testing.T) {
 	require.Equal(t, []contexty.ContextArtifact{artifact}, replayed.Outputs[1].Artifacts)
 	envelope, err := contexty.ExportProjection(
 		result.Projections["consumer"],
-		contexty.ExportSelection{ArtifactIDs: []string{"doc"}},
+		contexty.ExportSelection{ArtifactPayloadRefs: []contexty.ContentRef{ref}},
 		contexty.DefaultJSONSerializer(),
 	)
 	require.NoError(t, err)

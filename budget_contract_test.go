@@ -320,7 +320,7 @@ func TestAcceptance_BudgetSummaryReservations(t *testing.T) {
 				),
 			}, contexty.CharTokenEstimator{}, contexty.WithRollingSummary(fixtureRollingPolicy(1)))
 			turn := contexty.NewCurrentTurn(fixtureRollingText("turn", turnText))
-			engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
 			request := contexty.CompileRequest{
 				System: []contexty.Message{fixtureRollingText("sys", "sys")},
 				History: []contexty.Message{

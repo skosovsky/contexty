@@ -45,15 +45,15 @@ func fixtureComponentFixture(t *testing.T) (contexty.CompileResult, contexty.Rec
 		messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "formatted"}}
 		return messages, nil
 	}
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(trace),
 		contexty.WithCompileRecording(profile),
 		contexty.WithCompileContentCapture(
 			contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent),
 		),
-		contexty.WithTransformHooks(contexty.RedactionHook{Replacer: func(text string) string { return text + "!" }},
-			contexty.RedactionHook{Replacer: func(text string) string { return text + "?" }}),
+		contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(text string) string { return text + "!" }},
+			fixtureTextTransform{Replacer: func(text string) string { return text + "?" }}),
 		contexty.WithSegmentFormatter(contexty.SegmentHistory, formatter),
 		contexty.WithRoleProjectionPolicy(
 			contexty.RoleProjectionFunc(

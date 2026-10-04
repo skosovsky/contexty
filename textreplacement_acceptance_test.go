@@ -14,7 +14,7 @@ func TestAcceptance_TextReplacement_ExactLastUserID(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -62,7 +62,7 @@ func TestAcceptance_TextReplacement_NotMutatesInput(t *testing.T) {
 			),
 		},
 	}
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, req)
 	// Assert.
@@ -76,7 +76,7 @@ func TestAcceptance_TextReplacement_EmptySegmentMissingTarget(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Options: []contexty.CompileOption{
@@ -94,7 +94,7 @@ func TestAcceptance_TextReplacement_MissingIDDoesNotRetarget(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
@@ -117,7 +117,7 @@ func TestAcceptance_TextReplacement_PendingTurn(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	req := contexty.CompileRequest{
 		History: []contexty.Message{{
 			ID:    "h1",
@@ -153,7 +153,7 @@ func TestAcceptance_TextReplacement_PreBudgetSkipsHistory(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{
@@ -177,7 +177,7 @@ func TestAcceptance_TextReplacement_MultipleExplicitIDs(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -224,7 +224,7 @@ func TestAcceptance_TextReplacement_ExplicitFirstID(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -264,7 +264,7 @@ func TestAcceptance_TextReplacement_ExplicitIDWithoutDefaults(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -298,7 +298,7 @@ func TestAcceptance_TextReplacement_ToolsSegment(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		Tools: []contexty.Message{{
@@ -324,7 +324,7 @@ func TestAcceptance_TextReplacement_PostBudgetSkipsNonHistory(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{{

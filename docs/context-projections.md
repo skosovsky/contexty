@@ -3,8 +3,8 @@
 Compile has one shared preparation boundary: normalized identities, prompt-safe
 current turn, historical argument projections, and explicitly declared deferred
 resolution/merge. Deferred authorization and projection remain host-owned.
-Preparation is trusted local work, not transport to a consumer. Output hooks,
-role/segment formatters, summarizers and budget admission run after this boundary.
+Preparation is trusted local work, not transport to a consumer. Artifact materialization requires an explicit host role/typed-parts policy.
+Output hooks, role/segment formatters, summarizers and budget admission run after this boundary.
 Compile options and shared resolvers run once, without hidden reads for targets.
 
 Main uses all prepared segments, visible artifacts and prompt-safe active input.
@@ -46,8 +46,10 @@ by original preparation ordinal. Priorities decide admission, never dialogue
 chronology. With an explicit selection policy, each optional unit is tried against
 the whole admitted representation; an over-cap unit is excluded. Required overflow
 fails. Without a selection policy, normal history budgeting remains responsible
-for shortening history. The final representation is recounted after transforms
-and formatting regardless of admission estimates.
+for shortening history. A configured final `OutputPolicy` runs after transforms, pending/post-budget
+patches and formatting; the accepted representation is recounted afterward,
+regardless of admission estimates. View outputs run the same semantic policy
+before rendering.
 
 Artifact-local caps use the output's own estimator and admit whole artifacts.
 A prepared resource merge is shared before those caps; an excluded merged revision
@@ -77,7 +79,9 @@ Diagnostic projections can contain source/prepared input. External handoff uses
 `ExportProjection(projection, selection, codec)` and the resulting allowlisted
 `ExportEnvelope` only. Export selects final messages and participating artifacts
 owned by that projection; an external artifact set cannot inject payloads.
-Metadata disclosure remains explicit. Do not serialize the diagnostic projection.
+Message export selects accepted output-policy revisions. Canonical artifact
+payload export is a separate host disclosure decision: final prompt projection
+does not modify artifact bodies. Metadata disclosure remains explicit. Do not serialize the diagnostic projection.
 
 Persistence requires an explicit output choice. For main, use
 `DerivePersistenceProjection` to restore compile-only changes and apply the
@@ -86,3 +90,12 @@ choice; the host must decide which prompt transforms belong in durable state.
 `ProjectCheckpoint` filters artifact persistence/lifecycle, not prompt edits.
 Commit under a loaded OCC revision. No API combines summaries from multiple
 outputs automatically. See [the runnable example](../examples/context_projections/main.go).
+
+`ExportSelection.ArtifactPayloadRefs` explicitly approves exact canonical artifact
+revisions from `ArtifactContentRef`, independently of `MessageIDs` selecting accepted
+prompt messages. This replaces export selection `ArtifactIDs`; projection
+`ArtifactIDs` remains participation evidence. Stale, malformed or duplicate payload
+refs fail export. A payload ref grants disclosure of the original canonical typed
+body, not the output-policy representation; select only messages when handing off
+the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
+canonical body.

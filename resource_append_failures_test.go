@@ -20,7 +20,7 @@ func TestResourceAppend_MediaRejected(t *testing.T) {
 		"projected",
 		contexty.ToolPayload{MIMEType: "image/png", Binary: []byte{1}},
 	).ContextArtifact
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	// Act.
 	compiled, err := engine.CompileSnapshot(
 		context.Background(),
@@ -57,7 +57,7 @@ func TestResourceAppend_BlobPreviewRejected(t *testing.T) {
 		t,
 		func(artifact *contexty.ContextArtifact) { artifact.MergePolicy = contexty.PolicyAppend },
 	)
-	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
+	engine := fixtureEngine(contexty.WithDeferredBlocks(block))
 	// Act.
 	compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		Artifacts: []contexty.ContextArtifact{*prepared.Artifact},
@@ -97,7 +97,7 @@ func TestResourceAppend_EstimatorCancellation(t *testing.T) {
 				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
 				counter,
 			)
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithDeferredBlocks(block),
 				contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
 			)
@@ -125,7 +125,7 @@ func TestResourceAppend_DerivedPrivacy(t *testing.T) {
 		t,
 		func(artifact *contexty.ContextArtifact) { artifact.MergePolicy = contexty.PolicyAppend },
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(block),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(
@@ -168,7 +168,7 @@ func TestResourceAppend_LabelFailures(t *testing.T) {
 			}
 			old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
 			old.Extensions = []contexty.Extension{fixtureWireExtension{wire: `["host-owned"]`}}
-			engine := contexty.NewEngine(contexty.WithDeferredBlocks(block), contexty.WithTraceProfile(profile))
+			engine := fixtureEngine(contexty.WithDeferredBlocks(block), contexty.WithTraceProfile(profile))
 			// Act.
 			compiled, err := engine.CompileSnapshot(
 				ctx,

@@ -21,10 +21,10 @@ func TestAcceptance_Redaction_ThroughCompile(t *testing.T) {
 			contexty.TextMessage(contexty.RoleUser, "reach me at a@b.com"),
 		}),
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithConversationID("t"),
 		contexty.WithStateStore(store),
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 	)
 	// Act.
 	result, err := engine.Compile(ctx, contexty.CompileRequest{})
@@ -40,8 +40,8 @@ func TestAcceptance_Redaction_ThroughCompile(t *testing.T) {
 func TestAcceptance_Redaction_RecordsTransformation(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
-	engine := contexty.NewEngine(
-		contexty.WithTransformHooks(contexty.NewRedactionHook()),
+	engine := fixtureEngine(
+		contexty.WithTransformHooks(fixtureEmailTransform()),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{

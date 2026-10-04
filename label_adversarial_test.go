@@ -47,7 +47,7 @@ func TestLabel_RoleProjection(t *testing.T) {
 			input := contexty.TextMessage(contexty.RoleUser, "external input")
 			input.ID = "external"
 			input.Extensions = []contexty.Extension{fixtureWireExtension{wire: `{"host":"external"}`}}
-			engine := contexty.NewEngine(
+			engine := fixtureEngine(
 				contexty.WithTraceProfile(profile),
 				contexty.WithRoleProjectionPolicy(
 					contexty.RoleProjectionFunc(func(contexty.Message) (contexty.Role, error) {

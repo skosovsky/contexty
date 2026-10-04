@@ -16,9 +16,11 @@ type DeferredConfiguration struct {
 
 // CompileConfiguration contains identities, never option values or executions.
 type CompileConfiguration struct {
-	Outputs  []OutputConfiguration   `json:"outputs"`
-	Options  ContentRef              `json:"options"`
-	Deferred []DeferredConfiguration `json:"deferred"`
+	Materialization *Descriptor             `json:"materialization,omitempty"`
+	OutputPolicy    *Descriptor             `json:"output_policy,omitempty"`
+	Outputs         []OutputConfiguration   `json:"outputs"`
+	Options         ContentRef              `json:"options"`
+	Deferred        []DeferredConfiguration `json:"deferred"`
 }
 
 type compileOptionIdentityKey struct{}
@@ -104,10 +106,34 @@ func (e *Engine) compileConfiguration(ctx context.Context) (CompileConfiguration
 	}
 	deferred, err := e.deferredConfiguration()
 	outputs, _ := ctx.Value(outputConfigurationKey{}).([]OutputConfiguration)
-	return CompileConfiguration{Options: ref, Deferred: deferred, Outputs: cloneOutputConfigurations(outputs)}, err
+	config := CompileConfiguration{
+		Options:         ref,
+		Deferred:        deferred,
+		Outputs:         cloneOutputConfigurations(outputs),
+		Materialization: nil,
+		OutputPolicy:    nil,
+	}
+	if e.artifactMaterialization != nil {
+		identity := e.artifactMaterialization.Identity
+		config.Materialization = &identity
+	}
+	if e.outputPolicy != nil {
+		identity := e.outputPolicy.Identity
+		config.OutputPolicy = &identity
+	}
+	return config, err
 }
 
 func (c CompileConfiguration) clone() CompileConfiguration {
+	if c.Materialization != nil {
+		identity := *c.Materialization
+		c.Materialization = &identity
+	}
+	if c.OutputPolicy != nil {
+		identity := *c.OutputPolicy
+		c.OutputPolicy = &identity
+	}
+
 	c.Outputs = cloneOutputConfigurations(c.Outputs)
 	c.Deferred = slices.Clone(c.Deferred)
 	for i := range c.Deferred {
@@ -117,6 +143,9 @@ func (c CompileConfiguration) clone() CompileConfiguration {
 }
 
 func (c CompileConfiguration) validate(profile RecordProfile) error {
+	if err := c.validatePolicyIdentities(); err != nil {
+		return err
+	}
 	if err := validateOutputConfigurations(c.Outputs, profile); err != nil {
 		return err
 	}
@@ -160,5 +189,17 @@ func (c CompileConfiguration) validate(profile RecordProfile) error {
 	if len(indices) != 0 {
 		return ErrInvalidRecordingComponent
 	}
+	return nil
+}
+
+func (c CompileConfiguration) validatePolicyIdentities() error {
+	for _, identity := range []*Descriptor{c.Materialization, c.OutputPolicy} {
+		if identity != nil {
+			if err := identity.Validate(); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }

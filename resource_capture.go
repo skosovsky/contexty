@@ -19,7 +19,7 @@ func captureResolvedResource(ctx context.Context, resource ResolvedResource) err
 			return err
 		}
 	}
-	err := capture.message(ctx, resource.Message, CaptureTransform, "resource-materialize")
+	err := capture.message(ctx, resource.Message, CaptureTransform, traceStageResourceMaterialize)
 	if canceled := ctx.Err(); canceled != nil {
 		return canceled
 	}

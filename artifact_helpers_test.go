@@ -32,7 +32,7 @@ func fixtureArtifactEstimateFixture(t *testing.T) (contexty.CompileResult, *int)
 		ContextArtifact.WithTurn("other").
 		WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 1})
 	unlimited := contexty.NewMemoryBlock("unlimited", contexty.TextPayload("tail")).ContextArtifact
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(

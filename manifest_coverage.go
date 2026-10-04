@@ -231,7 +231,7 @@ func coverageAnchors(graph Lineage, inherited []string, segment string, input Co
 	for _, record := range graph.Records {
 		materialization := record.Stage == stage
 		if stage == traceStageArtifact {
-			materialization = materialization || record.Stage == "resource-materialize" ||
+			materialization = materialization || record.Stage == traceStageResourceMaterialize ||
 				record.Stage == resourceAppendMaterializeStage
 		}
 		if !materialization || slices.Contains(inherited, record.ID) {

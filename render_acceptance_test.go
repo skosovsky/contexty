@@ -21,7 +21,7 @@ func TestAcceptance_Render_ViewNonMutating(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView("trim", contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
 			Budget:        pipe,
@@ -57,7 +57,7 @@ func TestAcceptance_RenderView_BuiltinParity(t *testing.T) {
 			contexty.TextMessage(contexty.RoleUser, "tool-a"),
 			contexty.TextMessage(contexty.RoleUser, "tool-b"),
 		})
-	engine := contexty.NewEngine()
+	engine := fixtureEngine()
 	// Act / Assert: exercise the contract and check its result.
 	for _, name := range []string{string(contexty.ViewLLMXML), string(contexty.ViewFlatClassifier)} {
 		viewName := name
@@ -76,7 +76,7 @@ func TestAcceptance_RenderView_BuiltinTakesPrecedenceOverRegistry(t *testing.T) 
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
-	engine := contexty.NewEngine(
+	engine := fixtureEngine(
 		contexty.WithNamedView(string(contexty.ViewLLMXML), contexty.ViewConfiguration{
 			SourceSegment: contexty.SegmentHistory,
 			Formatter: func(_ context.Context, msgs []contexty.Message) ([]contexty.Message, error) {

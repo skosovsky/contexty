@@ -128,7 +128,7 @@ func TestCompile_ExtensionEstimate(t *testing.T) {
 		fixtureExtensionEstimateCodec(),
 	)
 	require.NoError(t, err)
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
 		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)}, reporter)))
 	// Act.
 	compiled, err := engine.CompileSnapshot(
