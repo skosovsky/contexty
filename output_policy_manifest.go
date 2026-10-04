@@ -102,7 +102,10 @@ func validateOutputPolicyEvidence(identity *Descriptor, output ManifestOutput) e
 	if err := decision.Validate(); err != nil {
 		return err
 	}
-	if err := validatePolicyFinalRefs(output, decision.Outputs); err != nil {
+	if err := validatePolicyFinalRefs(
+		output,
+		opaqueAcceptedSegments(output.OpaqueState, decision.Outputs),
+	); err != nil {
 		return err
 	}
 	for i, segment := range decision.Inputs {
@@ -208,7 +211,7 @@ func validateRequiredPolicyRefs(required []ContentRef, output ManifestOutput) er
 	}
 	previous := -1
 	for _, ref := range required {
-		accepted := policyAcceptedRef(output.OutputPolicy, ref)
+		accepted := opaqueAcceptedRef(output.OpaqueState, policyAcceptedRef(output.OutputPolicy, ref))
 		position := slices.IndexFunc(
 			refs,
 			func(candidate ContentRef) bool { return baseContentRef(candidate) == accepted },

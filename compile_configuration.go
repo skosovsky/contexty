@@ -16,11 +16,12 @@ type DeferredConfiguration struct {
 
 // CompileConfiguration contains identities, never option values or executions.
 type CompileConfiguration struct {
-	Materialization *Descriptor             `json:"materialization,omitempty"`
-	OutputPolicy    *Descriptor             `json:"output_policy,omitempty"`
-	Outputs         []OutputConfiguration   `json:"outputs"`
-	Options         ContentRef              `json:"options"`
-	Deferred        []DeferredConfiguration `json:"deferred"`
+	OpaqueState     *OpaqueStateConfiguration `json:"opaque_state,omitempty"`
+	Materialization *Descriptor               `json:"materialization,omitempty"`
+	OutputPolicy    *Descriptor               `json:"output_policy,omitempty"`
+	Outputs         []OutputConfiguration     `json:"outputs"`
+	Options         ContentRef                `json:"options"`
+	Deferred        []DeferredConfiguration   `json:"deferred"`
 }
 
 type compileOptionIdentityKey struct{}
@@ -107,6 +108,7 @@ func (e *Engine) compileConfiguration(ctx context.Context) (CompileConfiguration
 	deferred, err := e.deferredConfiguration()
 	outputs, _ := ctx.Value(outputConfigurationKey{}).([]OutputConfiguration)
 	config := CompileConfiguration{
+		OpaqueState:     nil,
 		Options:         ref,
 		Deferred:        deferred,
 		Outputs:         cloneOutputConfigurations(outputs),
@@ -121,10 +123,18 @@ func (e *Engine) compileConfiguration(ctx context.Context) (CompileConfiguration
 		identity := e.outputPolicy.Identity
 		config.OutputPolicy = &identity
 	}
+	if e.opaqueStatePolicy != nil {
+		config.OpaqueState = &OpaqueStateConfiguration{
+			Policy:      e.opaqueStatePolicy.Identity,
+			Profile:     e.opaqueStatePolicy.Profile,
+			Invalidated: e.opaqueStatePolicy.Invalidated,
+		}
+	}
 	return config, err
 }
 
 func (c CompileConfiguration) clone() CompileConfiguration {
+	c.OpaqueState = c.OpaqueState.clone()
 	if c.Materialization != nil {
 		identity := *c.Materialization
 		c.Materialization = &identity
@@ -193,6 +203,11 @@ func (c CompileConfiguration) validate(profile RecordProfile) error {
 }
 
 func (c CompileConfiguration) validatePolicyIdentities() error {
+	if c.OpaqueState != nil {
+		if err := c.OpaqueState.Validate(); err != nil {
+			return err
+		}
+	}
 	for _, identity := range []*Descriptor{c.Materialization, c.OutputPolicy} {
 		if identity != nil {
 			if err := identity.Validate(); err != nil {

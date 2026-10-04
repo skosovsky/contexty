@@ -16,15 +16,17 @@ type Extension interface {
 
 // ExtensionRegistry decodes host-owned typed extensions.
 type ExtensionRegistry struct {
-	mu       sync.RWMutex
-	decoders map[string]func([]byte) (Extension, error)
+	mu           sync.RWMutex
+	decoders     map[string]func([]byte) (Extension, error)
+	opaqueCodecs map[string]Descriptor
 }
 
 // NewExtensionRegistry returns an empty extension registry.
 func NewExtensionRegistry() *ExtensionRegistry {
 	return &ExtensionRegistry{
-		mu:       sync.RWMutex{},
-		decoders: make(map[string]func([]byte) (Extension, error)),
+		mu:           sync.RWMutex{},
+		decoders:     make(map[string]func([]byte) (Extension, error)),
+		opaqueCodecs: make(map[string]Descriptor),
 	}
 }
 
@@ -34,11 +36,18 @@ func (r *ExtensionRegistry) snapshot() *ExtensionRegistry {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return &ExtensionRegistry{mu: sync.RWMutex{}, decoders: maps.Clone(r.decoders)}
+	return &ExtensionRegistry{
+		mu:           sync.RWMutex{},
+		decoders:     maps.Clone(r.decoders),
+		opaqueCodecs: maps.Clone(r.opaqueCodecs),
+	}
 }
 
 // Register adds a decoder for extension typeID. It panics on duplicates.
 func (r *ExtensionRegistry) Register(typeID string, decode func([]byte) (Extension, error)) {
+	if typeID == OpaqueStateExtensionType {
+		panic("contexty: reserved opaque envelope type")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.decoders[typeID]; exists {
@@ -58,6 +67,9 @@ func (r *ExtensionRegistry) Decode(data []byte) (Extension, error) {
 	}
 	if wire.TypeID == "" {
 		return nil, errors.New("contexty: extension decode: missing type_id")
+	}
+	if wire.TypeID == OpaqueStateExtensionType {
+		return r.decodeOpaqueState(wire.Payload)
 	}
 	r.mu.RLock()
 	decode, ok := r.decoders[wire.TypeID]
@@ -86,6 +98,11 @@ type extensionWire struct {
 func EncodeExtension(ext Extension) ([]byte, error) {
 	if nilInterfaceValue(ext) {
 		return []byte(jsonNullLiteral), nil
+	}
+	if ext.ExtensionType() == OpaqueStateExtensionType {
+		if _, ok := opaqueStateFromExtension(ext); !ok {
+			return nil, ErrInvalidOpaqueState
+		}
 	}
 	payload, err := json.Marshal(ext)
 	if err != nil {
@@ -145,4 +162,22 @@ func cloneExtensions(exts []Extension) []Extension {
 		}
 	}
 	return out
+}
+
+// RegisterOpaquePayload pins a host payload decoder to its explicit encoding identity.
+func (r *ExtensionRegistry) RegisterOpaquePayload(
+	typeID string,
+	identity Descriptor,
+	decode func([]byte) (Extension, error),
+) {
+	if typeID == "" || typeID == OpaqueStateExtensionType || identity.Validate() != nil || decode == nil {
+		panic("contexty: invalid opaque payload registration")
+	}
+	r.Register(typeID, decode)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.opaqueCodecs == nil {
+		r.opaqueCodecs = make(map[string]Descriptor)
+	}
+	r.opaqueCodecs[typeID] = identity
 }

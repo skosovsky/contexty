@@ -144,7 +144,7 @@ func TestAcceptance_TextReplacement_PendingTurn(t *testing.T) {
 	assert.Equal(t, "REDACTED", last.TextContent())
 	assert.Equal(t, "secret@mail.com", result.Source.Pending[0].TextContent())
 	assert.Equal(t, "secret@mail.com", req.Pending[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "h1", proj[0].ID)
 }
@@ -213,7 +213,7 @@ func TestAcceptance_TextReplacement_MultipleExplicitIDs(t *testing.T) {
 		require.NotNil(t, m)
 		assert.Equal(t, "PATCHED", m.TextContent())
 	}
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 3)
 	assert.Equal(t, "first", proj[0].TextContent())
 	assert.Equal(t, "mid", proj[1].TextContent())
@@ -254,7 +254,7 @@ func TestAcceptance_TextReplacement_ExplicitFirstID(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "PATCHED", result.Payload.History[0].TextContent())
 	assert.Equal(t, "last", result.Payload.History[2].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 3)
 	assert.Equal(t, "first", proj[0].TextContent())
 	assert.Equal(t, "last", proj[2].TextContent())
@@ -289,7 +289,7 @@ func TestAcceptance_TextReplacement_ExplicitIDWithoutDefaults(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "PATCHED", result.Payload.History[0].TextContent())
 	assert.Equal(t, "second", result.Payload.History[1].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, proj, 2)
 	assert.Equal(t, "first", proj[0].TextContent())
 }
@@ -315,7 +315,7 @@ func TestAcceptance_TextReplacement_ToolsSegment(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	assert.Equal(t, "PATCHED", result.Payload.Tools[0].TextContent())
-	proj := result.DerivePersistenceProjection(contexty.SegmentTools)
+	proj := fixturePersistenceSegment(t, result, contexty.SegmentTools)
 	require.Len(t, proj, 1)
 	assert.Equal(t, "tool payload", proj[0].TextContent())
 }

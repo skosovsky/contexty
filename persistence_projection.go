@@ -1,10 +1,10 @@
 package contexty
 
-// DerivePersistenceProjection returns messages ready to persist for seg,
+// derivePersistenceSegment returns the source-aware persistence segment,
 // using immutable Source and compile transformations (excludes evicted/truncated;
 // in-place formatted/ephemeral changes revert to Source or Introduced originals;
 // structural replacements and deferred merge removals use payload adds; Pending excluded from history).
-func (r CompileResult) DerivePersistenceProjection(seg SegmentName) []Message {
+func (r CompileResult) derivePersistenceSegment(seg SegmentName) []Message {
 	sourceMsgs := r.sourceSegment(seg)
 	pendingIDs := r.pendingIDSet()
 	var out []Message
@@ -185,4 +185,19 @@ func (r CompileResult) isArtifactMessage(id string) bool {
 		}
 	}
 	return false
+}
+
+// DerivePersistenceState restores compile-only changes and validates all declared
+// opaque dependencies jointly before returning any durable state. The host must
+// explicitly supply the codec and integration profile used for that state.
+func (r CompileResult) DerivePersistenceState(codec JSONSerializer, profile Descriptor) (ConversationState, error) {
+	state := EmptyState()
+	for _, segment := range viewSegmentOrder() {
+		state = state.WithSegment(segment, r.derivePersistenceSegment(segment))
+	}
+	state = state.WithArtifacts(r.Artifacts)
+	if err := ValidateOpaqueState(snapshotPayload(state).FlattenMessages(), codec, profile); err != nil {
+		return ConversationState{}, err
+	}
+	return state, nil
 }

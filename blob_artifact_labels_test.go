@@ -65,7 +65,10 @@ func TestBlob_ArtifactLabels(t *testing.T) {
 		CompilationID: "blob-labels", Artifacts: []contexty.ContextArtifact{*prepared.Artifact},
 		Lineage: prepared.Lineage, Origins: []contexty.ContentRef{original}})
 	require.NoError(t, err)
-	stateCodec := contexty.ConversationStateCodec{Extensions: registry}
+	stateCodec := contexty.ConversationStateCodec{
+		Extensions:    registry,
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	delta := contexty.ConversationDelta{Operation: contexty.DeltaUpsertArtifact, Artifact: prepared.Artifact}
 	deltaWire, err := stateCodec.EncodeDelta(delta)
 	require.NoError(t, err)
@@ -163,7 +166,10 @@ func TestArtifact_LabelCodecFailures(t *testing.T) {
 			decoded, decodeErr := contexty.UnmarshalArtifactJSON(wire, registry)
 			require.ErrorIs(t, decodeErr, contexty.ErrMissingLabelCodec)
 			require.Zero(t, decoded)
-			codec := contexty.ConversationCodec{Extensions: registry}
+			codec := contexty.ConversationCodec{
+				Extensions:    registry,
+				OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+			}
 			encoded, encodeErr := codec.Encode(contexty.EmptySnapshot().WithArtifact(input))
 			require.ErrorIs(t, encodeErr, contexty.ErrMissingLabelCodec)
 			require.Nil(t, encoded)
@@ -206,7 +212,10 @@ func TestArtifact_AppendPreservesLabels(t *testing.T) {
 	right.SourceRefs = []contexty.SourceRef{{ID: "right-source"}}
 	// Act: state append preserves both opaque values, leaving reconciliation to host.
 	state := contexty.EmptyState().WithArtifact(left).WithArtifact(right)
-	codec := contexty.ConversationCodec{Extensions: fixtureArtifactLabelRegistry()}
+	codec := contexty.ConversationCodec{
+		Extensions:    fixtureArtifactLabelRegistry(),
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	wire, err := codec.Encode(state)
 	require.NoError(t, err)
 	restored, err := codec.Decode(wire)

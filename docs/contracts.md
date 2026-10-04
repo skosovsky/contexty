@@ -375,7 +375,7 @@ in the manifest, without publishing raw option values.
 The projection runs before deferred/hooks and budgeting. Its lineage uses the
 actual pinned offload policy, preserving labels without a trust change. Later
 host transforms still apply normal label policy. TransformChain records an
-in-place historical argument change; DerivePersistenceProjection returns the
+in-place historical argument change; DerivePersistenceState(codec, profile) returns the
 original arguments and opaque approval/operation metadata, never preview bytes.
 Main/targets and accepted replay contain the exact projected arguments/ref
 without Put/Get; isolated export strips ArgumentsBlob handles/scopes. Do not
@@ -842,3 +842,13 @@ refs fail export. A payload ref grants disclosure of the original canonical type
 body, not the output-policy representation; select only messages when handing off
 the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
 canonical body.
+
+## Непрозрачное внешнее состояние
+
+Единственная representation — `OpaqueState` envelope над `Message.Extensions`;
+контракт, placement, codecs, точные зависимости и явное invalidation описаны в
+[opaque-state.md](opaque-state.md). Core не интерпретирует host payload. Проверка
+каждого выдаваемого semantic output идёт после host output policy и до финальной
+оценки/identity. Fail-closed — default; разрешённый drop фиксируется в evidence.
+BYOT payload и pinned codec/profile сохраняются losslessly через store и replay.
+Plain render и isolated export автоматически state не раскрывают.

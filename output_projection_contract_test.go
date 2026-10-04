@@ -172,7 +172,7 @@ func TestAcceptance_OutputBoundaryPersistenceModes(t *testing.T) {
 			// Assert.
 			require.NoError(t, err)
 			require.Equal(t, "prompt [safe:main]", result.Payload.History[0].TextContent())
-			persisted := result.DerivePersistenceProjection(contexty.SegmentHistory)
+			persisted := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 			if scenario.want == "" {
 				require.Empty(t, persisted)
 			} else {
@@ -239,7 +239,7 @@ func TestAcceptance_OutputBoundaryRequiredRefsAndAcceptedReplay(t *testing.T) {
 	// Assert: exact refs need not prevent the explicitly configured final projection.
 	require.NoError(t, err)
 	require.Equal(t, "[safe:main]", result.Payload.History[0].TextContent())
-	require.Equal(t, []contexty.Message{message}, result.DerivePersistenceProjection(contexty.SegmentHistory))
+	require.Equal(t, []contexty.Message{message}, fixturePersistenceSegment(t, result, contexty.SegmentHistory))
 	accepted, err := result.Record.Accept("host/accept")
 	require.NoError(t, err)
 	expected, err := contexty.ReplayExpectationFor(accepted.Manifest)

@@ -37,7 +37,7 @@ func TestTextReplacement_Identity(t *testing.T) {
 	require.Equal(t, selected.SourceRefs, result.Payload.History[0].SourceRefs)
 	require.Equal(t, selected.Role, result.Payload.History[0].Role)
 	require.Equal(t, "first", result.Payload.History[1].TextContent())
-	require.Equal(t, selected, result.DerivePersistenceProjection(contexty.SegmentHistory)[0])
+	require.Equal(t, selected, fixturePersistenceSegment(t, result, contexty.SegmentHistory)[0])
 	require.Equal(t, "original", req.History[0].TextContent())
 }
 

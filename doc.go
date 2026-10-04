@@ -15,12 +15,13 @@
 //   - CompileResult.Source + NormalizedSnapshot + Writeback + Projections + Introduced
 //   - CompileProjection.Source + InputSnapshot for local preparation traceability
 //   - SelectionPolicy for exact atomic candidate admission with host priorities
-//   - DerivePersistenceProjection and ProjectCheckpoint for explicit persistence
+//   - Fallible DerivePersistenceState and ProjectCheckpoint for explicit persistence
 //   - RetentionPolicy, budget-aware SummaryRequest and explicit BudgetDecision
 //   - CompactionPolicy for early compression with a soft target
 //   - BudgetPipeline (retention with summary or eviction) and Engine.Compile → CompileResult
 //   - BudgetRequest for effective input capacity or a window with reservations
 //   - TransformChain and Lineage for ordered transitions and full content identity
+//   - OpaqueState envelopes with host codecs, placement and exact context dependencies
 //   - Host LabelProjection and codecs for Bring Your Own Types metadata
 //   - CompileManifest and accepted SavedCompileRecord for exact replay without execution
 //   - CompactionRecord, explicit tool-round state and opt-in rolling summaries

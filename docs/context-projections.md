@@ -84,10 +84,10 @@ payload export is a separate host disclosure decision: final prompt projection
 does not modify artifact bodies. Metadata disclosure remains explicit. Do not serialize the diagnostic projection.
 
 Persistence requires an explicit output choice. For main, use
-`DerivePersistenceProjection` to restore compile-only changes and apply the
+`DerivePersistenceState(codec, profile)` to restore compile-only changes and apply the
 current-turn persistence policy. A target `Snapshot` is an explicit prompt-state
 choice; the host must decide which prompt transforms belong in durable state.
-`ProjectCheckpoint` filters artifact persistence/lifecycle, not prompt edits.
+`ProjectCheckpoint(state, codec, profile)` filters artifact persistence/lifecycle and validates opaque bindings across the selected state; it does not restore prompt edits.
 Commit under a loaded OCC revision. No API combines summaries from multiple
 outputs automatically. See [the runnable example](../examples/context_projections/main.go).
 

@@ -89,8 +89,12 @@ type Store struct {
 // New returns a Redis-backed ConversationStateStore.
 func New(client goredis.UniversalClient, opts ...Option) *Store {
 	store := &Store{
-		client:    client,
-		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil},
+		client: client,
+		codec: contexty.ConversationCodec{
+			Provenance:    contexty.DefaultProvenanceRegistry(),
+			Extensions:    nil,
+			OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+		},
 		keyPrefix: defaultKeyPrefix,
 		ttl:       0,
 	}
@@ -201,7 +205,11 @@ func (s *Store) mutate(
 	if err != nil {
 		return err
 	}
-	next, err = contexty.ProjectCheckpoint(next)
+	next, err = contexty.ProjectCheckpoint(
+		next,
+		contexty.JSONSerializer{Provenance: s.codec.Provenance, Extensions: s.codec.Extensions},
+		s.codec.OpaqueProfile,
+	)
 	if err != nil {
 		return err
 	}

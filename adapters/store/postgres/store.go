@@ -25,8 +25,12 @@ type Store struct {
 // New returns a PostgreSQL-backed ConversationStateStore.
 func New(pool *pgxpool.Pool, opts ...Option) *Store {
 	store := &Store{
-		pool:      pool,
-		codec:     contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil},
+		pool: pool,
+		codec: contexty.ConversationCodec{
+			Provenance:    contexty.DefaultProvenanceRegistry(),
+			Extensions:    nil,
+			OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+		},
 		tableName: defaultTableName,
 	}
 	for _, opt := range opts {
@@ -134,7 +138,11 @@ func (s *Store) mutate(
 	if err != nil {
 		return err
 	}
-	next, err = contexty.ProjectCheckpoint(next)
+	next, err = contexty.ProjectCheckpoint(
+		next,
+		contexty.JSONSerializer{Provenance: s.codec.Provenance, Extensions: s.codec.Extensions},
+		s.codec.OpaqueProfile,
+	)
 	if err != nil {
 		return err
 	}

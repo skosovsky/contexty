@@ -129,8 +129,9 @@ type ConversationStateStore interface {
 
 // ConversationStateCodec serializes state and deltas for checkpoints.
 type ConversationStateCodec struct {
-	Provenance *ProvenanceRegistry
-	Extensions *ExtensionRegistry
+	OpaqueProfile Descriptor
+	Provenance    *ProvenanceRegistry
+	Extensions    *ExtensionRegistry
 }
 
 type conversationDeltaWire struct {

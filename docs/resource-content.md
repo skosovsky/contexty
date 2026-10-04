@@ -68,7 +68,7 @@ Resolution evidence and preparation state are owned by one compile operation.
 `CompileResult.Artifacts` contains main participating projections; each named
 projection owns its own participating artifacts. Choose one output artifact set
 and apply normal checkpoint policy explicitly. Artifact-generated messages are
-not also saved through `DerivePersistenceProjection`, which prevents an ephemeral
+not also saved through `DerivePersistenceState(codec, profile)`, which prevents an ephemeral
 projection becoming a persistent ordinary message. Source retains pre-resolution
 input metadata, not an implicitly approved downstream resource body.
 

@@ -277,7 +277,8 @@ func TestStoreIntegration(t *testing.T) {
 
 	t.Run("expanded semantic round trip", func(t *testing.T) {
 		store := New(pool, WithCodec(contexty.ConversationCodec{
-			Provenance: contexty.DefaultProvenanceRegistry(),
+			Provenance:    contexty.DefaultProvenanceRegistry(),
+			OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
 		}))
 		conversationID := "thread-semantic-expanded"
 		require.NoError(t, persistExpandedSemanticFixture(ctx, store, conversationID))

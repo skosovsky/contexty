@@ -1,6 +1,9 @@
 package contexty
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 var (
 	ErrEmptyCheckpointCommit       = errors.New("contexty: empty checkpoint commit")
@@ -12,7 +15,10 @@ var (
 const ConversationSchema = "contexty/conversation/1"
 
 // ProjectCheckpoint explicitly filters working artifacts for durable persistence.
-func ProjectCheckpoint(state ConversationState) (ConversationState, error) {
+func ProjectCheckpoint(state ConversationState, codec JSONSerializer, profile Descriptor) (ConversationState, error) {
+	if err := ValidateOpaqueState(checkpointMessages(state), codec, profile); err != nil {
+		return ConversationState{}, err
+	}
 	artifacts := state.Artifacts()
 	for _, artifact := range artifacts {
 		if artifact.ID == "" {
@@ -41,4 +47,22 @@ type MemoryStateStoreOption func(*MemoryConversationStateStore)
 // WithMemoryStateCodec supplies host codecs for checkpoint parts and extensions.
 func WithMemoryStateCodec(codec ConversationCodec) MemoryStateStoreOption {
 	return func(store *MemoryConversationStateStore) { store.codec = codec }
+}
+
+// checkpointMessages fixes durable order: standard wire segments first, then
+// host-defined segments by name. Every stored segment participates in validation.
+func checkpointMessages(state ConversationState) []Message {
+	order := viewSegmentOrder()
+	names := state.SegmentNames()
+	slices.Sort(names)
+	for _, name := range names {
+		if !slices.Contains(order, name) {
+			order = append(order, name)
+		}
+	}
+	var messages []Message
+	for _, name := range order {
+		messages = append(messages, state.Segment(name)...)
+	}
+	return messages
 }

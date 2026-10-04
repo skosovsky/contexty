@@ -74,7 +74,7 @@ func TestLineage_Stages(t *testing.T) {
 	require.Equal(t, "sum", result.Payload.History[0].TextContent())
 	require.Len(t, result.Payload.History[0].SourceRefs, 2)
 	require.NotEqual(t, result.Projections["one"].Lineage, result.Lineage)
-	persisted := result.DerivePersistenceProjection(contexty.SegmentHistory)
+	persisted := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
 	require.Len(t, persisted, 1)
 	require.Equal(t, "sum", persisted[0].TextContent())
 	require.Len(t, persisted[0].SourceRefs, 2)

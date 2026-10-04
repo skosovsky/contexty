@@ -114,17 +114,25 @@ func TestResourceAppend_CheckpointLifecycle(t *testing.T) {
 				TurnID: "turn", Artifacts: []contexty.ContextArtifact{old},
 			})
 			require.NoError(t, err)
-			projected, err := contexty.ProjectCheckpoint(contexty.EmptyState().WithArtifacts(compiled.Artifacts))
+			projected, err := contexty.ProjectCheckpoint(
+				contexty.EmptyState().WithArtifacts(compiled.Artifacts),
+				contexty.DefaultJSONSerializer(),
+				contexty.Descriptor{ID: "", Revision: ""},
+			)
 			require.NoError(t, err)
-			wire, err := (contexty.ConversationCodec{}).Encode(projected)
+			wire, err := (contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}).Encode(
+				projected,
+			)
 			require.NoError(t, err)
-			state, err := (contexty.ConversationCodec{}).Decode(wire)
+			state, err := (contexty.ConversationCodec{OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}).Decode(
+				wire,
+			)
 			// Assert: checkpoint policy and lifecycle survive, without duplicate prompt-message persistence.
 			require.NoError(t, err)
 			require.Equal(t, scenario.want, compiled.Artifacts[0].Payload.Text)
 			require.Equal(t, scenario.lifecycle, compiled.Artifacts[0].Lifecycle)
 			require.Equal(t, scenario.stored, len(state.Artifacts()) == 1)
-			require.Empty(t, compiled.DerivePersistenceProjection(contexty.SegmentMemory))
+			require.Empty(t, fixturePersistenceSegment(t, compiled, contexty.SegmentMemory))
 		})
 	}
 }

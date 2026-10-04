@@ -45,7 +45,11 @@ func reconcileOwnedCheckpoint(ctx context.Context, store contexty.ConversationSt
 	if err != nil {
 		return err
 	}
-	expected, err := contexty.ProjectCheckpoint(working)
+	expected, err := contexty.ProjectCheckpoint(
+		working,
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
 	if err != nil {
 		return err
 	}
@@ -60,7 +64,11 @@ func reconcileOwnedCheckpoint(ctx context.Context, store contexty.ConversationSt
 	if err != nil {
 		return fmt.Errorf("%w: reload: %w", ErrUnknownOutcome, err)
 	}
-	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil}
+	codec := contexty.ConversationCodec{
+		Provenance:    contexty.DefaultProvenanceRegistry(),
+		Extensions:    nil,
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
 	expectedWire, err := codec.Encode(expected.WithVersion(version))
 	if err != nil {
 		return err

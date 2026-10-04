@@ -112,7 +112,7 @@ iterate the chain when every transition matters. Use `Lineage` for actual
 input/output content refs and transform descriptors, not the action list as a
 substitute for provenance.
 
-Persist through `DerivePersistenceProjection` and explicit artifact/checkpoint
+Persist through `DerivePersistenceState(codec, profile)` and explicit artifact/checkpoint
 operations. A prompt preview or compile-only replacement is not the authoritative
 raw input. `CurrentTurn` keeps raw/prompt-safe/persistence forms distinct.
 Artifact lifecycle, persistence policy and turn binding remain explicit; artifact
@@ -268,7 +268,7 @@ hard-code successive revisions or blindly retry on a reloaded version. Compile
 still does not persist its output. An unavailable response (or conflict after a
 retry) does not prove whether this host committed; reconciliation belongs to host.
 
-ConversationCodec now retains all artifacts. Use `ProjectCheckpoint` explicitly
+ConversationCodec now retains all artifacts. Use `ProjectCheckpoint(state, codec, profile)` explicitly
 before directly encoding a durable checkpoint. Memory stores use the same projection
 and configured semantic codec as durable adapters; host extensions require
 `WithMemoryStateCodec`. The wire envelope requires `schema: contexty/conversation/1`;
@@ -338,3 +338,27 @@ refs fail export. A payload ref grants disclosure of the original canonical type
 body, not the output-policy representation; select only messages when handing off
 the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
 canonical body.
+
+## Opaque state and fallible persistence
+
+Store external model state in the single `OpaqueState` extension envelope, with a
+host-owned typed `Payload`, explicit `Codec`, `Placement` and `Binding`. Remove
+text, tool-result or artificial media wrappers. Register payload decoders with
+`RegisterOpaquePayload(typeID, descriptor, decoder)`; ordinary extension registration
+does not establish the required pinned opaque codec identity. Configure
+`WithOpaqueStatePolicy` for state-bearing compile and `ConversationCodec.OpaqueProfile`
+for storage. Core does not infer a protocol from a vendor or payload name.
+
+Replace per-segment `DerivePersistenceProjection` with fallible
+`DerivePersistenceState(codec, profile)`, then select segments from the validated
+returned state. `ProjectCheckpoint` also requires `(state, codec, profile)`.
+Cross-segment dependency validation must happen over the whole chosen state;
+handle failures before writing. No compatibility wrapper preserves the old API.
+For state-free data, use a normal semantic codec and empty profile descriptor.
+
+State dependency changes fail closed. `OpaqueDropInvalid` is an explicit host
+choice with recorded drops, rather than automatic byte repair. Isolated export
+needs `OpaqueStateIDs`, a matching `OpaqueProfile` and separately allowed dependency
+messages. Default rendering and export omit opaque payloads. External opaque
+compaction items and local text summaries have separate lifecycles; see the
+[offline fixture recipe](../examples/opaque_state/main.go).

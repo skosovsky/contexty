@@ -72,8 +72,7 @@ func TestAcceptance_Extensions_RoundTrip(t *testing.T) {
 	reg := newTestExtensionRegistry()
 	codec := contexty.ConversationCodec{
 		Provenance: contexty.DefaultProvenanceRegistry(),
-		Extensions: reg,
-	}
+		Extensions: reg, OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	snap := contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, []contexty.Message{{
 		ID:         "ext-1",
 		Role:       contexty.RoleUser,

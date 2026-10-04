@@ -101,7 +101,7 @@ func TestFinal_BudgetPersistence(t *testing.T) {
 	// Assert.
 	require.NoError(t, err)
 	require.Equal(t, "safe", result.Payload.History[0].TextContent())
-	require.Equal(t, "raw", result.DerivePersistenceProjection(contexty.SegmentHistory)[0].TextContent())
+	require.Equal(t, "raw", fixturePersistenceSegment(t, result, contexty.SegmentHistory)[0].TextContent())
 
 	// Arrange: pending is protected even when larger than the limit.
 	req.Pending = []contexty.Message{contexty.TextMessage(contexty.RoleUser, strings.Repeat("x", 11))}

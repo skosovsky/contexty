@@ -48,7 +48,7 @@ func TestResource_SameIDDeduplication(t *testing.T) {
 			require.Equal(t, scenario.want, compiled.Payload.Memory[0].TextContent())
 			require.Equal(t, compiled.Payload.Memory, compiled.Projections["memory"].Messages)
 			require.Equal(t, []contexty.ContextArtifact{old}, compiled.Source.Artifacts)
-			require.Empty(t, compiled.DerivePersistenceProjection(contexty.SegmentMemory))
+			require.Empty(t, fixturePersistenceSegment(t, compiled, contexty.SegmentMemory))
 			require.Equal(t, 1, *reads)
 		})
 	}

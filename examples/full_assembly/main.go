@@ -109,10 +109,18 @@ func logCompileArtifacts(result contexty.CompileResult) {
 	if view, ok := result.Projections["flat_classifier"]; ok {
 		log.Printf("flat classifier projection:\n%s", view.Text)
 	}
+	persisted, err := result.DerivePersistenceState(
+		contexty.DefaultJSONSerializer(),
+		contexty.Descriptor{ID: "", Revision: ""},
+	)
+	if err != nil {
+		log.Printf("persistence rejected: %v", err)
+		return
+	}
 	for _, seg := range []contexty.SegmentName{
 		contexty.SegmentSystem, contexty.SegmentHistory, contexty.SegmentMemory,
 	} {
-		proj := result.DerivePersistenceProjection(seg)
+		proj := persisted.Segment(seg)
 		log.Printf("persistence projection %s: %d messages", seg, len(proj))
 	}
 }

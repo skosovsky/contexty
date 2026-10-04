@@ -80,8 +80,8 @@ func TestTrace_LabelPersistenceRoundTrip(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	persisted := result.DerivePersistenceProjection(contexty.SegmentHistory)
-	codec := contexty.ConversationCodec{Extensions: registry}
+	persisted := fixturePersistenceSegment(t, result, contexty.SegmentHistory)
+	codec := contexty.ConversationCodec{Extensions: registry, OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""}}
 	wire, err := codec.Encode(contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, persisted))
 	require.NoError(t, err)
 	restored, err := codec.Decode(wire)
