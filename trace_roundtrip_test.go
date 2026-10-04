@@ -52,8 +52,33 @@ func TestTrace_LabelPersistenceRoundTrip(t *testing.T) {
 			}),
 		}, contexty.CharTokenEstimator{})))
 	// Act: compile, derive persistence, then reconstruct messages and graph from codecs.
-	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "labels",
-		History: []contexty.Message{a, b}, Origins: origins, Targets: []contexty.CompileTarget{{Name: "consumer"}}})
+	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
+		CompilationID: "labels",
+		History: []contexty.Message{
+			a,
+			b,
+		},
+		Origins: origins,
+		Targets: []contexty.CompileTarget{
+			{
+				Segments: []contexty.SegmentName{contexty.SegmentHistory},
+				Name:     "consumer",
+				Budget: contexty.NewBudgetPipeline(
+					contexty.BudgetConfig{
+						Budget: contexty.EffectiveInputBudget(10),
+						Summarizer: stubSummarizer(
+							func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
+								m := contexty.TextMessage(contexty.RoleAssistant, "sum")
+								m.ID = "consumer-summary"
+								return m, nil
+							},
+						),
+					},
+					contexty.CharTokenEstimator{},
+				),
+			},
+		},
+	})
 	require.NoError(t, err)
 	persisted := result.DerivePersistenceProjection(contexty.SegmentHistory)
 	codec := contexty.ConversationCodec{Extensions: registry}

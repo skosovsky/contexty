@@ -218,7 +218,7 @@ func TestTrace_TargetStageFailures(t *testing.T) {
 			delete(profile.Stages, stage)
 			input := contexty.TextMessage(contexty.RoleUser, "x")
 			input.ID = "input"
-			target := contexty.CompileTarget{Name: "branch", SourceSegment: contexty.SegmentHistory,
+			target := contexty.CompileTarget{Name: "branch", Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Budget: contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)},
 					contexty.CharTokenEstimator{}),
 				Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {

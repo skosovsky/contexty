@@ -92,8 +92,14 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 	prepared.Selection.Preview.Bytes[0] = 'X'
 	// Act: authoritative History stays raw; the option projects before budget.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "argument-compile", History: request.History, Origins: origins,
-		Options: []contexty.CompileOption{option}, Targets: []contexty.CompileTarget{{Name: "copy"}}})
+		CompilationID: "argument-compile",
+		History:       request.History,
+		Origins:       origins,
+		Options: []contexty.CompileOption{
+			option,
+		},
+		Targets: []contexty.CompileTarget{{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "copy"}},
+	})
 	// Assert: call/result/approval identity and original persistence are intact.
 	require.NoError(t, err)
 	require.Equal(t, request.History, result.Source.History)
@@ -119,8 +125,14 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 	resumed, err := checkpointCodec.Decode(checkpoint)
 	require.NoError(t, err)
 	resumeResult, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "argument-resume", History: resumed.Segment(contexty.SegmentHistory), Origins: origins,
-		Options: []contexty.CompileOption{option}, Targets: []contexty.CompileTarget{{Name: "copy"}}})
+		CompilationID: "argument-resume",
+		History:       resumed.Segment(contexty.SegmentHistory),
+		Origins:       origins,
+		Options: []contexty.CompileOption{
+			option,
+		},
+		Targets: []contexty.CompileTarget{{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "copy"}},
+	})
 	require.NoError(t, err)
 	require.Equal(t, result.Payload.History, resumeResult.Payload.History)
 	require.Equal(t, request.History, resumeResult.DerivePersistenceProjection(contexty.SegmentHistory))
@@ -138,7 +150,6 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 	require.Equal(t, result.Payload.History, replayed.Outputs[0].Segments[string(contexty.SegmentHistory)])
 	exported, err := contexty.ExportProjection(
 		contexty.CompileProjection{Messages: result.Payload.History, Lineage: result.Lineage},
-		nil,
 		contexty.ExportSelection{MessageIDs: []string{"assistant", "result"}},
 		request.Codec,
 	)

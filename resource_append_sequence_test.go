@@ -36,7 +36,9 @@ func TestResourceAppend_Sequence(t *testing.T) {
 				CompilationID: "append-sequence",
 				Artifacts:     []contexty.ContextArtifact{old},
 				Origins:       []contexty.ContentRef{oldRef},
-				Targets:       []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+				Targets: []contexty.CompileTarget{
+					{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+				},
 			})
 			// Assert: only the last derived revision reaches main/target; both incoming records remain evidence.
 			require.NoError(t, err)

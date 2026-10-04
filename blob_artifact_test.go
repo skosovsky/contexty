@@ -90,9 +90,17 @@ func TestBlob_ArtifactCompileAndResume(t *testing.T) {
 		fixtureBlobReplayOption(t, prepared.Artifact.Blob.Object))
 	require.NoError(t, err)
 	require.Equal(t, result.Artifacts, replayed.Artifacts)
-	projection := contexty.CompileProjection{Messages: result.Payload.Memory, Lineage: result.Lineage}
-	exported, err := contexty.ExportProjection(projection, result.Artifacts,
-		contexty.ExportSelection{ArtifactIDs: []string{"large"}}, contexty.DefaultJSONSerializer())
+	projection := contexty.CompileProjection{
+		Messages:    result.Payload.Memory,
+		Lineage:     result.Lineage,
+		Artifacts:   result.Artifacts,
+		ArtifactIDs: []string{"large"},
+	}
+	exported, err := contexty.ExportProjection(
+		projection,
+		contexty.ExportSelection{ArtifactIDs: []string{"large"}},
+		contexty.DefaultJSONSerializer(),
+	)
 	require.NoError(t, err)
 	exportWire, err := json.Marshal(exported)
 	require.NoError(t, err)

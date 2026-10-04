@@ -181,6 +181,9 @@ func requiredSavedContent(manifest CompileManifest) []savedRequirement {
 		)
 	}
 	for _, output := range manifest.Outputs {
+		for _, ref := range output.ArtifactRefs {
+			requirements = append(requirements, savedRequirement{ref: ref, kind: SavedArtifact})
+		}
 		for _, segment := range output.Segments {
 			for _, ref := range segment.Messages {
 				requirements = append(requirements, savedRequirement{ref: ref, kind: SavedMessage})

@@ -47,11 +47,16 @@ func TestResourceAppend_TargetFinalBudget(t *testing.T) {
 		contexty.CharTokenEstimator{},
 	)
 	request := contexty.CompileRequest{Artifacts: []contexty.ContextArtifact{old}, Targets: []contexty.CompileTarget{
-		{Name: "expanded", SourceSegment: contexty.SegmentMemory, Budget: pipe,
+		{
+			Name:             "expanded",
+			Segments:         []contexty.SegmentName{contexty.SegmentMemory},
+			IncludeArtifacts: true,
+			Budget:           pipe,
 			Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
 				messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "old\nsafe!"}}
 				return messages, nil
-			}},
+			},
+		},
 	}}
 	engine := contexty.NewEngine(contexty.WithDeferredBlocks(block))
 	// Act / Assert: post-format target overflow fails atomically.
@@ -65,7 +70,11 @@ func TestResourceAppend_TargetFinalBudget(t *testing.T) {
 	}
 	request.Targets = append(
 		request.Targets,
-		contexty.CompileTarget{Name: "other", SourceSegment: contexty.SegmentMemory},
+		contexty.CompileTarget{
+			Name:             "other",
+			Segments:         []contexty.SegmentName{contexty.SegmentMemory},
+			IncludeArtifacts: true,
+		},
 	)
 	compiled, err = engine.CompileSnapshot(context.Background(), request)
 	require.NoError(t, err)
@@ -128,8 +137,11 @@ func TestResourceAppend_EvidenceOwnership(t *testing.T) {
 	)
 	old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
 	compiled, err := fixtureDedupRecordingEngine(block).CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "append-owned", Artifacts: []contexty.ContextArtifact{old},
-		Targets: []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+		CompilationID: "append-owned",
+		Artifacts:     []contexty.ContextArtifact{old},
+		Targets: []contexty.CompileTarget{
+			{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+		},
 	})
 	require.NoError(t, err)
 	// Act: mutate one caller-visible graph and typed artifact without changing saved evidence.

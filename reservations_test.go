@@ -15,10 +15,16 @@ func TestContract_Reservations(t *testing.T) {
 	message.ID = "m"
 	system := contexty.TextMessage(contexty.RoleSystem, "123")
 	system.ID = "sys"
-	request := contexty.CompileRequest{CompilationID: "reserved", System: []contexty.Message{system},
-		History: []contexty.Message{message}, Targets: []contexty.CompileTarget{{Name: "target",
+	request := contexty.CompileRequest{
+		CompilationID: "reserved",
+		System:        []contexty.Message{system},
+		History: []contexty.Message{
+			message,
+		},
+		Targets: []contexty.CompileTarget{{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "target",
 			Budget: contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.WindowInputBudget(12, 3, 2)},
-				contexty.CharTokenEstimator{})}}}
+				contexty.CharTokenEstimator{})}},
+	}
 	for _, budget := range []contexty.BudgetRequest{
 		contexty.WindowInputBudget(20, 7, 3), contexty.EffectiveInputBudget(10),
 	} {
@@ -84,7 +90,10 @@ func TestInvalid_Reservations(t *testing.T) {
 		require.Zero(t, calls)
 		engine = contexty.NewEngine(deferred)
 		_, err = engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
-			Targets: []contexty.CompileTarget{{Name: "bad", Budget: pipe}}})
+			Targets: []contexty.CompileTarget{
+				{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "bad", Budget: pipe},
+			},
+		})
 		require.ErrorIs(t, err, contexty.ErrInvalidBudgetRequest)
 		require.Zero(t, calls)
 	}

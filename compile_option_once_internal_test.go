@@ -25,11 +25,18 @@ func TestCompile_OptionsEvaluatedOnce(t *testing.T) {
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), CompileRequest{
 		History: []Message{input}, Options: []CompileOption{option},
+		Targets: []CompileTarget{
+			{Name: "one", Segments: []SegmentName{SegmentHistory}},
+			{Name: "two", Segments: []SegmentName{SegmentHistory}},
+		},
 	})
 	// Assert: both compile phases use the exact same evaluated option configuration.
 	require.NoError(t, err)
 	require.Equal(t, 1, calls)
 	require.Equal(t, "evaluation-1", result.Payload.History[0].TextContent())
+	for _, projection := range result.Projections {
+		require.Equal(t, "evaluation-1", projection.Messages[0].TextContent())
+	}
 	require.Equal(t, "original", input.TextContent())
 }
 

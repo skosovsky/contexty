@@ -34,7 +34,9 @@ func TestResource_ReplaceByOrigin(t *testing.T) {
 	request := contexty.CompileRequest{
 		CompilationID: "replace-resource",
 		Artifacts:     []contexty.ContextArtifact{old, other},
-		Targets:       []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+		Targets: []contexty.CompileTarget{
+			{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+		},
 	}
 	// Act: native resolution replaces matching origin without changing actual resolution evidence.
 	compiled, err := engine.CompileSnapshot(context.Background(), request)

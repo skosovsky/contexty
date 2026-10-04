@@ -112,9 +112,13 @@ func validateManifestCompactionProfile(manifest CompileManifest, budget Manifest
 	if err := profile.validate(); err != nil {
 		return err
 	}
-	if profile.Model != manifest.Profile.Model || profile.Encoding != manifest.Encoding ||
-		manifest.Privacy == nil || profile.Privacy != *manifest.Privacy ||
-		budget.Summarizer == nil || profile.Summarizer != *budget.Summarizer || budget.ReportProfile == nil {
+	if (budget.Kind == ManifestMainOutput && profile.Model != manifest.Profile.Model) ||
+		profile.Encoding != manifest.Encoding ||
+		manifest.Privacy == nil ||
+		profile.Privacy != *manifest.Privacy ||
+		budget.Summarizer == nil ||
+		profile.Summarizer != *budget.Summarizer ||
+		budget.ReportProfile == nil {
 		return fmt.Errorf("%w: capture profile mismatch for %s/%s", ErrInvalidCompaction, budget.Kind, budget.Target)
 	}
 	if profile.Estimator != budget.ReportProfile.Estimator || profile.Model != budget.ReportProfile.Model ||

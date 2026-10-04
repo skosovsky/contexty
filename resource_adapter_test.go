@@ -92,8 +92,8 @@ func TestResource_AdapterNativeSelection(t *testing.T) {
 	// Act: two targets consume the single selected body with no additional reads.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		Targets: []contexty.CompileTarget{
-			{Name: "one", SourceSegment: contexty.SegmentMemory},
-			{Name: "two", SourceSegment: contexty.SegmentMemory},
+			{Name: "one", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+			{Name: "two", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
 		},
 	})
 	// Assert: name collision neither selects the wrong resource nor expands authorization.

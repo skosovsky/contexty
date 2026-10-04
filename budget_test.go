@@ -46,7 +46,14 @@ func TestTarget_FinalBudget(t *testing.T) {
 	}
 	req := contexty.CompileRequest{
 		History: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "x")},
-		Targets: []contexty.CompileTarget{{Name: "small", Budget: pipe, Formatter: formatter}},
+		Targets: []contexty.CompileTarget{
+			{
+				Segments:  []contexty.SegmentName{contexty.SegmentHistory},
+				Name:      "small",
+				Budget:    pipe,
+				Formatter: formatter,
+			},
+		},
 	}
 	engine := contexty.NewEngine()
 	// Act.
@@ -60,7 +67,10 @@ func TestTarget_FinalBudget(t *testing.T) {
 		msgs[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "safe"}}
 		return msgs, nil
 	}
-	req.Targets = append(req.Targets, contexty.CompileTarget{Name: "other"})
+	req.Targets = append(
+		req.Targets,
+		contexty.CompileTarget{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "other"},
+	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, req)
 	// Assert: target-local output doesn't change main or other output.

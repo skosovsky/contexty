@@ -50,6 +50,8 @@ func ReplayExpectationFor(manifest CompileManifest) (ReplayExpectation, error) {
 // ReplayedOutput has no executable Source or misleading reconstructed snapshot.
 // Its bytes and metadata derive exclusively from accepted saved content.
 type ReplayedOutput struct {
+	Artifacts       []ContextArtifact
+	Selection       *SelectionDecision
 	Kind            ManifestOutputKind
 	Name            string
 	Segments        map[string][]Message
@@ -119,10 +121,11 @@ func Replay(
 		if cancelErr := ctx.Err(); cancelErr != nil {
 			return ReplayResult{}, cancelErr
 		}
-		decoded, decodeErr := replayOutput(output, index, codec)
+		decoded, decodeErr := replayOutput(ctx, output, index, codec)
 		if decodeErr != nil {
 			return ReplayResult{}, decodeErr
 		}
+
 		result.Outputs = append(result.Outputs, decoded)
 	}
 	result.Artifacts, result.WireArtifacts, err = replayArtifacts(ctx, copyRecord.Manifest.Artifacts, index, codec)
@@ -237,11 +240,14 @@ func validateReplayExpectation(manifest CompileManifest, expected ReplayExpectat
 }
 
 func replayOutput(
+	ctx context.Context,
 	output ManifestOutput,
 	index map[ContentRef]SavedContent,
 	codec JSONSerializer,
 ) (ReplayedOutput, error) {
 	result := ReplayedOutput{
+		Artifacts:       nil,
+		Selection:       output.Selection.clone(),
 		Kind:            output.Kind,
 		Name:            output.Name,
 		Segments:        make(map[string][]Message),
@@ -281,6 +287,11 @@ func replayOutput(
 		}
 		result.Text = rendered.Text
 	}
+	artifacts, _, artifactErr := replayArtifacts(ctx, output.ArtifactRefs, index, codec)
+	if artifactErr != nil {
+		return ReplayedOutput{}, artifactErr
+	}
+	result.Artifacts = artifacts
 	return result, nil
 }
 

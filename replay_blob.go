@@ -93,7 +93,11 @@ func replayBlobs(result ReplayResult) []BlobDescriptor {
 			blobs = append(blobs, messageBlobs(*output.Rendered)...)
 		}
 	}
-	for _, artifact := range result.Artifacts {
+	artifacts := cloneArtifacts(result.Artifacts)
+	for _, output := range result.Outputs {
+		artifacts = append(artifacts, cloneArtifacts(output.Artifacts)...)
+	}
+	for _, artifact := range artifacts {
 		if artifact.Blob != nil {
 			blobs = append(blobs, artifact.Blob.Object.Clone())
 		}

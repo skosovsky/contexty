@@ -109,11 +109,10 @@ func TestRolling_SummaryTargets(t *testing.T) {
 	targetProfile.Policy = targetPolicy.Descriptor
 	calls := 0
 	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
-		inputs := request.Messages
 		calls++
 		message := contexty.TextMessage(contexty.RoleSystem, "sum")
 		message.ID = "main-summary"
-		if inputs[0].ID == "main-summary" {
+		if request.Purpose.ID == "target-rolling" {
 			message = contexty.TextMessage(contexty.RoleSystem, "t")
 			message.ID = "target-summary"
 		}
@@ -150,7 +149,19 @@ func TestRolling_SummaryTargets(t *testing.T) {
 			CompilationID: "rolling-targets",
 			History:       history,
 			CurrentTurn:   &turn,
-			Targets:       []contexty.CompileTarget{{Name: "short", Budget: target}, {Name: "unchanged"}},
+			Targets: []contexty.CompileTarget{
+				{
+					Segments:           []contexty.SegmentName{contexty.SegmentHistory},
+					Name:               "short",
+					Budget:             target,
+					IncludeCurrentTurn: true,
+				},
+				{
+					Segments:           []contexty.SegmentName{contexty.SegmentHistory},
+					Name:               "unchanged",
+					IncludeCurrentTurn: true,
+				},
+			},
 		},
 	)
 	// Assert: separate records/capacities/coverage; no target mutation of main/source.
@@ -159,15 +170,19 @@ func TestRolling_SummaryTargets(t *testing.T) {
 	require.Equal(t, []string{"main-summary", "d", "e", "turn"}, fixtureRollingMessageIDs(compiled.Payload.History))
 	require.Equal(
 		t,
-		[]string{"target-summary", "turn"},
+		[]string{"target-summary", "e", "turn"},
 		fixtureRollingMessageIDs(compiled.Projections["short"].Messages),
 	)
-	require.Equal(t, compiled.Payload.History, compiled.Projections["unchanged"].Messages)
+	require.Equal(
+		t,
+		[]string{"a", "b", "c", "d", "e", "turn"},
+		fixtureRollingMessageIDs(compiled.Projections["unchanged"].Messages),
+	)
 	require.Equal(t, history, compiled.Source.History)
 	require.Len(t, compiled.Compactions, 2)
 	require.Equal(t, []string{"a", "b", "c"}, fixtureRefIDs(compiled.Compactions[0].Covered))
-	require.Equal(t, []string{"main-summary", "d", "e"}, fixtureRefIDs(compiled.Compactions[1].Covered))
-	require.Equal(t, contexty.EffectiveInputBudget(2), compiled.Compactions[1].Budget)
+	require.Equal(t, []string{"a", "b", "c", "d"}, fixtureRefIDs(compiled.Compactions[1].Covered))
+	require.Equal(t, contexty.EffectiveInputBudget(1), compiled.Compactions[1].Budget)
 	for _, budget := range compiled.Manifest.Budgets {
 		if budget.Kind == contexty.ManifestMainOutput {
 			require.Equal(t, mainPolicy, *budget.RollingSummary)

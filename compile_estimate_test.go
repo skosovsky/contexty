@@ -37,7 +37,7 @@ func TestCompile_EstimateReport(t *testing.T) {
 	)
 	request := contexty.CompileRequest{CompilationID: "reported", History: []contexty.Message{message},
 		System: []contexty.Message{system}, Targets: []contexty.CompileTarget{
-			{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Name: "target",
 				Budget: contexty.NewBudgetPipeline(
 					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)},
@@ -131,12 +131,17 @@ func TestCompile_EstimateFailures(t *testing.T) {
 	message := contexty.TextMessage(contexty.RoleUser, "x")
 	message.ID = "m"
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(2)}, reporter)
-	request := contexty.CompileRequest{CompilationID: "overflow", History: []contexty.Message{message},
-		Targets: []contexty.CompileTarget{{Name: "target", Budget: pipe,
-			Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
-				messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "expanded"}}
-				return messages, nil
-			}}}}
+	request := contexty.CompileRequest{
+		CompilationID: "overflow",
+		History:       []contexty.Message{message},
+		Targets: []contexty.CompileTarget{
+			{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "target", Budget: pipe,
+				Formatter: func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
+					messages[0].Parts = []contexty.ContentPart{contexty.TextPart{Text: "expanded"}}
+					return messages, nil
+				}},
+		},
+	}
 	// Act / Assert: no partial output or misleading successful report escapes.
 	result, err := contexty.NewEngine().CompileSnapshot(context.Background(), request)
 	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)

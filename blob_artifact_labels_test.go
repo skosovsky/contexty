@@ -96,13 +96,18 @@ func TestBlob_ArtifactLabels(t *testing.T) {
 	require.Equal(t, result.Artifacts, replayed.Artifacts)
 	require.Equal(t, original, replayed.Artifacts[0].Blob.Original)
 	require.Contains(t, string(deltaWire), `"type_id":"fixture-label"`)
-	projection := contexty.CompileProjection{Messages: result.Payload.Memory, Lineage: result.Lineage}
+	projection := contexty.CompileProjection{
+		Messages:    result.Payload.Memory,
+		Lineage:     result.Lineage,
+		Artifacts:   result.Artifacts,
+		ArtifactIDs: []string{"large"},
+	}
 	for _, disclose := range []bool{false, true} {
 		selection := contexty.ExportSelection{ArtifactIDs: []string{"large"}}
 		if disclose {
 			selection.Metadata.ExtensionTypes = []string{"fixture-label"}
 		}
-		exported, exportErr := contexty.ExportProjection(projection, result.Artifacts, selection, trace.Codec)
+		exported, exportErr := contexty.ExportProjection(projection, selection, trace.Codec)
 		require.NoError(t, exportErr)
 		exportWire, exportErr := json.Marshal(exported)
 		require.NoError(t, exportErr)

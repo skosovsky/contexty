@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -11,24 +12,33 @@ import (
 type CompileTarget struct {
 	Name string
 	// View requests a built-in rendered view and is mutually exclusive with
-	// SourceSegment, Budget, and Formatter.
-	View          string
-	SourceSegment SegmentName
-	Budget        *BudgetPipeline
-	Formatter     SegmentFormatter
+	// Segments, ArtifactRefs, IncludeCurrentTurn, Selection, Budget, and Formatter.
+	View               string
+	Segments           []SegmentName
+	ArtifactRefs       []ContentRef
+	IncludeCurrentTurn bool
+	IncludeArtifacts   bool
+	Selection          *SelectionPolicy
+	Budget             *BudgetPipeline
+	Formatter          SegmentFormatter
 }
 
 // CompileProjection is a named compile output with traceability to the shared pass.
 type CompileProjection struct {
-	Name            string
-	Text            string
-	Messages        []Message
-	Transformations map[string]TransformChain
-	Source          CompileRequest       // normalized request before pipeline mutations
-	InputSnapshot   ConversationSnapshot // compiled snapshot used as target input
-	ArtifactIDs     []string
-	Lineage         Lineage
-	Rendered        *RenderedOutput
+	Name              string
+	Text              string
+	Messages          []Message
+	Transformations   map[string]TransformChain
+	Source            CompileRequest       // normalized request before pipeline mutations
+	InputSnapshot     ConversationSnapshot // shared prepared snapshot before output admission
+	ArtifactIDs       []string
+	Lineage           Lineage
+	Rendered          *RenderedOutput
+	Snapshot          ConversationSnapshot
+	Selection         *SelectionDecision
+	Artifacts         []ContextArtifact
+	ArtifactEstimates []ArtifactBudgetEstimate
+	ExcludedArtifacts []ArtifactExclusion
 }
 
 // RenderedOutput is the typed content/metadata counterpart of a text view.
@@ -48,15 +58,20 @@ func (r *RenderedOutput) clone() *RenderedOutput {
 
 func (p CompileProjection) clone() CompileProjection {
 	return CompileProjection{
-		Name:            p.Name,
-		Text:            p.Text,
-		Messages:        cloneMessageSlice(p.Messages),
-		Transformations: cloneTransformRecords(p.Transformations),
-		Source:          p.Source.Freeze(),
-		InputSnapshot:   p.InputSnapshot.AllSegmentsSnapshot(),
-		ArtifactIDs:     append([]string(nil), p.ArtifactIDs...),
-		Lineage:         p.Lineage.Clone(),
-		Rendered:        p.Rendered.clone(),
+		Name:              p.Name,
+		Text:              p.Text,
+		Messages:          cloneMessageSlice(p.Messages),
+		Transformations:   cloneTransformRecords(p.Transformations),
+		Source:            p.Source.Freeze(),
+		InputSnapshot:     p.InputSnapshot.AllSegmentsSnapshot(),
+		ArtifactIDs:       append([]string(nil), p.ArtifactIDs...),
+		Lineage:           p.Lineage.Clone(),
+		Rendered:          p.Rendered.clone(),
+		Snapshot:          p.Snapshot.AllSegmentsSnapshot(),
+		Selection:         p.Selection.clone(),
+		Artifacts:         cloneArtifacts(p.Artifacts),
+		ArtifactEstimates: cloneValidArtifactEstimates(p.ArtifactEstimates),
+		ExcludedArtifacts: append([]ArtifactExclusion(nil), p.ExcludedArtifacts...),
 	}
 }
 
@@ -95,18 +110,37 @@ func validateCompileTargets(targets []CompileTarget) error {
 		if _, ok := seen[name]; ok {
 			return ErrDuplicateCompileTarget
 		}
-		if target.View != "" {
-			if _, ok := builtinViewFormatter(target.View); !ok {
-				return fmt.Errorf("%w: %s", ErrUnknownCompileTargetView, target.View)
-			}
-			if target.SourceSegment != "" || target.Budget != nil || target.Formatter != nil {
-				return fmt.Errorf("%w: target %q view is mutually exclusive", ErrConflictingCompileTargetFields, name)
-			}
+		if err := validateCompileTarget(target); err != nil {
+			return err
 		}
-		if target.SourceSegment != "" && !isKnownSegment(target.SourceSegment) {
-			return fmt.Errorf("%w: %s", ErrInvalidCompileTargetSegment, target.SourceSegment)
-		}
+
 		seen[name] = struct{}{}
+	}
+	return nil
+}
+
+func validateCompileTarget(target CompileTarget) error {
+	if target.View != "" {
+		if _, ok := builtinViewFormatter(target.View); !ok {
+			return ErrUnknownCompileTargetView
+		}
+		if len(target.Segments) != 0 || len(target.ArtifactRefs) != 0 || target.IncludeCurrentTurn ||
+			target.IncludeArtifacts ||
+			target.Selection != nil ||
+			target.Budget != nil ||
+			target.Formatter != nil {
+			return ErrConflictingCompileTargetFields
+		}
+	}
+	seen := make(map[SegmentName]bool)
+	for _, segment := range target.Segments {
+		if !isKnownSegment(segment) || seen[segment] {
+			return ErrInvalidCompileTargetSegment
+		}
+		seen[segment] = true
+	}
+	if target.Selection != nil {
+		return target.Selection.validate()
 	}
 	return nil
 }
@@ -132,19 +166,12 @@ func (e *Engine) compileTargets(
 		return map[string]CompileProjection{}, nil
 	}
 	out := make(map[string]CompileProjection, len(targets))
-	artifactIDs := make([]string, 0, len(artifacts))
-	for _, artifact := range artifacts {
-		if artifact.ID != "" {
-			artifactIDs = append(artifactIDs, artifact.ID)
-		}
-	}
 	for _, target := range targets {
-		proj, err := e.compileTarget(ctx, snap, target, source, transforms)
+		proj, err := e.compileTarget(ctx, snap, target, source, transforms, artifacts)
 		if err != nil {
 			return nil, err
 		}
 		proj.Source = source.Freeze()
-		proj.ArtifactIDs = append([]string(nil), artifactIDs...)
 		out[proj.Name] = proj
 	}
 	return out, nil
@@ -156,79 +183,173 @@ func (e *Engine) compileTarget(
 	target CompileTarget,
 	source CompileRequest,
 	transforms map[string]TransformChain,
+	artifacts []ContextArtifact,
 ) (CompileProjection, error) {
 	if err := ctx.Err(); err != nil {
 		return CompileProjection{}, fmt.Errorf("contexty: compile target %q: %w", target.Name, err)
 	}
 	name := strings.TrimSpace(target.Name)
+	ctx = preparedTargetContext(ctx, source, snap, name, transforms)
+	localTransforms := cloneTransformRecords(transforms)
+	if target.View != "" {
+		return compileTextViewTarget(ctx, snap, target, localTransforms)
+	}
+	input := snap.AllSegmentsSnapshot()
+	scoped, selectedArtifacts, err := scopeTargetSnapshot(snap, target, artifacts)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	if exclusionErr := initializeTargetArtifactExclusions(ctx, artifacts); exclusionErr != nil {
+		return CompileProjection{}, exclusionErr
+	}
+	localEngine := *e
+	localEngine.budget = target.Budget
+	prepared, _ := ctx.Value(preparedOutputKey{}).(preparedOutput)
+	var pending []Message
+	if target.IncludeCurrentTurn {
+		pending = cloneMessageSlice(prepared.pending)
+	}
+	recorder := transformRecorderFrom(ctx)
+	scoped, selection, err := selectOutput(ctx, scoped, pending, target.Selection, target.Budget)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	if selectionErr := recordSelectionArtifactExclusions(ctx, selection, selectedArtifacts); selectionErr != nil {
+		return CompileProjection{}, selectionErr
+	}
+	selectedArtifacts = filterParticipatingArtifacts(selectedArtifacts, snapshotAllMessages(scoped))
+	scoped = scoped.WithArtifacts(selectedArtifacts)
+	localOptions := outputOptions(
+		prepared.options,
+		scoped.WithSegment(SegmentHistory, append(scoped.Segment(SegmentHistory), pending...)),
+	)
+	scoped, err = applyCompileReplacements(ctx, scoped, localOptions, patchPhasePreBudget)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	scoped, err = localEngine.applyTransformsAndBudget(
+		ctx,
+		source,
+		scoped,
+		pending,
+		recorder,
+		localOptions,
+	)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	working := snapshotAllMessages(scoped)
+	localTransforms = recorder.snapshot()
+	estimates, err := compileArtifactEstimates(ctx, artifacts)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	working, err = finishTargetMessages(ctx, target, working, localTransforms)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+
+	scoped, selectedArtifacts, exclusions, err := finishTargetSnapshot(
+		ctx,
+		scoped,
+		target,
+		selection,
+		selectedArtifacts,
+		artifacts,
+		working,
+	)
+	if err != nil {
+		return CompileProjection{}, err
+	}
+	return CompileProjection{
+		Name:              name,
+		Text:              plainMessagesText(working),
+		Messages:          cloneMessageSlice(working),
+		Transformations:   localTransforms,
+		Source:            emptyCompileRequest(),
+		InputSnapshot:     input,
+		ArtifactIDs:       artifactIDs(selectedArtifacts),
+		Selection:         selection,
+		Artifacts:         cloneArtifacts(selectedArtifacts),
+		ArtifactEstimates: estimates,
+		ExcludedArtifacts: exclusions,
+		Snapshot:          scoped,
+		Lineage:           traceGraph(ctx),
+		Rendered:          nil,
+	}, nil
+}
+
+func initializeTargetArtifactExclusions(ctx context.Context, artifacts []ContextArtifact) error {
+	exclusionsMap, _ := ctx.Value(artifactExclusionsKey{}).(map[ContentRef]string)
+	for _, artifact := range artifacts {
+		ref, refErr := ArtifactContentRef(artifact)
+		if refErr != nil {
+			return refErr
+		}
+		exclusionsMap[ref] = coverageNotSelected
+	}
+	return nil
+}
+
+func finishTargetSnapshot(
+	ctx context.Context,
+	scoped ConversationSnapshot,
+	target CompileTarget,
+	selection *SelectionDecision,
+	selectedArtifacts, artifacts []ContextArtifact,
+	working []Message,
+) (ConversationSnapshot, []ContextArtifact, []ArtifactExclusion, error) {
+	if err := validateMandatorySelection(ctx, selection, target.Selection, working); err != nil {
+		return ConversationSnapshot{}, nil, nil, err
+	}
+	selectedArtifacts, err := finalParticipatingArtifacts(ctx, selectedArtifacts, working)
+	if err != nil {
+		return ConversationSnapshot{}, nil, nil, err
+	}
+	exclusions, err := artifactExclusionsForOutput(ctx, artifacts, selectedArtifacts)
+	if err != nil {
+		return ConversationSnapshot{}, nil, nil, err
+	}
+	scoped = snapshotWithFinalMessages(scoped, working).WithArtifacts(selectedArtifacts)
+	if target.Formatter != nil {
+		scoped = EmptySnapshot().WithVersion(scoped.Version()).
+			WithSegment(SegmentHistory, working).
+			WithArtifacts(selectedArtifacts)
+	}
+	if err := validateFinalSelectionRounds(scoped); err != nil {
+		return ConversationSnapshot{}, nil, nil, err
+	}
+	if err := validateUniqueMessageIDs(working); err != nil {
+		return ConversationSnapshot{}, nil, nil, fmt.Errorf(
+			"contexty: compile target %q identity: %w",
+			target.Name,
+			err,
+		)
+	}
+	return scoped, selectedArtifacts, exclusions, nil
+}
+
+func preparedTargetContext(
+	ctx context.Context,
+	source CompileRequest,
+	snap ConversationSnapshot,
+	name string,
+	transforms map[string]TransformChain,
+) context.Context {
 	ctx = withCompileIdentity(ctx, source.IdentityPolicy, source.RequireDurableIdentity, source.TurnID, name)
 	if trace := traceFromContext(ctx); trace != nil {
 		ctx = context.WithValue(ctx, compileTraceKey{}, trace.branch(name))
 	}
 	// Target-local pipeline events cannot mutate the recorder of the shared pass.
-	ctx = withTransformRecorder(ctx, newTransformRecorder(snapshotAllMessages(snap)))
-	localTransforms := cloneTransformRecords(transforms)
-	if target.View != "" {
-		return compileTextViewTarget(ctx, snap, target, localTransforms)
+	targetRecorder := newTransformRecorder(source.AllMessages())
+	for id, chain := range transforms {
+		targetRecorder.records[id] = append(TransformChain(nil), chain...)
 	}
-	seg := target.SourceSegment
-	if seg == "" {
-		seg = SegmentHistory
-	}
-	working := snap.Segment(seg)
-	if target.Budget != nil {
-		before := cloneMessageSlice(working)
-		budgetCtx := withBudgetIdentitySegment(ctx, seg)
-		trimmed, err := target.Budget.Apply(budgetCtx, working)
-		if err != nil {
-			return CompileProjection{}, fmt.Errorf("contexty: compile target %q budget: %w", name, err)
-		}
-		working = trimmed.Messages
-		working, err = traceStage(ctx, "budget", before, working, false)
-		if err != nil {
-			return CompileProjection{}, err
-		}
-		recordProjectionBudgetTransforms(localTransforms, before, working)
-	}
-	if target.Formatter != nil {
-		before := cloneMessageSlice(working)
-		formatted, err := formatTargetMessages(ctx, target, seg, working)
-		if err != nil {
-			return CompileProjection{}, err
-		}
-		working = formatted
-		recordProjectionFormatterTransforms(localTransforms, before, working)
-	}
-	projected, err := traceStage(ctx, "project", working, working, false)
-	if err != nil {
-		return CompileProjection{}, err
-	}
-	working = projected
-	if target.Budget != nil {
-		if err := target.Budget.validateRecordedRetention(ctx, working); err != nil {
-			return CompileProjection{}, err
-		}
-		if err := target.Budget.validateSegments(
-			ctx,
-			[]EstimateSegment{{Name: manifestMessagesSegment, Messages: working}},
-		); err != nil {
-			return CompileProjection{}, fmt.Errorf("contexty: compile target %q final budget: %w", name, err)
-		}
-	}
-	if err := validateUniqueMessageIDs(working); err != nil {
-		return CompileProjection{}, fmt.Errorf("contexty: compile target %q identity: %w", name, err)
-	}
-	return CompileProjection{
-		Name:            name,
-		Text:            plainMessagesText(working),
-		Messages:        cloneMessageSlice(working),
-		Transformations: localTransforms,
-		Source:          emptyCompileRequest(),
-		InputSnapshot:   snap.AllSegmentsSnapshot(),
-		ArtifactIDs:     nil,
-		Lineage:         traceGraph(ctx),
-		Rendered:        nil,
-	}, nil
+	targetRecorder.registerDeferredMessageIDs(source.ToSnapshot(), snap)
+	ctx = withTransformRecorder(ctx, targetRecorder)
+	ctx = context.WithValue(ctx, artifactExclusionsKey{}, make(map[ContentRef]string))
+	ctx = context.WithValue(ctx, artifactEstimatesKey{}, make(map[ContentRef]ArtifactBudgetEstimate))
+	return ctx
 }
 
 func compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, target CompileTarget,
@@ -255,8 +376,10 @@ func compileTextViewTarget(ctx context.Context, snap ConversationSnapshot, targe
 	return CompileProjection{
 		Name: strings.TrimSpace(target.Name), Text: text, Messages: nil,
 		Transformations: transforms, Source: emptyCompileRequest(),
-		InputSnapshot: snap.AllSegmentsSnapshot(), ArtifactIDs: nil,
+		InputSnapshot: snap.AllSegmentsSnapshot(), ArtifactIDs: artifactIDs(snap.Artifacts()),
 		Lineage: traceGraph(ctx), Rendered: rendered,
+		Snapshot: snap.AllSegmentsSnapshot(), Selection: nil, Artifacts: cloneArtifacts(snap.Artifacts()),
+		ArtifactEstimates: nil, ExcludedArtifacts: nil,
 	}, nil
 }
 
@@ -316,30 +439,6 @@ func plainMessagesText(msgs []Message) string {
 	return b.String()
 }
 
-func recordProjectionBudgetTransforms(records map[string]TransformChain, before, after []Message) {
-	beforeSet := messageIDSet(before)
-	afterSet := messageIDSet(after)
-	for _, msg := range before {
-		if msg.ID == "" {
-			continue
-		}
-		if _, kept := afterSet[msg.ID]; !kept {
-			records[msg.ID] = append(
-				records[msg.ID],
-				TransformRecord{Action: ActionTruncated, Reason: ReasonTokenBudgetExceeded},
-			)
-		}
-	}
-	for _, msg := range after {
-		if msg.ID == "" {
-			continue
-		}
-		if _, existed := beforeSet[msg.ID]; !existed {
-			records[msg.ID] = append(records[msg.ID], TransformRecord{Action: ActionPassed, Reason: ""})
-		}
-	}
-}
-
 func recordProjectionFormatterTransforms(records map[string]TransformChain, before, after []Message) {
 	beforeSet := messageIDSet(before)
 	afterSet := messageIDSet(after)
@@ -373,4 +472,138 @@ func recordProjectionFormatterTransforms(records map[string]TransformChain, befo
 			)
 		}
 	}
+}
+
+func cloneCompileTargets(targets []CompileTarget) []CompileTarget {
+	out := append([]CompileTarget(nil), targets...)
+	for i := range out {
+		out[i].Segments = append([]SegmentName(nil), out[i].Segments...)
+		out[i].ArtifactRefs = append([]ContentRef(nil), out[i].ArtifactRefs...)
+		if out[i].Selection != nil {
+			cp := *out[i].Selection
+			cp.Required = append([]ContentRef(nil), cp.Required...)
+			out[i].Selection = &cp
+		}
+	}
+	return out
+}
+
+func scopeTargetSnapshot(
+	snap ConversationSnapshot,
+	target CompileTarget,
+	artifacts []ContextArtifact,
+) (ConversationSnapshot, []ContextArtifact, error) {
+	selected, err := targetArtifacts(target, artifacts)
+	if err != nil {
+		return ConversationSnapshot{}, nil, err
+	}
+	allIDs := make(map[string]bool)
+	selectedIDs := make(map[string]bool)
+	for _, artifact := range artifacts {
+		allIDs["artifact:"+artifact.ID] = true
+	}
+	for _, artifact := range selected {
+		selectedIDs["artifact:"+artifact.ID] = true
+	}
+	out := EmptySnapshot().WithVersion(snap.Version()).WithArtifacts(selected)
+	for _, segment := range snapshotSegmentOrder() {
+		var messages []Message
+		for _, message := range snap.Segment(segment) {
+			if selectedIDs[message.ID] || (!allIDs[message.ID] && containsSegment(target.Segments, segment)) {
+				messages = append(messages, message)
+			}
+		}
+		out = out.WithSegment(segment, messages)
+	}
+	return out, selected, nil
+}
+
+func containsSegment(segments []SegmentName, name SegmentName) bool {
+	return slices.Contains(segments, name)
+}
+
+func targetArtifacts(target CompileTarget, artifacts []ContextArtifact) ([]ContextArtifact, error) {
+	if target.IncludeArtifacts {
+		if len(target.ArtifactRefs) != 0 {
+			return nil, ErrInvalidSelection
+		}
+		return cloneArtifacts(artifacts), nil
+	}
+	requested := make(map[ContentRef]bool)
+	for _, ref := range target.ArtifactRefs {
+		if requested[ref] {
+			return nil, ErrDuplicateSelection
+		}
+		requested[ref] = true
+	}
+	var out []ContextArtifact
+	for _, artifact := range artifacts {
+		ref, err := ArtifactContentRef(artifact)
+		if err != nil {
+			return nil, err
+		}
+		if requested[ref] {
+			out = append(out, artifact.Clone())
+			delete(requested, ref)
+		}
+	}
+	if len(requested) > 0 {
+		return nil, ErrUnavailableCandidate
+	}
+	return out, nil
+}
+
+func participatingArtifactIDs(artifacts []ContextArtifact, messages []Message) []string {
+	var ids []string
+	for _, artifact := range artifacts {
+		for _, message := range messages {
+			if message.ID == "artifact:"+artifact.ID {
+				ids = append(ids, artifact.ID)
+				break
+			}
+		}
+	}
+	return ids
+}
+
+func artifactIDs(artifacts []ContextArtifact) []string {
+	var ids []string
+	for _, artifact := range artifacts {
+		ids = append(ids, artifact.ID)
+	}
+	return ids
+}
+
+func finishTargetMessages(
+	ctx context.Context,
+	target CompileTarget,
+	working []Message,
+	localTransforms map[string]TransformChain,
+) ([]Message, error) {
+	if target.Formatter != nil {
+		before := cloneMessageSlice(working)
+		formatted, formatErr := formatTargetMessages(ctx, target, SegmentHistory, working)
+		if formatErr != nil {
+			return nil, formatErr
+		}
+		working = formatted
+		recordProjectionFormatterTransforms(localTransforms, before, working)
+	}
+	projected, err := traceStage(ctx, "project", working, working, false)
+	if err != nil {
+		return nil, err
+	}
+	working = projected
+	if target.Budget != nil {
+		if err := target.Budget.validateRecordedRetention(ctx, working); err != nil {
+			return nil, err
+		}
+		if err := target.Budget.validateSegments(
+			ctx,
+			[]EstimateSegment{{Name: manifestMessagesSegment, Messages: working}},
+		); err != nil {
+			return nil, fmt.Errorf("contexty: compile target %q final budget: %w", target.Name, err)
+		}
+	}
+	return working, nil
 }

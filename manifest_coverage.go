@@ -37,11 +37,18 @@ type ArtifactExclusion struct {
 }
 
 func manifestArtifactExclusions(ctx context.Context, result CompileResult) ([]ArtifactExclusion, error) {
+	return artifactExclusionsForOutput(ctx, compileArtifactEvidence(ctx, result.Source.Artifacts), result.Artifacts)
+}
+
+func artifactExclusionsForOutput(
+	ctx context.Context,
+	artifacts, selected []ContextArtifact,
+) ([]ArtifactExclusion, error) {
 	decisions, _ := ctx.Value(artifactExclusionsKey{}).(map[ContentRef]string)
 	var exclusions []ArtifactExclusion
 	seen := make(map[ContentRef]bool)
-	for _, artifact := range compileArtifactEvidence(ctx, result.Source.Artifacts) {
-		present, err := artifactRevisionPresent(result.Artifacts, artifact)
+	for _, artifact := range artifacts {
+		present, err := artifactRevisionPresent(selected, artifact)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +142,11 @@ func coverageEntry(manifest CompileManifest, output ManifestOutput, segment stri
 
 func coverageExclusionReason(manifest CompileManifest, output ManifestOutput, segment string, input ContentRef) string {
 	if segment == manifestArtifactsSegment {
-		for _, exclusion := range manifest.ExcludedArtifacts {
+		exclusions := manifest.ExcludedArtifacts
+		if output.Kind == ManifestTargetOutput {
+			exclusions = output.ExcludedArtifacts
+		}
+		for _, exclusion := range exclusions {
 			if exclusion.Input == input {
 				return exclusion.Reason
 			}
@@ -145,8 +156,8 @@ func coverageExclusionReason(manifest CompileManifest, output ManifestOutput, se
 	if reason := coverageRemovalReason(output.Lineage, anchors); reason != "" {
 		return reason
 	}
-	if output.Kind == ManifestTargetOutput && output.SourceSegment != "" &&
-		isKnownSegment(SegmentName(segment)) && output.SourceSegment != SegmentName(segment) {
+	if output.Kind == ManifestTargetOutput && len(output.SourceSegments) != 0 &&
+		isKnownSegment(SegmentName(segment)) && !slices.Contains(output.SourceSegments, SegmentName(segment)) {
 		return coverageNotSelected
 	}
 	chain := output.Transformations[input.ID]
@@ -316,21 +327,51 @@ func validateManifestCoverage(manifest CompileManifest) error {
 	return nil
 }
 
-func validateArtifactExclusions(manifest CompileManifest) error {
+func manifestArtifactInputs(manifest CompileManifest) []ContentRef {
 	var inputs []ContentRef
 	for _, segment := range manifest.Inputs {
 		if segment.Name == manifestArtifactsSegment {
-			inputs = segment.Messages
+			inputs = slices.Clone(segment.Messages)
 		}
 	}
-	inputs = append(inputs, manifestDerivedArtifactRefs(manifest)...)
+	return append(inputs, manifestDerivedArtifactRefs(manifest)...)
+}
+
+func validateArtifactExclusions(manifest CompileManifest) error {
+	inputs := manifestArtifactInputs(manifest)
+	if err := validateOutputArtifactExclusions(inputs, manifest.Artifacts, manifest.ExcludedArtifacts); err != nil {
+		return err
+	}
+	for _, output := range manifest.Outputs {
+		if output.Kind == ManifestMainOutput {
+			if len(output.ArtifactRefs)+len(output.ArtifactEstimates)+len(output.ExcludedArtifacts) != 0 {
+				return ErrInvalidCoverage
+			}
+			continue
+		}
+		if err := validateOutputArtifactExclusions(inputs, output.ArtifactRefs, output.ExcludedArtifacts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateOutputArtifactExclusions(inputs, selected []ContentRef, exclusions []ArtifactExclusion) error {
+	if err := validateManifestRefs(selected); err != nil {
+		return err
+	}
+	for _, ref := range selected {
+		if !slices.Contains(inputs, ref) {
+			return ErrInvalidCoverage
+		}
+	}
 	seen := make(map[ContentRef]bool)
-	allowedReasons := []string{"artifact_merge", artifactInactiveReason, ReasonTokenBudgetExceeded}
-	for _, excluded := range manifest.ExcludedArtifacts {
+	allowedReasons := []string{"artifact_merge", artifactInactiveReason, ReasonTokenBudgetExceeded,
+		coverageNotSelected, ReasonReplacedByFormatter, ReasonReplacedByHook}
+	for _, excluded := range exclusions {
 		if !slices.Contains(allowedReasons, excluded.Reason) ||
 			!slices.Contains(inputs, excluded.Input) ||
-			slices.Contains(manifest.Artifacts, excluded.Input) ||
-			seen[excluded.Input] {
+			slices.Contains(selected, excluded.Input) || seen[excluded.Input] {
 			return ErrInvalidCoverage
 		}
 		seen[excluded.Input] = true

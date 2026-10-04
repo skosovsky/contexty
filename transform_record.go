@@ -62,6 +62,8 @@ func (c TransformChain) Final() TransformRecord {
 
 // CompileResult is the immutable compile output plus O(1) traceability by Message.ID.
 type CompileResult struct {
+	PreparedSnapshot   ConversationSnapshot
+	Selection          *SelectionDecision
 	BudgetDecisions    []CompileBudgetDecision
 	Payload            AbstractPayload
 	Transformations    map[string]TransformChain
@@ -123,7 +125,7 @@ func (r CompileRequest) Freeze() CompileRequest {
 		Artifacts:              mergeArtifacts(r.Artifacts),
 		IdentityPolicy:         r.IdentityPolicy,
 		RequireDurableIdentity: r.RequireDurableIdentity,
-		Targets:                append([]CompileTarget(nil), r.Targets...),
+		Targets:                cloneCompileTargets(r.Targets),
 		CompilationID:          r.CompilationID,
 		Lineage:                r.Lineage.Clone(),
 		Origins:                append([]ContentRef(nil), r.Origins...),
@@ -172,7 +174,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		Options:                r.Options,
 		IdentityPolicy:         r.IdentityPolicy,
 		RequireDurableIdentity: r.RequireDurableIdentity,
-		Targets:                append([]CompileTarget(nil), r.Targets...),
+		Targets:                cloneCompileTargets(r.Targets),
 		CompilationID:          r.CompilationID,
 		Lineage:                r.Lineage.Clone(),
 		Origins:                append([]ContentRef(nil), r.Origins...),

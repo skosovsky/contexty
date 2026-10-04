@@ -56,8 +56,9 @@ func TestCompaction_Capture(t *testing.T) {
 		require.Equal(t, proposal.Execution, restored.Execution)
 	}
 	require.Len(t, main.Covered, 2)
-	require.Len(t, target.Covered, 1)
-	require.Equal(t, "main-summary", target.Covered[0].ID)
+	require.Len(t, target.Covered, 2)
+	require.Equal(t, "a", target.Covered[0].ID)
+	require.Equal(t, "b", target.Covered[1].ID)
 	require.NotEqual(t, main.ID, target.ID)
 	require.Len(t, compiled.Manifest.Compactions, 2)
 	require.Equal(t, compiled.Manifest.Compactions, compiled.Record.Manifest.Compactions)

@@ -14,7 +14,7 @@ func (e *Engine) admitResourceAppend(ctx context.Context, state *resourceCompile
 	if err != nil {
 		return false, err
 	}
-	projection.record.Admitted = len(admitted) != 0
+	projection.record.Prepared = len(admitted) != 0
 	if err = importResourceAppend(ctx, projection.record.Lineage); err != nil {
 		return false, err
 	}
@@ -26,11 +26,11 @@ func (e *Engine) admitResourceAppend(ctx context.Context, state *resourceCompile
 		return false, err
 	}
 	state.appends[resource.ID] = projection
-	if projection.record.Admitted {
+	if projection.record.Prepared {
 		state.active[index] = projection.artifact.Clone()
 		state.removed["artifact:"+existing.ID] = true
 	}
-	return projection.record.Admitted, ctx.Err()
+	return projection.record.Prepared, ctx.Err()
 }
 
 func importResourceAppend(ctx context.Context, graph Lineage) error {

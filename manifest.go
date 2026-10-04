@@ -60,13 +60,7 @@ func WithCompileRecording(profile RecordProfile) EngineOption {
 }
 
 func (e *Engine) validateCompileConfiguration(request CompileRequest) error {
-	if err := e.validateDeferredResources(); err != nil {
-		return err
-	}
-	if err := e.validateCompactionConfiguration(request.Targets); err != nil {
-		return err
-	}
-	if err := e.validateInputBudgets(request.Targets); err != nil {
+	if err := e.validateOutputPolicies(request); err != nil {
 		return err
 	}
 	if e.capture != nil && (e.recording == nil || e.capture.policy == nil) {
@@ -104,6 +98,24 @@ func (e *Engine) validateCompileConfiguration(request CompileRequest) error {
 		}
 	}
 	return e.validateRecordingComponentTopology(request)
+}
+
+func (e *Engine) validateOutputPolicies(request CompileRequest) error {
+	if e.selection != nil {
+		if selectionErr := e.selection.validate(); selectionErr != nil {
+			return selectionErr
+		}
+	}
+	if err := e.validateDeferredResources(); err != nil {
+		return err
+	}
+	if err := e.validateCompactionConfiguration(request.Targets); err != nil {
+		return err
+	}
+	if err := e.validateInputBudgets(request.Targets); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ManifestSegment preserves input order and segment membership, including the
@@ -155,20 +167,26 @@ const (
 // ManifestOutput identifies one compiled channel and its transformation evidence.
 // Text is a reference to rendered content, never the rendered payload itself.
 type ManifestOutput struct {
-	Kind            ManifestOutputKind        `json:"kind"`
-	Name            string                    `json:"name"`
-	Segments        []ManifestSegment         `json:"segments"`
-	Text            *ContentRef               `json:"text,omitempty"`
-	Rendered        *ContentRef               `json:"rendered,omitempty"`
-	Lineage         Lineage                   `json:"lineage"`
-	Transformations map[string]TransformChain `json:"transformations"`
-	SourceSegment   SegmentName               `json:"source_segment,omitempty"`
-	View            ViewType                  `json:"view,omitempty"`
+	Kind              ManifestOutputKind        `json:"kind"`
+	Name              string                    `json:"name"`
+	Segments          []ManifestSegment         `json:"segments"`
+	Text              *ContentRef               `json:"text,omitempty"`
+	Rendered          *ContentRef               `json:"rendered,omitempty"`
+	Lineage           Lineage                   `json:"lineage"`
+	Transformations   map[string]TransformChain `json:"transformations"`
+	SourceSegments    []SegmentName             `json:"source_segments,omitempty"`
+	Selection         *SelectionDecision        `json:"selection,omitempty"`
+	ArtifactRefs      []ContentRef              `json:"artifact_refs,omitempty"`
+	ArtifactEstimates []ArtifactBudgetEstimate  `json:"artifact_estimates,omitempty"`
+	ArtifactBudgets   []ArtifactBudgetRequest   `json:"artifact_budgets,omitempty"`
+	ExcludedArtifacts []ArtifactExclusion       `json:"excluded_artifacts,omitempty"`
+	View              ViewType                  `json:"view,omitempty"`
 }
 
 // CompileManifest is local reproducibility metadata, not an isolated export.
 // It intentionally contains no raw content, callbacks, codecs or backend handles.
 type CompileManifest struct {
+	PreparedInputs       []ManifestSegment        `json:"prepared_inputs"`
 	Resources            []ResourceResolution     `json:"resources"`
 	ID                   string                   `json:"id"`
 	TurnID               string                   `json:"turn_id"`
@@ -215,6 +233,10 @@ func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult)
 	if err != nil {
 		return CompileManifest{}, err
 	}
+	preparedInputs, preparedErr := preparedManifestInputs(ctx, result.PreparedSnapshot, e.trace.Codec)
+	if preparedErr != nil {
+		return CompileManifest{}, preparedErr
+	}
 	outputs, err := manifestOutputs(result, e.trace.Codec)
 	if err != nil {
 		return CompileManifest{}, err
@@ -231,17 +253,8 @@ func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult)
 	if err != nil {
 		return CompileManifest{}, err
 	}
-	artifactBudgets, err := artifactBudgetRequests(
-		result.Source.TurnID,
-		compileArtifactEvidence(ctx, result.Source.Artifacts),
-	)
-	if err != nil {
-		return CompileManifest{}, err
-	}
-	artifactEstimates, err := cloneArtifactEstimates(result.ArtifactEstimates)
-	if err != nil {
-		return CompileManifest{}, err
-	}
+	artifactBudgets := artifactRequestsFromEstimates(result.ArtifactEstimates)
+	artifactEstimates := cloneValidArtifactEstimates(result.ArtifactEstimates)
 	configuration, err := e.trace.configuration(result.Source.RequireDurableIdentity)
 	if err != nil {
 		return CompileManifest{}, err
@@ -251,6 +264,7 @@ func (e *Engine) buildCompileManifest(ctx context.Context, result CompileResult)
 		return CompileManifest{}, err
 	}
 	manifest := CompileManifest{
+		PreparedInputs:       preparedInputs,
 		Resources:            nil,
 		ID:                   result.Source.CompilationID,
 		TurnID:               result.Source.TurnID,
@@ -407,6 +421,23 @@ func manifestSegment(name string, messages []Message, codec JSONSerializer) (Man
 	return ManifestSegment{Name: name, Messages: refs}, nil
 }
 
+func preparedManifestInputs(
+	ctx context.Context,
+	snap ConversationSnapshot,
+	codec JSONSerializer,
+) ([]ManifestSegment, error) {
+	inputs, err := manifestSnapshotSegments(snap, codec)
+	if err != nil {
+		return nil, err
+	}
+	prepared, _ := ctx.Value(preparedOutputKey{}).(preparedOutput)
+	pending, err := manifestSegment("current/prompt", prepared.pending, codec)
+	if err != nil {
+		return nil, err
+	}
+	return append(inputs, pending), nil
+}
+
 func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutput, error) {
 	snap := EmptySnapshot().WithSegment(SegmentSystem, result.Payload.System).
 		WithSegment(SegmentHistory, result.Payload.History).WithSegment(SegmentTools, result.Payload.Tools).
@@ -417,6 +448,8 @@ func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutp
 	}
 	outputs := []ManifestOutput{
 		{
+			Selection:    result.Selection.clone(),
+			ArtifactRefs: nil, ArtifactEstimates: nil, ArtifactBudgets: nil, ExcludedArtifacts: nil,
 			Kind:            ManifestMainOutput,
 			Name:            string(ManifestMainOutput),
 			Segments:        segments,
@@ -424,7 +457,7 @@ func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutp
 			Rendered:        nil,
 			Lineage:         result.Lineage.Clone(),
 			Transformations: cloneTransformRecords(result.Transformations),
-			SourceSegment:   "",
+			SourceSegments:  nil,
 			View:            "",
 		},
 	}
@@ -443,26 +476,32 @@ func manifestOutputs(result CompileResult, codec JSONSerializer) ([]ManifestOutp
 		if textErr != nil {
 			return nil, textErr
 		}
+		artifactRefs, artifactErr := manifestArtifactRefs(projection.Artifacts)
+		if artifactErr != nil {
+			return nil, artifactErr
+		}
 		output := ManifestOutput{
-			Kind:            ManifestTargetOutput,
-			Name:            name,
-			Segments:        []ManifestSegment{segment},
-			Text:            &textRef,
-			Rendered:        nil,
-			Lineage:         projection.Lineage.Clone(),
-			Transformations: cloneTransformRecords(projection.Transformations),
-			SourceSegment:   "",
-			View:            "",
+			Selection:         projection.Selection.clone(),
+			ArtifactRefs:      append([]ContentRef(nil), artifactRefs...),
+			ArtifactEstimates: cloneValidArtifactEstimates(projection.ArtifactEstimates),
+			ArtifactBudgets:   artifactRequestsFromEstimates(projection.ArtifactEstimates),
+			ExcludedArtifacts: append([]ArtifactExclusion(nil), projection.ExcludedArtifacts...),
+			Kind:              ManifestTargetOutput,
+			Name:              name,
+			Segments:          []ManifestSegment{segment},
+			Text:              &textRef,
+			Rendered:          nil,
+			Lineage:           projection.Lineage.Clone(),
+			Transformations:   cloneTransformRecords(projection.Transformations),
+			SourceSegments:    nil,
+			View:              "",
 		}
 		for _, target := range result.Source.Targets {
 			if target.Name != name {
 				continue
 			}
 			output.View = ViewType(target.View)
-			output.SourceSegment = target.SourceSegment
-			if output.View == "" && output.SourceSegment == "" {
-				output.SourceSegment = SegmentHistory
-			}
+			output.SourceSegments = append([]SegmentName(nil), target.Segments...)
 		}
 		if projection.Rendered != nil {
 			ref := projection.Rendered.Ref
@@ -637,10 +676,7 @@ func (m CompileManifest) Validate() error {
 	if err := validateManifestStages(m.Stages); err != nil {
 		return err
 	}
-	if err := validateManifestSegments(m.Inputs); err != nil {
-		return err
-	}
-	if err := validateManifestOutputs(m.Outputs, m.Profile.Targets); err != nil {
+	if err := m.validateInputsAndOutputs(); err != nil {
 		return err
 	}
 	if err := validateManifestBudgets(m.Budgets, m.Outputs); err != nil {
@@ -676,6 +712,19 @@ func (m CompileManifest) Validate() error {
 	digest, err := m.contentDigest()
 	if err != nil || digest != m.Digest {
 		return ErrInvalidManifest
+	}
+	return nil
+}
+
+func (m CompileManifest) validateInputsAndOutputs() error {
+	if err := validateManifestSegments(m.Inputs); err != nil {
+		return err
+	}
+	if err := validateManifestSegments(m.PreparedInputs); err != nil {
+		return err
+	}
+	if err := validateManifestOutputs(m.Outputs, m.Profile.Targets); err != nil {
+		return err
 	}
 	return nil
 }
@@ -902,6 +951,9 @@ func validateManifestOutput(output ManifestOutput, targets map[string]Descriptor
 				return err
 			}
 		}
+	}
+	if err := validateSelectionDecision(output.Selection); err != nil {
+		return err
 	}
 	return validateManifestOutputLineage(output)
 }

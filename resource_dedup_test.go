@@ -36,7 +36,9 @@ func TestResource_SameIDDeduplication(t *testing.T) {
 			// Act.
 			compiled, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 				Artifacts: []contexty.ContextArtifact{old},
-				Targets:   []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+				Targets: []contexty.CompileTarget{
+					{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+				},
 			})
 			// Assert: one selected revision, consistent main/target and immutable source.
 			require.NoError(t, err)
@@ -61,16 +63,18 @@ func TestResource_DedupAcceptedReplay(t *testing.T) {
 	old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old revision")).ContextArtifact
 	old.SourceRefs = []contexty.SourceRef{{ID: "opaque-source"}}
 	compiled, err := fixtureDedupRecordingEngine(block).CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "dedup-replay", Artifacts: []contexty.ContextArtifact{old},
-		Targets: []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+		CompilationID: "dedup-replay",
+		Artifacts:     []contexty.ContextArtifact{old},
+		Targets: []contexty.CompileTarget{
+			{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+		},
 	})
 	require.NoError(t, err)
 	require.Equal(t, []contexty.ContextArtifact{old}, compiled.Artifacts)
 	require.Len(t, compiled.Manifest.ExcludedArtifacts, 1)
 	require.Equal(t, compiled.Manifest.Resources[0].Artifact, compiled.Manifest.ExcludedArtifacts[0].Input)
 	require.Equal(t, "artifact_merge", compiled.Manifest.ExcludedArtifacts[0].Reason)
-	require.Len(t, compiled.ArtifactEstimates, 1)
-	require.Equal(t, 4, compiled.ArtifactEstimates[0].Tokens)
+	require.Empty(t, compiled.ArtifactEstimates)
 	accepted, err := compiled.Record.Accept("host-accept")
 	require.NoError(t, err)
 	expected, err := contexty.ReplayExpectationFor(accepted.Manifest)
@@ -106,8 +110,11 @@ func TestResource_DedupIdenticalRevisionBudget(t *testing.T) {
 	old := resolved.Resources[0].Artifact.Clone()
 	// Act.
 	compiled, err := fixtureDedupRecordingEngine(block).CompileSnapshot(context.Background(), contexty.CompileRequest{
-		CompilationID: "same-revision", Artifacts: []contexty.ContextArtifact{old},
-		Targets: []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+		CompilationID: "same-revision",
+		Artifacts:     []contexty.ContextArtifact{old},
+		Targets: []contexty.CompileTarget{
+			{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+		},
 	})
 	// Assert: repeated evidence cannot create duplicate budget requests, estimates or prompt messages.
 	require.NoError(t, err)
@@ -140,21 +147,37 @@ func TestResource_DedupExcludedAdmission(t *testing.T) {
 			compiled, err := fixtureDedupRecordingEngine(
 				block,
 			).CompileSnapshot(context.Background(), contexty.CompileRequest{
-				CompilationID: "excluded", TurnID: "current", Artifacts: []contexty.ContextArtifact{old},
-				Targets: []contexty.CompileTarget{{Name: "memory", SourceSegment: contexty.SegmentMemory}},
+				CompilationID: "excluded",
+				TurnID:        "current",
+				Artifacts:     []contexty.ContextArtifact{old},
+				Targets: []contexty.CompileTarget{
+					{Name: "memory", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
+				},
 			})
-			// Assert: no incoming projection evicts admitted content when its own admission fails.
+			// Assert: preparation resolves merge before output-local admission; no hidden fallback.
 			require.NoError(t, err)
-			require.Equal(t, []contexty.ContextArtifact{old}, compiled.Artifacts)
-			require.Len(t, compiled.Payload.Memory, 1)
-			require.Equal(t, "active", compiled.Payload.Memory[0].TextContent())
-			require.Equal(t, compiled.Payload.Memory, compiled.Projections["memory"].Messages)
-			require.Len(t, compiled.Manifest.ExcludedArtifacts, 1)
-			want := contexty.ReasonTokenBudgetExceeded
 			if inactive {
-				want = "artifact_inactive"
+				require.Equal(t, []contexty.ContextArtifact{old}, compiled.Artifacts)
+				require.Len(t, compiled.Payload.Memory, 1)
+				require.Equal(t, "active", compiled.Payload.Memory[0].TextContent())
+			} else {
+				require.Empty(t, compiled.Artifacts)
+				require.Empty(t, compiled.Payload.Memory)
+				require.Contains(
+					t,
+					fixtureExclusionReasons(compiled.Manifest.ExcludedArtifacts),
+					contexty.ReasonTokenBudgetExceeded,
+				)
 			}
-			require.Equal(t, want, compiled.Manifest.ExcludedArtifacts[0].Reason)
+			require.Equal(t, compiled.Payload.Memory, compiled.Projections["memory"].Messages)
 		})
 	}
+}
+
+func fixtureExclusionReasons(exclusions []contexty.ArtifactExclusion) []string {
+	var reasons []string
+	for _, exclusion := range exclusions {
+		reasons = append(reasons, exclusion.Reason)
+	}
+	return reasons
 }

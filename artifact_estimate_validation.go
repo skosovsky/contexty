@@ -3,15 +3,27 @@ package contexty
 import "slices"
 
 func validateArtifactEstimates(manifest CompileManifest) error {
-	var inputs []ContentRef
-	for _, segment := range manifest.Inputs {
-		if segment.Name == manifestArtifactsSegment {
-			inputs = segment.Messages
+	for _, output := range manifest.Outputs {
+		requests, estimates, exclusions := output.ArtifactBudgets, output.ArtifactEstimates, output.ExcludedArtifacts
+		if output.Kind == ManifestMainOutput {
+			if len(requests) != 0 {
+				return ErrInvalidEstimateReport
+			}
+			requests, estimates, exclusions = manifest.ArtifactBudgets, manifest.ArtifactEstimates, manifest.ExcludedArtifacts
+		}
+		if err := validateOutputArtifactEstimates(manifest, output, requests, estimates, exclusions); err != nil {
+			return err
 		}
 	}
-	inputs = append(inputs, manifestDerivedArtifactRefs(manifest)...)
+	return nil
+}
+
+func validateOutputArtifactEstimates(manifest CompileManifest, output ManifestOutput,
+	budgets []ArtifactBudgetRequest, estimates []ArtifactBudgetEstimate, exclusions []ArtifactExclusion,
+) error {
+	inputs := manifestArtifactInputs(manifest)
 	requests := make(map[ContentRef]ArtifactBudgetRequest)
-	for _, request := range manifest.ArtifactBudgets {
+	for _, request := range budgets {
 		if _, duplicate := requests[request.Input]; duplicate || request.TokenLimit < 0 ||
 			!slices.Contains(inputs, request.Input) {
 			return ErrInvalidEstimateReport
@@ -19,13 +31,13 @@ func validateArtifactEstimates(manifest CompileManifest) error {
 		requests[request.Input] = request
 	}
 	seen := make(map[ContentRef]bool)
-	for _, estimate := range manifest.ArtifactEstimates {
+	for _, estimate := range estimates {
 		request, found := requests[estimate.Input]
 		if !found || seen[estimate.Input] || estimate.TokenLimit != request.TokenLimit {
 			return ErrInvalidEstimateReport
 		}
 		seen[estimate.Input] = true
-		if err := validateArtifactEstimate(manifest, estimate); err != nil {
+		if err := validateOutputArtifactEstimate(manifest, output, exclusions, estimate); err != nil {
 			return err
 		}
 	}
@@ -35,7 +47,9 @@ func validateArtifactEstimates(manifest CompileManifest) error {
 	return nil
 }
 
-func validateArtifactEstimate(manifest CompileManifest, estimate ArtifactBudgetEstimate) error {
+func validateOutputArtifactEstimate(manifest CompileManifest, output ManifestOutput,
+	exclusions []ArtifactExclusion, estimate ArtifactBudgetEstimate,
+) error {
 	if estimate.Tokens < 0 || !validEstimateQuality(estimate.Quality) ||
 		estimate.Message.ID != "artifact:"+estimate.Input.ID || estimate.Message.Occurrence != "" {
 		return ErrInvalidEstimateReport
@@ -43,22 +57,12 @@ func validateArtifactEstimate(manifest CompileManifest, estimate ArtifactBudgetE
 	if err := estimate.Message.Validate(); err != nil {
 		return err
 	}
-	reason := ""
-	for _, excluded := range manifest.ExcludedArtifacts {
-		if excluded.Input == estimate.Input {
-			reason = excluded.Reason
-		}
-	}
-	if estimate.Tokens > estimate.TokenLimit {
-		if reason != ReasonTokenBudgetExceeded {
-			return ErrInvalidEstimateReport
-		}
-	} else if reason == ReasonTokenBudgetExceeded || reason == artifactInactiveReason {
-		return ErrInvalidEstimateReport
+	if err := validateArtifactAdmission(output.Selection, exclusions, estimate); err != nil {
+		return err
 	}
 	var profile *EstimateProfile
 	for _, budget := range manifest.Budgets {
-		if budget.Kind == ManifestMainOutput {
+		if budget.Kind == output.Kind && budget.Target == output.Name {
 			profile = budget.ReportProfile
 		}
 	}
@@ -69,6 +73,38 @@ func validateArtifactEstimate(manifest CompileManifest, estimate ArtifactBudgetE
 		return nil
 	}
 	return validateArtifactReport(estimate, *profile)
+}
+
+func validateArtifactAdmission(selection *SelectionDecision, exclusions []ArtifactExclusion,
+	estimate ArtifactBudgetEstimate,
+) error {
+	reason := ""
+	for _, excluded := range exclusions {
+		if excluded.Input == estimate.Input {
+			reason = excluded.Reason
+		}
+	}
+	if estimate.Tokens > estimate.TokenLimit {
+		if reason != ReasonTokenBudgetExceeded {
+			return ErrInvalidEstimateReport
+		}
+		return nil
+	}
+	if reason == artifactInactiveReason || (reason == ReasonTokenBudgetExceeded &&
+		(!selectionExcludedForBudget(selection, estimate.Input) ||
+			(estimate.Report != nil && estimate.Report.OverflowReason == ReasonTokenBudgetExceeded))) {
+		return ErrInvalidEstimateReport
+	}
+	return nil
+}
+
+func selectionExcludedForBudget(selection *SelectionDecision, ref ContentRef) bool {
+	if selection == nil {
+		return false
+	}
+	return slices.ContainsFunc(selection.Candidates, func(candidate CandidateDecision) bool {
+		return candidate.Ref == ref && !candidate.Selected && candidate.Reason == ReasonTokenBudgetExceeded
+	})
 }
 
 func validateArtifactReport(estimate ArtifactBudgetEstimate, profile EstimateProfile) error {

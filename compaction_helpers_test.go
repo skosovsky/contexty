@@ -31,11 +31,10 @@ func fixtureCompactionCaptureProfiles(t *testing.T, denyOutput, distinct bool) (
 	require.NoError(t, err)
 	calls := 0
 	summarizer := stubSummarizer(func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
-		inputs := request.Messages
 		calls++
 		output := contexty.TextMessage(contexty.RoleSystem, "safe")
 		output.ID = "main-summary"
-		if len(inputs) == 1 {
+		if request.MaxTokens == 3 {
 			output = contexty.TextMessage(contexty.RoleSystem, "ok")
 			output.ID = "target-summary"
 		}
@@ -74,8 +73,17 @@ func fixtureCompactionCaptureProfiles(t *testing.T, denyOutput, distinct bool) (
 	system.ID = "sys"
 	result, err := engine.CompileSnapshot(
 		context.Background(),
-		contexty.CompileRequest{CompilationID: "capture", System: []contexty.Message{system},
-			History: []contexty.Message{a, b}, Targets: []contexty.CompileTarget{{Name: "small", Budget: target}}},
+		contexty.CompileRequest{
+			CompilationID: "capture",
+			System:        []contexty.Message{system},
+			History: []contexty.Message{
+				a,
+				b,
+			},
+			Targets: []contexty.CompileTarget{
+				{Segments: []contexty.SegmentName{contexty.SegmentHistory}, Name: "small", Budget: target},
+			},
+		},
 	)
 	require.NoError(t, err)
 	return result, calls

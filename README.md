@@ -8,7 +8,8 @@
 
 ## Installation
 
-This contract makes a clear break in budget configuration, compile-only selectors,
+This contract makes a clear break in explicit target composition, selection and export,
+budget configuration, compile-only selectors,
 deferred callback results and transformation status. See the
 [consumer migration guide](docs/migration.md) before updating stored state
 or callers; old checkpoint/OCC namespaces may need explicit host migration.
@@ -52,7 +53,7 @@ result, err := engine.Compile(ctx, contexty.CompileRequest{
     CurrentTurn: &turn, IdentityPolicy: contexty.NewStableMessageIdentityPolicy("chat"),
     RequireDurableIdentity: true,
     Options: []contexty.CompileOption{contexty.WithResolveVar("locale", "en-US")},
-    Targets: []contexty.CompileTarget{{Name: "classifier_history", SourceSegment: contexty.SegmentHistory}},
+    Targets: []contexty.CompileTarget{{Name: "classifier_history", Segments: []contexty.SegmentName{contexty.SegmentHistory}}},
 })
 if err != nil { return err }
 err = store.CommitState(ctx, "chat-1", result.NormalizedSnapshot.Version(), contexty.ConversationDelta{
@@ -76,7 +77,7 @@ result, err := engine.Compile(ctx, contexty.CompileRequest{
     RequireDurableIdentity: true,
     Targets: []contexty.CompileTarget{{
         Name:          "classifier_history",
-        SourceSegment: contexty.SegmentHistory,
+        Segments: []contexty.SegmentName{contexty.SegmentHistory},
         Budget:        classifierBudgetPipe,
     }},
     Options: []contexty.CompileOption{contexty.WithResolveVar("locale", "ru-RU")},
@@ -88,7 +89,7 @@ classifier := result.Projections["classifier_history"]
 
 `CompileResult.Source` is an immutable freeze of normalized input messages (before pipeline mutations). `CompileResult.NormalizedSnapshot` and `CompileResult.Writeback` expose durable ID normalization and checkpoint writeback intent. `CompileResult.Introduced` captures pre-transform baselines for payload-born IDs (registered post-deferred, before hooks/patches). Use `DerivePersistenceProjection` for checkpoint persistence instead of parsing `Transformations`.
 
-**Pipeline order:** normalize IDs/current turn → freeze Source → deferred → low-level ephemeral patches (pre-budget) → hooks → segment formatters → budget preflight → budget(history + protected current turn) → low-level ephemeral patches (post-budget) → payload → named compile targets.
+**Pipeline order:** normalize IDs/current turn → freeze Source → historical argument projection → authorized deferred resolution/merge → freeze shared prepared candidates → independently for main and each target: scope/selection/admission → pre-budget patches → hooks/role projection/segment formatters → history budgeting with protected current turn → post-budget patches → final rendering/recount. Compile options and shared resolvers run once; output selection runs once per output.
 
 The current clear-break contract is summarized below and in the [migration guide](docs/migration.md).
 
@@ -127,14 +128,14 @@ Observer telemetry (`WithObserver`, `WithBudgetObserver`) behaves the same on `C
 
 ## Named Compile Targets
 
-Use compile targets when a classifier, router, evaluator, or secondary provider needs a projection from the same normalized snapshot, current turn, artifacts, transforms, and budgeted history:
+Use compile targets when a classifier, router, evaluator, or secondary provider needs its own context from shared preparation, before main loses messages to admission or budgeting:
 
 ```go
 result, _ := engine.Compile(ctx, contexty.CompileRequest{
     CurrentTurn: &currentTurn,
     Targets: []contexty.CompileTarget{{
         Name:          "classifier_history",
-        SourceSegment: contexty.SegmentHistory,
+        Segments: []contexty.SegmentName{contexty.SegmentHistory},
         Budget:        classifierBudgetPipe,
     }},
 })
@@ -142,7 +143,17 @@ classifier := result.Projections["classifier_history"]
 _ = classifier.Text
 ```
 
-`CompileProjection` includes rendered `Text`, typed `Messages`, transform records, participating artifact IDs, frozen `Source` (normalized request before pipeline mutations), and `InputSnapshot` (the compiled snapshot used as the target input). A target `View` is a built-in rendered view and is mutually exclusive with `SourceSegment`, `Budget`, and `Formatter`; use segment targets when target-local budget or formatting is required.
+`CompileTarget.Segments` selects ordinary messages from explicit segments. Artifacts are separate candidates: choose exact `ArtifactRefs` or set `IncludeArtifacts` for all prepared visible artifacts. Set `IncludeCurrentTurn` to include the prompt-safe active turn and pending messages. Empty composition produces an empty output; nothing inherits from main.
+
+`CompileProjection` owns final `Messages`, `Snapshot`, participating `Artifacts`/`ArtifactIDs`, transforms, selection and estimate evidence. `InputSnapshot` is shared prepared input; `Source` is normalized input before preparation. These are local diagnostics, not consumer transport. Use `ExportProjection(projection, selection, codec)` for an allowlisted envelope.
+
+A target `View` renders prepared stored segments and is mutually exclusive with composition, selection, budget and formatter settings. It has no budget guarantee and does not append the active current turn. For independent budgeted messages, use explicit composition instead.
+
+`WithSelectionPolicy` configures main selection; `CompileTarget.Selection` configures a target. A host policy selects exact `ContextCandidate.Ref` values with integer priorities. Core admits required units first, then higher priority, breaking ties by preparation ordinal and preserving conversation order. Complete tool rounds remain atomic. `SelectionDecision` describes admission; later transforms and budgeting may change final coverage. Main and targets may use different estimators/profiles, without sharing estimates.
+
+Choose persistence explicitly: `result.DerivePersistenceProjection(segment)` derives main persistence with compile-only changes restored. A target `Snapshot` is an explicit prompt-state choice, not automatic durable writeback; apply the host's persistence policy and `ProjectCheckpoint` before committing it. Summaries from different outputs are never merged automatically.
+
+See [the output contract](docs/context-projections.md) and runnable [two-consumer example](examples/context_projections/main.go).
 
 ## Views (non-mutating render)
 
@@ -310,7 +321,7 @@ Resource resolution pins an independent `LabelPolicyIdentity` and explicit custo
 
 `DescribeResource` pins an opaque host reference/revision, display name, full typed artifact digest and serialized byte length. `ResourceResolver.Resolve` requires an explicit `ResourceReader`, fresh scope, pinned projection, byte bound and estimate budget. It validates the actual body before projection and retains host labels/source ancestry. Declare selections/codecs in `DeferredBlock.Resources`/`ResourceCodec`, then return actual evidence in `DeferredResult.Resources`. Source keeps pre-resolution metadata; manifest and privacy-controlled saved records retain actual resolution dependencies. Resource-bearing accepted replay requires explicit `WithReplayResourceCodecs`; it never invokes a reader or refetches missing bodies. Missing/changed/oversized/unsupported content and cancellation fail without partial output or implicit fallback. Core does not discover resources, parse paths, install capabilities or execute body text. See the [selected resource contract](docs/resource-content.md), [host-owned reference reader](adapters/resource/memory/reader.go) and runnable [progressive disclosure example](examples/progressive_disclosure/main.go).
 
-Resolved artifacts follow normal lifecycle, local-budget and merge admission. Same-ID replacement and source-layer deduplication select one intact revision; append creates separate `ResourceResolution.Merge` evidence and checks the actual merged local budget before replacing the active artifact. Main and targets use the final admitted projection without additional reads. Incoming resolution evidence stays immutable even when excluded. Append labels require the compile host label policy; media and blob-bound previews fail explicitly rather than being flattened. Save the final artifact set through its checkpoint policy, not as additional ordinary messages from `DerivePersistenceProjection`. Replay requires saved old/incoming/derived content for every append, including excluded derivations, and never re-executes the host label policy or estimator.
+Resolved artifacts pass lifecycle checks and merges during shared preparation, before output admission. Same-ID replacement and source-layer deduplication select one intact prepared revision; append creates separate `ResourceResolution.Merge` evidence with `Prepared` recording the shared derivation. Incoming and merged evidence stay immutable. Main and targets independently apply artifact-local caps using their own estimators, without additional reads. An excluded replacement or merged revision does not silently restore the prior artifact. Append labels require the compile host label policy; media and blob-bound previews fail explicitly rather than being flattened. Choose an output artifact set for persistence and apply its checkpoint policy, not additional ordinary messages from `DerivePersistenceProjection`. Replay requires saved old/incoming/derived content for every append, including output-excluded derivations, and never re-executes the host label policy or estimator.
 
 ## Prefix diagnostics
 
@@ -535,7 +546,7 @@ _ = result
 _ = err
 ```
 
-Artifact-local limits use the main budget pipeline's estimator on the materialized
+Artifact-local limits use each output's budget pipeline estimator on its materialized
 message, or `CharTokenEstimator` when no pipeline is configured. A nil `Budget`
 means no local limit. An explicit `TokenLimit: 0` means zero capacity; callers
 previously using zero as unlimited must omit the policy instead. Negative active
@@ -576,7 +587,7 @@ desc := contexty.ArtifactCodecDescriptor[Fact]{
     Lifecycle:   contexty.ArtifactLifecyclePersistent,
     SourceRefs:  []contexty.SourceRef{{Namespace: "kb", Kind: "document", ID: "doc-1"}},
     MergePolicy: contexty.PolicyReplaceByOrigin,
-    Budget:      &contexty.ArtifactBudgetPolicy{Group: "retrieval", TokenLimit: 2000},
+    Budget:      &contexty.ArtifactBudgetPolicy{TokenLimit: 2000},
     Persistence: contexty.ArtifactPersistenceStore,
     Render:      func(v Fact) string { return v.Title + ": " + v.Body },
 }

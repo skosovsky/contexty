@@ -227,6 +227,11 @@ func (c *contentCapture) finish(manifest CompileManifest) (SavedCompileRecord, e
 }
 
 func (c *contentCapture) projection(ctx context.Context, projection CompileProjection) error {
+	for _, artifact := range projection.Artifacts {
+		if err := c.artifact(ctx, artifact, CaptureOutput); err != nil {
+			return err
+		}
+	}
 	for _, message := range projection.Messages {
 		if err := c.message(ctx, message, CaptureOutput, ""); err != nil {
 			return err

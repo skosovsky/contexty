@@ -66,7 +66,14 @@ func run(ctx context.Context) error {
 		ctx,
 		contexty.CompileRequest{ //nolint:exhaustruct_v5 // optional inputs omitted
 			Targets: []contexty.CompileTarget{
-				{Name: "selected", SourceSegment: contexty.SegmentMemory, View: "", Budget: nil, Formatter: nil},
+				{
+					Name:         "selected",
+					Segments:     []contexty.SegmentName{contexty.SegmentMemory},
+					View:         "",
+					ArtifactRefs: nil, IncludeCurrentTurn: false, IncludeArtifacts: false, Selection: nil,
+					Budget:    nil,
+					Formatter: nil,
+				},
 			},
 		},
 	)

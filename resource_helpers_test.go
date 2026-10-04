@@ -245,7 +245,12 @@ func fixtureIndependentResourceRecord(
 func fixtureIndependentResourceRequest(t *testing.T, appendInput bool) contexty.CompileRequest {
 	t.Helper()
 	request := contexty.CompileRequest{CompilationID: "independent-resource", Targets: []contexty.CompileTarget{
-		{Name: "first", SourceSegment: contexty.SegmentMemory}, {Name: "second", SourceSegment: contexty.SegmentMemory},
+		{
+			Name:             "first",
+			Segments:         []contexty.SegmentName{contexty.SegmentMemory},
+			IncludeArtifacts: true,
+		},
+		{Name: "second", Segments: []contexty.SegmentName{contexty.SegmentMemory}, IncludeArtifacts: true},
 	}}
 	if !appendInput {
 		return request
