@@ -1,130 +1,138 @@
-// Resilient store example: stdlib-only retries on [contexty.ErrUnavailable]
-// around a [contexty.ConversationStateStore]. Run: go run ./examples/resilient_store
+// Host reconciliation after an acknowledged read or an ambiguous checkpoint write.
+// Run: go run ./examples/resilient_store
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/skosovsky/contexty"
-	"github.com/skosovsky/contexty/testutil"
 )
 
-const (
-	exampleMaxRetries       = 5
-	exampleInitialBackoffMs = 10
-	exampleSimulatedFails   = 2
-)
+var ErrUnknownOutcome = errors.New("host: checkpoint write outcome unknown")
 
-type resilientConversationStateStore struct {
-	base     contexty.ConversationStateStore
-	attempts int
-	failLeft int
+// lostAcknowledgementStore models a backend commit whose response never arrived.
+type lostAcknowledgementStore struct {
+	contexty.ConversationStateStore
+
+	loseNext bool
 }
 
-func (s *resilientConversationStateStore) withRetry(ctx context.Context, op func(context.Context) error) error {
-	backoff := exampleInitialBackoffMs * time.Millisecond
-	var last error
-	for attempt := 0; attempt <= exampleMaxRetries; attempt++ {
-		s.attempts++
-		err := op(ctx)
-		if err == nil {
-			return nil
-		}
-		if errors.Is(err, contexty.ErrUnavailable) && attempt < exampleMaxRetries {
-			last = err
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-			backoff *= 2
-			continue
-		}
+func (s *lostAcknowledgementStore) CommitState(
+	ctx context.Context,
+	id string,
+	version int64,
+	deltas ...contexty.ConversationDelta,
+) error {
+	if err := s.ConversationStateStore.CommitState(ctx, id, version, deltas...); err != nil {
 		return err
 	}
-	return last
+	if s.loseNext {
+		s.loseNext = false
+		return fmt.Errorf("response lost after commit: %w", contexty.ErrUnavailable)
+	}
+	return nil
 }
 
-func (s *resilientConversationStateStore) LoadState(
-	ctx context.Context,
-	conversationID string,
-) (contexty.ConversationState, error) {
-	var state contexty.ConversationState
-	err := s.withRetry(ctx, func(ctx context.Context) error {
-		if s.failLeft > 0 {
-			s.failLeft--
-			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
-		}
-		var e error
-		state, e = s.base.LoadState(ctx, conversationID)
-		return e
-	})
-	return state, err
+// reconcileOwnedCheckpoint requires a host-owned unique witness in the expected
+// content. Exact content plus the next revision is sufficient in this host model;
+// later writes or a competing checkpoint remain unknown. No mutation is retried.
+func reconcileOwnedCheckpoint(ctx context.Context, store contexty.ConversationStateStore, id string,
+	before contexty.ConversationState, deltas ...contexty.ConversationDelta) error {
+	working, err := contexty.ApplyDeltas(before, deltas...)
+	if err != nil {
+		return err
+	}
+	expected, err := contexty.ProjectCheckpoint(working)
+	if err != nil {
+		return err
+	}
+	if !hasNewCheckpointWitness(before, expected) {
+		return ErrUnknownOutcome
+	}
+	version, err := contexty.NextConversationVersion(before.Version())
+	if err != nil {
+		return err
+	}
+	actual, err := store.LoadState(ctx, id)
+	if err != nil {
+		return fmt.Errorf("%w: reload: %w", ErrUnknownOutcome, err)
+	}
+	codec := contexty.ConversationCodec{Provenance: contexty.DefaultProvenanceRegistry(), Extensions: nil}
+	expectedWire, err := codec.Encode(expected.WithVersion(version))
+	if err != nil {
+		return err
+	}
+	actualWire, err := codec.Encode(actual)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(expectedWire, actualWire) {
+		return ErrUnknownOutcome
+	}
+	return nil
 }
 
-func (s *resilientConversationStateStore) ApplyDelta(
-	ctx context.Context,
-	conversationID string,
-	expectedVersion int64,
-	delta contexty.ConversationDelta,
-) error {
-	return s.withRetry(ctx, func(ctx context.Context) error {
-		if s.failLeft > 0 {
-			s.failLeft--
-			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
+func hasNewCheckpointWitness(before, expected contexty.ConversationState) bool {
+	known := make(map[string]bool)
+	for _, messages := range before.AllSegments() {
+		for _, message := range messages {
+			known[message.ID] = true
 		}
-		return s.base.ApplyDelta(ctx, conversationID, expectedVersion, delta)
-	})
-}
-
-func (s *resilientConversationStateStore) ClearState(
-	ctx context.Context,
-	conversationID string,
-	expectedVersion int64,
-) error {
-	return s.withRetry(ctx, func(ctx context.Context) error {
-		if s.failLeft > 0 {
-			s.failLeft--
-			return fmt.Errorf("simulated: %w", contexty.ErrUnavailable)
+	}
+	for _, artifact := range before.Artifacts() {
+		known[artifact.ID] = true
+	}
+	for _, messages := range expected.AllSegments() {
+		for _, message := range messages {
+			if message.ID != "" && !known[message.ID] {
+				return true
+			}
 		}
-		return s.base.ClearState(ctx, conversationID, expectedVersion)
-	})
+	}
+	for _, artifact := range expected.Artifacts() {
+		if artifact.ID != "" && !known[artifact.ID] {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
 	ctx := context.Background()
-	base := testutil.NewMemoryConversationStateStore()
-	store := &resilientConversationStateStore{
-		base:     base,
-		attempts: 0,
-		failLeft: exampleSimulatedFails,
-	}
-
-	state0, err := store.LoadState(ctx, "demo")
+	base := contexty.NewMemoryConversationStateStore()
+	store := &lostAcknowledgementStore{ConversationStateStore: base, loseNext: true}
+	before, err := store.LoadState(ctx, "demo")
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Load after %d attempts (%d simulated ErrUnavailable): version=%d\n",
-		store.attempts, exampleSimulatedFails, state0.Version())
-
-	store.attempts = 0
-	store.failLeft = 0
-	//nolint:exhaustruct_v5 // zero-value fields omitted in example
-	err = store.ApplyDelta(ctx, "demo", state0.Version(), contexty.ConversationDelta{
-		Operation: contexty.DeltaAppendMessages,
-		Segment:   contexty.SegmentHistory,
-		Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")},
-	})
+	// The host controls this unique application message ID; it is not a library receipt.
+	message := contexty.TextMessage(contexty.RoleUser, "hello")
+	message.ID = "host-write-1/message"
+	delta := contexty.ConversationDelta{Operation: contexty.DeltaAppendMessages, Segment: contexty.SegmentHistory,
+		Messages: []contexty.Message{message}, MessageIDs: nil, Artifact: nil, ToolRound: nil}
+	err = store.CommitState(ctx, "demo", before.Version(), delta)
+	if !errors.Is(err, contexty.ErrUnavailable) {
+		panic("expected an ambiguous response")
+	}
+	// Reusing the original token cannot duplicate the mutation, but conflict proves no ownership.
+	retryErr := store.CommitState(ctx, "demo", before.Version(), delta)
+	fmt.Printf(
+		"Lost response; retry conflicts=%t (not evidence of success)\n",
+		errors.Is(retryErr, contexty.ErrConversationVersionConflict),
+	)
+	if err = reconcileOwnedCheckpoint(ctx, base, "demo", before, delta); err != nil {
+		panic(err)
+	}
+	after, err := base.LoadState(ctx, "demo")
 	if err != nil {
 		panic(err)
 	}
-	state1, err := store.LoadState(ctx, "demo")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Append ok; reload version=%d content=%q\n",
-		state1.Version(), state1.Segment(contexty.SegmentHistory)[0].TextContent())
+	fmt.Printf(
+		"Host reconciled owned checkpoint: version=%d messages=%d\n",
+		after.Version(),
+		len(after.Segment(contexty.SegmentHistory)),
+	)
 }

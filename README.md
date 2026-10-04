@@ -27,54 +27,40 @@ linter installation is required. CI uses the same release.
 ```go
 ctx := context.Background()
 store := contexty.NewMemoryConversationStateStore()
-
-_ = store.ApplyDelta(ctx, "chat-1", 0, contexty.ConversationDelta{
-    Operation: contexty.DeltaReplaceSegment,
-    Segment:   contexty.SegmentSystem,
-    Messages: []contexty.Message{
-        contexty.TextMessage(contexty.RoleSystem, "You are helpful."),
+initial, err := store.LoadState(ctx, "chat-1")
+if err != nil { return err }
+err = store.CommitState(ctx, "chat-1", initial.Version(),
+    contexty.ConversationDelta{
+        Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentSystem,
+        Messages: []contexty.Message{contexty.TextMessage(contexty.RoleSystem, "You are helpful.")},
     },
-})
-_ = store.ApplyDelta(ctx, "chat-1", 1, contexty.ConversationDelta{
-    Operation: contexty.DeltaAppendMessages,
-    Segment:   contexty.SegmentHistory,
-    Messages: []contexty.Message{
-        contexty.TextMessage(contexty.RoleUser, "Hello"),
+    contexty.ConversationDelta{
+        Operation: contexty.DeltaAppendMessages, Segment: contexty.SegmentHistory,
+        Messages: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "Hello")},
     },
-})
-
+)
+if err != nil { return err }
 engine := contexty.NewEngine(
-    contexty.WithConversationID("chat-1"),
-    contexty.WithStateStore(store),
+    contexty.WithConversationID("chat-1"), contexty.WithStateStore(store),
     contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
-        contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4000)},
-        contexty.CharTokenEstimator{},
+        contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4000)}, contexty.CharTokenEstimator{},
     )),
 )
-
-turn := contexty.NewCurrentTurn(
-    contexty.TextMessage(contexty.RoleUser, "Current turn"),
-).WithPromptSafe(contexty.TextMessage(contexty.RoleUser, "Current turn, redacted for prompt"))
-
+turn := contexty.NewCurrentTurn(contexty.TextMessage(contexty.RoleUser, "Current turn")).
+    WithPromptSafe(contexty.TextMessage(contexty.RoleUser, "Current turn, redacted for prompt"))
 result, err := engine.Compile(ctx, contexty.CompileRequest{
-    CurrentTurn:            &turn,
-    IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("chat"),
+    CurrentTurn: &turn, IdentityPolicy: contexty.NewStableMessageIdentityPolicy("chat"),
     RequireDurableIdentity: true,
-    Options: []contexty.CompileOption{
-        contexty.WithResolveVar("locale", "en-US"),
-    },
-    Targets: []contexty.CompileTarget{{
-        Name:          "classifier_history",
-        SourceSegment: contexty.SegmentHistory,
-    }},
+    Options: []contexty.CompileOption{contexty.WithResolveVar("locale", "en-US")},
+    Targets: []contexty.CompileTarget{{Name: "classifier_history", SourceSegment: contexty.SegmentHistory}},
 })
-toSave := result.DerivePersistenceProjection(contexty.SegmentHistory)
-_ = result.Writeback // assigned durable IDs and normalized snapshot
-_ = store.ApplyDelta(ctx, "chat-1", 2, contexty.ConversationDelta{
-    Operation: contexty.DeltaReplaceSegment,
-    Segment:   contexty.SegmentHistory,
-    Messages:  toSave,
+if err != nil { return err }
+err = store.CommitState(ctx, "chat-1", result.NormalizedSnapshot.Version(), contexty.ConversationDelta{
+    Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentHistory,
+    Messages: result.DerivePersistenceProjection(contexty.SegmentHistory),
 })
+if err != nil { return err }
+
 ```
 
 ## Compile API
@@ -613,7 +599,7 @@ state, err := contexty.ApplyDelta(contexty.EmptyState(), contexty.ConversationDe
 _ = state
 _ = err
 
-err = store.ApplyDelta(ctx, "chat-1", expectedVersion, contexty.ConversationDelta{
+err = store.CommitState(ctx, "chat-1", expectedVersion, contexty.ConversationDelta{
     Operation: contexty.DeltaReplaceSegment,
     Segment:   contexty.SegmentHistory,
     Messages:  state.Segment(contexty.SegmentHistory),
@@ -664,7 +650,7 @@ import postgresstore "github.com/skosovsky/contexty/adapters/store/postgres"
 
 store := postgresstore.New(pool)
 state, err := store.LoadState(ctx, conversationID)
-err = store.ApplyDelta(ctx, conversationID, state.Version(), contexty.ConversationDelta{
+err = store.CommitState(ctx, conversationID, state.Version(), contexty.ConversationDelta{
     Operation: contexty.DeltaAppendMessages,
     Segment:   contexty.SegmentHistory,
     Messages:  []contexty.Message{msg},
@@ -798,3 +784,12 @@ patches and formatting.
 
 See [the complete contract](docs/retention-budget.md) and the executable
 [tool-heavy budgeting example](examples/context_budget/main.go).
+
+## Atomic checkpoint storage
+
+`CommitState` publishes an ordered nonempty batch under one loaded revision.
+Every supplied store applies `ProjectCheckpoint` explicitly. Conversation codecs
+are lossless and retain transient artifacts; they use `contexty/conversation/1`
+independently of OCC revisions. Redis checkpoint keys use a new encoded namespace
+with conversation-specific Cluster hash tags. See [checkpoint contract](docs/checkpoint-store.md)
+and [host reconciliation example](examples/resilient_store) for unknown network outcomes.

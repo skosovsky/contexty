@@ -128,7 +128,7 @@ err := store.ClearState(ctx, conversationID, expected)
 // Handle err before proceeding.
 state, err := store.LoadState(ctx, conversationID)
 // Handle err before proceeding.
-err = store.ApplyDelta(ctx, conversationID, state.Version(), delta)
+err = store.CommitState(ctx, conversationID, state.Version(), delta)
 ```
 
 Stale append/replace/clear now fail with `ErrConversationVersionConflict`. Payload
@@ -260,3 +260,24 @@ pipeline capacity after reservations. NewCompactionRecord requires the concrete
 CompactionExecution; old records lack required request evidence and must be
 explicitly retired or migrated by the host. No legacy callback adapter or record
 reader is provided. See [the complete contract](retention-budget.md).
+
+## Atomic checkpoints and semantic wire schema
+
+Replace store `ApplyDelta` with `CommitState(ctx, id, loadedVersion, deltas...)`.
+One nonempty batch consumes one revision; empty batches return an error. Do not
+hard-code successive revisions or blindly retry on a reloaded version. Compile
+still does not persist its output. An unavailable response (or conflict after a
+retry) does not prove whether this host committed; reconciliation belongs to host.
+
+ConversationCodec now retains all artifacts. Use `ProjectCheckpoint` explicitly
+before directly encoding a durable checkpoint. Memory stores use the same projection
+and configured semantic codec as durable adapters; host extensions require
+`WithMemoryStateCodec`. The wire envelope requires `schema: contexty/conversation/1`;
+missing/unknown schema fails. There is no legacy decoder or automatic migration.
+
+Redis keys are now `contexty:checkpoint:<hex namespace>:{c<hex ID>}:ver/data`.
+`WithKeyPrefix` supplies the logical namespace, encoded before key construction.
+The default logical namespace is `default`. There is no dual read or legacy write.
+Hosts must explicitly migrate old checkpoint data and OCC markers together, or
+choose fresh conversation identities. Never independently delete active revision
+markers. Clear/TTL remain monotonic, without cross-backend transaction promises.

@@ -17,7 +17,7 @@ func TestMemoryConversationStateStore_AppendAndLoad(t *testing.T) {
 	store := testutil.NewMemoryConversationStateStore()
 	s0, err := store.LoadState(ctx, "t")
 	require.NoError(t, err)
-	require.NoError(t, store.ApplyDelta(ctx, "t", s0.Version(), contexty.ConversationDelta{
+	require.NoError(t, store.CommitState(ctx, "t", s0.Version(), contexty.ConversationDelta{
 		Operation: contexty.DeltaAppendMessages,
 		Segment:   contexty.SegmentHistory,
 		Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "hello")},

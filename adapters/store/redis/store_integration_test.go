@@ -2,6 +2,8 @@ package redis
 
 import (
 	"context"
+	"math"
+	"strconv"
 	"testing"
 	"time"
 
@@ -32,6 +34,58 @@ func TestStoreIntegration(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, client.Close())
 	})
+	t.Run("exhausted revision", func(t *testing.T) {
+		// Arrange: a live namespace has consumed its final int64 token.
+		store := New(client)
+		id := "exhausted"
+		require.NoError(
+			t,
+			client.MSet(ctx, store.verKey(id), strconv.FormatInt(math.MaxInt64, 10), store.dataKey(id), "").Err(),
+		)
+		before, loadErr := store.LoadState(ctx, id)
+		require.NoError(t, loadErr)
+		// Act: neither commit nor clear may wrap or partially erase its identity.
+		require.ErrorIs(
+			t,
+			store.CommitState(ctx, id, before.Version(), contexty.ConversationDelta{}),
+			contexty.ErrConversationVersionExhausted,
+		)
+		require.ErrorIs(t, store.ClearState(ctx, id, before.Version()), contexty.ErrConversationVersionExhausted)
+		// Assert.
+		after, loadErr := store.LoadState(ctx, id)
+		require.NoError(t, loadErr)
+		require.Equal(t, before, after)
+	})
+	t.Run("write permission failure is atomic", func(t *testing.T) {
+		for _, rule := range []string{"-mset", "-pexpire"} {
+			t.Run(rule, func(t *testing.T) {
+				// Arrange: EVAL and reads work; a required write is forbidden.
+				user := "checkpoint-denied-" + rule[1:]
+				require.NoError(
+					t,
+					client.Do(ctx, "ACL", "SETUSER", user, "on", ">fixture-password", "~*", "+eval", "+get", "+mset", "+pexpire", rule).
+						Err(),
+				)
+				limited := goredis.NewClient(
+					&goredis.Options{Addr: endpoint, Username: user, Password: "fixture-password"},
+				)
+				t.Cleanup(func() { require.NoError(t, limited.Close()) })
+				store := New(limited, WithTTL(time.Hour))
+				id := user
+				// Act: the failed write must not consume a revision or publish payload.
+				err := store.CommitState(ctx, id, 0, contexty.ConversationDelta{
+					Operation: contexty.DeltaAppendMessages,
+					Segment:   contexty.SegmentHistory,
+					Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "not published")},
+				})
+				require.Error(t, err)
+				// Assert via the privileged reader, independently of the restricted connection.
+				exists, countErr := client.Exists(ctx, store.verKey(id), store.dataKey(id)).Result()
+				require.NoError(t, countErr)
+				require.Zero(t, exists)
+			})
+		}
+	})
 
 	t.Run("fixture OCC conformance", func(t *testing.T) {
 		testutil.CheckStateStore(t, New(client), "fixture-conformance")
@@ -42,13 +96,13 @@ func TestStoreIntegration(t *testing.T) {
 		id := "fixture-expiry"
 		delta := contexty.ConversationDelta{Operation: contexty.DeltaAppendMessages, Segment: contexty.SegmentHistory,
 			Messages: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "old private data")}}
-		require.NoError(t, store.ApplyDelta(ctx, id, 0, delta))
+		require.NoError(t, store.CommitState(ctx, id, 0, delta))
 		stale, err := store.LoadState(ctx, id)
 		require.NoError(t, err)
 		// Act: actual Redis expiry, deterministically triggered without sleeping.
 		require.NoError(t, client.PExpire(ctx, store.dataKey(id), -time.Millisecond).Err())
 		// Assert: CAS itself notices expiry, even without a preceding LoadState.
-		require.ErrorIs(t, store.ApplyDelta(ctx, id, stale.Version(), delta), contexty.ErrConversationVersionConflict)
+		require.ErrorIs(t, store.CommitState(ctx, id, stale.Version(), delta), contexty.ErrConversationVersionConflict)
 		require.ErrorIs(t, store.ClearState(ctx, id, stale.Version()), contexty.ErrConversationVersionConflict)
 		empty, err := store.LoadState(ctx, id)
 		require.NoError(t, err)
@@ -57,7 +111,7 @@ func TestStoreIntegration(t *testing.T) {
 		repeated, err := store.LoadState(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, empty.Version(), repeated.Version())
-		require.NoError(t, store.ApplyDelta(ctx, id, empty.Version(), delta))
+		require.NoError(t, store.CommitState(ctx, id, empty.Version(), delta))
 		ttl, err := client.TTL(ctx, store.verKey(id)).Result()
 		require.NoError(t, err)
 		require.Equal(t, -time.Nanosecond, ttl)
@@ -133,7 +187,7 @@ func TestStoreIntegration(t *testing.T) {
 	t.Run("apply delta state and OCC", func(t *testing.T) {
 		store := New(client)
 		conversationID := "thread-delta"
-		require.NoError(t, store.ApplyDelta(ctx, conversationID, 0, contexty.ConversationDelta{
+		require.NoError(t, store.CommitState(ctx, conversationID, 0, contexty.ConversationDelta{
 			Operation: contexty.DeltaReplaceSegment,
 			Segment:   contexty.SegmentHistory,
 			Messages: []contexty.Message{
@@ -149,7 +203,7 @@ func TestStoreIntegration(t *testing.T) {
 			"memory-1",
 			contexty.TextPayload("memory"),
 		).ContextArtifact
-		require.NoError(t, store.ApplyDelta(ctx, conversationID, state.Version(), contexty.ConversationDelta{
+		require.NoError(t, store.CommitState(ctx, conversationID, state.Version(), contexty.ConversationDelta{
 			Operation: contexty.DeltaUpsertArtifact,
 			Artifact:  &artifact,
 		}))
@@ -158,7 +212,7 @@ func TestStoreIntegration(t *testing.T) {
 		require.Len(t, state.Artifacts(), 1)
 		assert.Equal(t, "memory-1", state.Artifacts()[0].ID)
 
-		err = store.ApplyDelta(ctx, conversationID, 1, contexty.ConversationDelta{
+		err = store.CommitState(ctx, conversationID, 1, contexty.ConversationDelta{
 			Operation: contexty.DeltaAppendMessages,
 			Segment:   contexty.SegmentHistory,
 			Messages:  []contexty.Message{contexty.TextMessage(contexty.RoleUser, "stale")},
@@ -172,7 +226,7 @@ func TestStoreIntegration(t *testing.T) {
 		require.NoError(t, err)
 		require.NoError(t, appendHistory(ctx, withTTL, "thread-ttl", s0.Version(),
 			contexty.TextMessage(contexty.RoleUser, "ttl")))
-		ttlData, err := client.TTL(ctx, defaultKeyPrefix+"thread-ttl:data").Result()
+		ttlData, err := client.TTL(ctx, withTTL.dataKey("thread-ttl")).Result()
 		require.NoError(t, err)
 		assert.Greater(t, ttlData, time.Duration(0))
 	})
@@ -212,8 +266,8 @@ func TestStoreIntegration(t *testing.T) {
 
 	t.Run("version without payload returns unavailable", func(t *testing.T) {
 		conversationID := "thread-corrupt"
-		require.NoError(t, client.Set(ctx, defaultKeyPrefix+conversationID+":ver", "2", 0).Err())
 		store := New(client)
+		require.NoError(t, client.Set(ctx, store.verKey(conversationID), "2", 0).Err())
 		_, err := store.LoadState(ctx, conversationID)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, contexty.ErrUnavailable)

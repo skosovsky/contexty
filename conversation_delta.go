@@ -123,7 +123,7 @@ func ApplyDeltas(state ConversationState, deltas ...ConversationDelta) (Conversa
 // ConversationStateStore persists immutable state transitions with OCC.
 type ConversationStateStore interface {
 	LoadState(ctx context.Context, conversationID string) (ConversationState, error)
-	ApplyDelta(ctx context.Context, conversationID string, expectedVersion int64, delta ConversationDelta) error
+	CommitState(ctx context.Context, conversationID string, expectedVersion int64, deltas ...ConversationDelta) error
 	ClearState(ctx context.Context, conversationID string, expectedVersion int64) error
 }
 

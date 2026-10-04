@@ -790,3 +790,12 @@ SummaryRequest, BudgetResult/Decision, RetentionPolicy and CompactionPolicy.
 Retention applies before any compression or eviction callback, independently of
 the chosen strategy. Compaction records carry concrete request capacities and
 configuration, and compile manifests bind actual budget-stage decisions.
+
+## Atomic checkpoint commit
+
+ConversationStateStore exposes LoadState, CommitState with an ordered nonempty batch,
+and ClearState. Stores apply one explicit ProjectCheckpoint and semantic codec before
+atomic publication, consume one OCC revision, and publish no partial batch on failure.
+ConversationCodec is lossless and schema-tagged; OCC is independent of schema.
+See [checkpoint-store.md](checkpoint-store.md) for policy matrix, Cluster key layout,
+unknown network outcomes and host reconciliation boundaries.

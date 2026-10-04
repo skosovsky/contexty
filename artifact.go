@@ -299,20 +299,13 @@ func sourceRefKey(ref SourceRef) string {
 }
 
 func persistentArtifacts(artifacts []ContextArtifact) []ContextArtifact {
-	if len(artifacts) == 0 {
-		return nil
-	}
-	out := make([]ContextArtifact, 0, len(artifacts))
+	var persistent []ContextArtifact
 	for _, artifact := range artifacts {
-		if !artifactShouldPersist(artifact) {
-			continue
+		if artifactShouldPersist(artifact) {
+			persistent = append(persistent, artifact.Clone())
 		}
-		out = upsertArtifact(out, artifact)
 	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return persistent
 }
 
 func artifactShouldPersist(artifact ContextArtifact) bool {

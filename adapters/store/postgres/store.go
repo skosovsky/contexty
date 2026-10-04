@@ -60,19 +60,22 @@ func (s *Store) LoadState(ctx context.Context, conversationID string) (contexty.
 	return snap.WithVersion(version), nil
 }
 
-// ApplyDelta applies an immutable state transition when expectedVersion matches.
-func (s *Store) ApplyDelta(
+// CommitState atomically applies a nonempty batch when expectedVersion matches.
+func (s *Store) CommitState(
 	ctx context.Context,
 	conversationID string,
 	expectedVersion int64,
-	delta contexty.ConversationDelta,
+	deltas ...contexty.ConversationDelta,
 ) error {
+	if len(deltas) == 0 {
+		return contexty.ErrEmptyCheckpointCommit
+	}
 	return s.mutate(
 		ctx,
 		conversationID,
 		expectedVersion,
 		func(snap contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
-			return contexty.ApplyDelta(snap, delta)
+			return contexty.ApplyDeltas(snap, deltas...)
 		},
 	)
 }
@@ -128,6 +131,10 @@ func (s *Store) mutate(
 	}
 
 	next, err := update(cur)
+	if err != nil {
+		return err
+	}
+	next, err = contexty.ProjectCheckpoint(next)
 	if err != nil {
 		return err
 	}

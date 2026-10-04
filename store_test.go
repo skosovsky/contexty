@@ -38,7 +38,7 @@ func TestClear_MissingIdentity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), state.Version())
 	require.Empty(t, state.AllSegments())
-	require.ErrorIs(t, store.ApplyDelta(ctx, "absent", 0, contexty.ConversationDelta{}),
+	require.ErrorIs(t, store.CommitState(ctx, "absent", 0, contexty.ConversationDelta{}),
 		contexty.ErrConversationVersionConflict)
 }
 
