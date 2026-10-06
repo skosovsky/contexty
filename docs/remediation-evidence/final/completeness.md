@@ -1,7 +1,7 @@
-# Task24 whole-goal independent completeness acceptance
+# remediation whole-goal independent completeness acceptance
 
 Reviewed committed HEAD afeca6b (`refactor: compile internals`) plus the frozen final
-formatter-preflight correction, including all six stages, original Task24 Definition
+formatter-preflight correction, including all six stages, original remediation Definition
 of Done, execution journal, contracts, decisions, implementation and preserved
 evidence. Read-only review; no repository edits.
 
