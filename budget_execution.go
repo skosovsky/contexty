@@ -13,25 +13,19 @@ func (p *BudgetPipeline) Apply(ctx context.Context, messages []Message) (BudgetR
 
 // ApplyWithLimit uses the actual remaining capacity after compile reservations.
 func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, messages []Message, limit int) (BudgetResult, error) {
-	hard, err := p.cfg.Budget.Resolve()
-	if err != nil {
+	if err := p.validateBudgetInvocation(ctx, limit); err != nil {
 		return BudgetResult{}, err
 	}
-	if limit < 0 || limit > hard {
-		return BudgetResult{}, ErrInvalidBudgetRequest
-	}
-	if err = p.validateBudgetPolicy(); err != nil {
-		return BudgetResult{}, err
-	}
-	if err = p.validateCompactionContext(ctx); err != nil {
-		return BudgetResult{}, err
-	}
+	var err error
 	ctx = ensureBudgetObservation(ctx, p.observer)
 	if err = ctx.Err(); err != nil {
 		return BudgetResult{}, err
 	}
-	cur := cloneMessageSlice(messages)
-	rounds, err := InspectToolRoundStates(cur, nil)
+	cur, err := ownCompileMessages(messages)
+	if err != nil {
+		return BudgetResult{}, err
+	}
+	rounds, err := p.inspectBudgetRounds(cur)
 	if err != nil {
 		return BudgetResult{}, err
 	}
@@ -52,12 +46,16 @@ func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, messages []Message,
 	if err = ctx.Err(); err != nil {
 		return BudgetResult{}, err
 	}
-	protectBudgetSuffix(selected, rounds, p.rolling)
+	p.protectCompileBudgetSuffix(cur, selected, rounds)
 	if err = validateUniqueMessageIDs(cur); err != nil {
 		return BudgetResult{}, err
 	}
 	required, _ := splitRequired(cur, selected)
-	decision.Required, err = p.requiredRefs(ctx, required)
+	explicit, requiredErr := p.explicitRequiredMessages(ctx, required)
+	if requiredErr != nil {
+		return BudgetResult{}, requiredErr
+	}
+	decision.Required, err = p.requiredRefs(ctx, explicit)
 	if err != nil {
 		return BudgetResult{}, err
 	}
@@ -81,9 +79,6 @@ func (p *BudgetPipeline) ApplyWithLimit(ctx context.Context, messages []Message,
 }
 
 func (p *BudgetPipeline) observeBudgetMessages(ctx context.Context, messages []Message) (int, error) {
-	if len(messages) == 0 {
-		return 0, nil
-	}
 	cost, err := p.estimateBudgetMessages(ctx, messages)
 	if err != nil {
 		return 0, err
@@ -109,6 +104,9 @@ func (p *BudgetPipeline) executeOverflow(
 	decision *BudgetDecision,
 ) ([]Message, error) {
 	required, evictable := splitRequired(before, selected)
+	if out, handled, evictionErr := p.tryCompleteEviction(ctx, before, selected, required, decision); handled {
+		return out, evictionErr
+	}
 	reserved := 0
 	var err error
 	if len(required) > 0 {
@@ -142,7 +140,7 @@ func (p *BudgetPipeline) executeOverflow(
 	if err != nil {
 		return nil, err
 	}
-	if _, err = InspectToolRoundStates(out, nil); err != nil {
+	if _, err = p.inspectBudgetRounds(out); err != nil {
 		return nil, err
 	}
 	decision.AfterTokens, err = p.estimateBudgetMessages(ctx, out)
@@ -197,7 +195,7 @@ func (p *BudgetPipeline) evictOptional(ctx context.Context, messages []Message, 
 	if strategy == nil {
 		strategy = NewDropHeadStrategy(p.cfg.DropHead)
 	}
-	output, err := strategy.Apply(ctx, messages, cost, limit, p.estimator)
+	output, err := strategy.Apply(ctx, evictionCallbackInput(strategy, messages), cost, limit, p.estimator)
 	if canceled := ctx.Err(); canceled != nil {
 		return nil, canceled
 	}
@@ -207,7 +205,7 @@ func (p *BudgetPipeline) evictOptional(ctx context.Context, messages []Message, 
 	if err = validateEvictableRounds(output); err != nil {
 		return nil, err
 	}
-	return cloneMessageSlice(output), nil
+	return ownCompileMessages(output)
 }
 
 func (p *BudgetPipeline) requiredOverflowError(messages []Message) error {
@@ -225,4 +223,51 @@ func (p *BudgetPipeline) requiredOverflowError(messages []Message) error {
 		}
 	}
 	return ErrBudgetExceeded
+}
+
+func (p *BudgetPipeline) tryCompleteEviction(
+	ctx context.Context,
+	before []Message,
+	selected []bool,
+	required []Message,
+	decision *BudgetDecision,
+) ([]Message, bool, error) {
+	if p.cfg.Summarizer != nil || len(required) == 0 || intrinsicAdditiveEstimator(p.estimator) {
+		return nil, false, nil
+	}
+	out, handled, err := p.evictCompleteCandidate(ctx, before, selected, decision.HardLimit)
+	if !handled || err != nil {
+		return out, handled, err
+	}
+	if _, roundErr := p.inspectBudgetRounds(out); roundErr != nil {
+		return nil, true, roundErr
+	}
+	decision.AfterTokens, err = p.estimateBudgetMessages(ctx, out)
+	if err == nil && decision.AfterTokens > decision.HardLimit {
+		return nil, true, ErrBudgetExceeded
+	}
+	return out, true, err
+}
+
+func (p *BudgetPipeline) validateBudgetInvocation(ctx context.Context, limit int) error {
+	if err := p.validateBudgetPolicy(); err != nil {
+		return err
+	}
+	hard, err := p.cfg.Budget.Resolve()
+	if err != nil {
+		return err
+	}
+	if limit < 0 || limit > hard {
+		return ErrInvalidBudgetRequest
+	}
+	return p.validateCompactionContext(ctx)
+}
+
+func evictionCallbackInput(strategy EvictionStrategy, messages []Message) []Message {
+	switch strategy.(type) {
+	case *dropHeadStrategy, *dropTailStrategy, *dropStrategy, *strictStrategy:
+		return messages
+	default:
+		return cloneMessageSlice(messages)
+	}
 }

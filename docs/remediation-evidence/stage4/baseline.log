@@ -1,0 +1,39 @@
+=== identity @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+first <nil>
+persist <nil>
+history 1 chat:current_turn:0:9d9cf6283341a656
+second <nil> history 2
+chat:current_turn:0:9d9cf6283341a656 yes
+chat:current_turn:1:9d9cf6283341a656 yes
+persist2 <nil> 2
+third after trimming oldest contexty: compile request: contexty: duplicate message id in compile request
+different images same generated ID true
+
+=== compile @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+segment="memroy" policy="append" err=<nil> calls=1 payload=[{df58a01808255cfb3bf2a4a6d6630862 system <nil> [{OLD RULE}] {<nil>} [] [] <nil> <nil> <nil>}] prepared_segments=[memroy memory history]
+segment="memory" policy="replcae" err=<nil> calls=1 payload=[{b70c5a4ed17423e0e123a82fa1cb5b26 system <nil> [{OLD RULE}] {<nil>} [] [] <nil> <nil> <nil>} {a9838e039046821a9babe20901e51c90 system <nil> [{NEW RULE}] {<nil>} [] [] <nil> <nil> <nil>}] prepared_segments=[memory history]
+role projection err=<nil> called=1 roles=system user 
+
+=== materialization @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+pointer=false err=contexty: invalid artifact materialization payload={System:[] History:[] Tools:[] Memory:[]}
+pointer=true err=<nil> payload={System:[] History:[] Tools:[] Memory:[{ID:artifact:data Role:assistant Actor:<nil> Parts:[{ID:call Name:execute Arguments:{Text:{} Data:null Binary:[] MIMEType: Error:<nil> Progress:<nil> Control:<nil>} ArgumentsBlob:<nil>}] Annotations:{Timestamp:<nil>} SourceRefs:[] Extensions:[] Origin:<nil> LLMCache:<nil> Provenance:<nil>}]}
+
+=== views @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+custom_called=false out="user: ORIGINAL\n" err=<nil>
+
+=== budget @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+mutation err=<nil> caller="original-b" output="mutated"
+fixed total=2 err=<nil>
+fixed admitted=2 tokens=2 err=<nil>
+char 2-runes/max=-1 err=<nil>
+
+=== overhead @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+full_input_cost=12 limit=12 err=<nil> kept_history=0
+
+=== arch @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+budget("history"): history=0 memory=1 err=<nil>
+budget("memory"): history=0 memory=1 err=<nil>
+budget("typo"): history=0 memory=1 err=<nil>
+provenance: err=<nil> encoding_error=<nil> reencoded={"type_id":"system","payload":{"component":"service"}}
+
+Baseline F03/F04/F05/F06/F07/F08/F11/F12 behavioral assertions PASS

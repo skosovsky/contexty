@@ -25,32 +25,43 @@ func (c *FixedEstimator) Estimate(ctx context.Context, msgs []Message) (int, err
 	if err != nil {
 		return 0, err
 	}
-	total := 0
-	for _, w := range weights {
-		total += w
-	}
-	return total, nil
+	return sumEstimateTokens(weights)
 }
 
 // EstimatePerMessage returns per-message weights.
 func (c *FixedEstimator) EstimatePerMessage(ctx context.Context, msgs []Message) ([]int, error) {
+	if err := validateBuiltinEstimator(c); err != nil {
+		return nil, err
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: fixed estimator: %w", err)
 	}
 	out := make([]int, len(msgs))
 	for i, m := range msgs {
+		if err := validateContentParts(m.Parts); err != nil {
+			return nil, err
+		}
 		if err := rejectOpaqueEstimateCost(m); err != nil {
 			return nil, err
 		}
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("contexty: fixed estimator: %w", err)
 		}
-		w := c.TokensPerMessage
-		if c.TokensPerContentPart != 0 {
-			w += len(m.Parts) * c.TokensPerContentPart
+		partCost, err := multiplyEstimateTokens(len(m.Parts), c.TokensPerContentPart)
+		if err != nil {
+			return nil, err
 		}
-		if c.TokensPerToolCall != 0 {
-			w += len(m.ToolCallParts()) * c.TokensPerToolCall
+		toolCost, err := multiplyEstimateTokens(len(m.ToolCallParts()), c.TokensPerToolCall)
+		if err != nil {
+			return nil, err
+		}
+		w, err := addEstimateTokens(c.TokensPerMessage, partCost)
+		if err != nil {
+			return nil, err
+		}
+		w, err = addEstimateTokens(w, toolCost)
+		if err != nil {
+			return nil, err
 		}
 		out[i] = w
 	}

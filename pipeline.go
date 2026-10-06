@@ -23,6 +23,7 @@ type BudgetConfig struct {
 
 // BudgetPipeline preserves required content and applies compression or eviction.
 type BudgetPipeline struct {
+	fixedIDs            []string // Compile-only fixed sections and active turn; never evictable.
 	cfg                 BudgetConfig
 	estimator           TokenEstimator
 	observer            Observer
@@ -35,14 +36,20 @@ type BudgetPipeline struct {
 
 // NewBudgetPipeline returns a pipeline with the given config and estimator.
 func NewBudgetPipeline(cfg BudgetConfig, estimator TokenEstimator, opts ...BudgetPipelineOption) *BudgetPipeline {
-	if estimator == nil {
-		estimator = CharTokenEstimator{}
-	}
 	cfg.DropHead = cfg.DropHead.normalized()
 	cfg.Retention = cfg.Retention.clone()
 	cfg.Compaction = cloneCompactionPolicy(cfg.Compaction)
-	p := &BudgetPipeline{cfg: cfg, estimator: freezeBuiltinEstimator(estimator), observer: nil, compaction: nil,
-		rolling: nil, truncation: nil, summarizer: nil, estimatorDescriptor: nil}
+	p := &BudgetPipeline{
+		fixedIDs:            nil,
+		cfg:                 cfg,
+		estimator:           freezeBuiltinEstimator(estimator),
+		observer:            nil,
+		compaction:          nil,
+		rolling:             nil,
+		truncation:          nil,
+		summarizer:          nil,
+		estimatorDescriptor: nil,
+	}
 	for _, opt := range opts {
 		opt(p)
 	}
@@ -58,7 +65,7 @@ func (p *BudgetPipeline) validateOutput(ctx context.Context, msgs []Message) err
 	if err != nil {
 		return err
 	}
-	n, err := p.estimator.Estimate(ctx, estimatorCallbackInput(p.estimator, msgs))
+	n, err := estimateOwned(ctx, p.estimator, msgs)
 	if canceled := ctx.Err(); canceled != nil {
 		return canceled
 	}

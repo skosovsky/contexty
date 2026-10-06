@@ -9,7 +9,7 @@ func (p *BudgetPipeline) estimateBudgetMessages(ctx context.Context, messages []
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	tokens, err := p.estimator.Estimate(ctx, estimatorCallbackInput(p.estimator, messages))
+	tokens, err := estimateOwned(ctx, p.estimator, messages)
 	if canceled := ctx.Err(); canceled != nil {
 		return 0, canceled
 	}
@@ -17,7 +17,7 @@ func (p *BudgetPipeline) estimateBudgetMessages(ctx context.Context, messages []
 		return 0, fmt.Errorf("contexty: budget: %w: %w", ErrTokenCountFailed, err)
 	}
 	if tokens < 0 {
-		return 0, ErrBudgetExceeded
+		return 0, ErrInconsistentEstimate
 	}
 	return tokens, nil
 }

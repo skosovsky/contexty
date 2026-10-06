@@ -48,7 +48,9 @@ func TestDropHeadStrategy_ToolTurnAtomicity(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "new"),
 	}
 	// Act.
-	out, err := strategy.Apply(ctx, msgs, 30, 15, estimator)
+	originalTokens, err := estimator.Estimate(ctx, msgs)
+	require.NoError(t, err)
+	out, err := strategy.Apply(ctx, msgs, originalTokens, 15, estimator)
 	// Assert.
 	require.NoError(t, err)
 	require.NotEmpty(t, out)

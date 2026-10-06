@@ -1,0 +1,34 @@
+bench-guardrails - root
+BenchmarkRender_LLMXML-10              	   48196	     38483 ns/op	   35561 B/op	     314 allocs/op
+BenchmarkHostTextTransform-10          	   10000	    125762 ns/op	   26989 B/op	     554 allocs/op
+BenchmarkBudgetPipeline_Truncate-10    	    4387	    410018 ns/op	  310959 B/op	     513 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty	11.226s
+PASS
+ok  	github.com/skosovsky/contexty/adapters/blob/memory	0.431s
+PASS
+ok  	github.com/skosovsky/contexty/adapters/resource/memory	0.422s
+PASS
+ok  	github.com/skosovsky/contexty/examples/archive_resume	0.480s
+?   	github.com/skosovsky/contexty/examples/context_budget	[no test files]
+PASS
+ok  	github.com/skosovsky/contexty/examples/context_composition	0.458s
+?   	github.com/skosovsky/contexty/examples/context_evaluation	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/skosovsky/contexty/examples/context_evaluation/evaluation
+cpu: Apple M1 Max
+BenchmarkOfflineStrategies-10    	       1	1389412375 ns/op	84528312 B/op	 1237738 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty/examples/context_evaluation/evaluation	1.952s
+?   	github.com/skosovsky/contexty/examples/context_projections	[no test files]
+?   	github.com/skosovsky/contexty/examples/full_assembly	[no test files]
+PASS
+ok  	github.com/skosovsky/contexty/examples/opaque_state	0.425s
+?   	github.com/skosovsky/contexty/examples/prefix_diagnostics	[no test files]
+PASS
+ok  	github.com/skosovsky/contexty/examples/progressive_disclosure	0.444s
+PASS
+ok  	github.com/skosovsky/contexty/examples/resilient_store	0.448s
+PASS
+ok  	github.com/skosovsky/contexty/testutil	0.459s

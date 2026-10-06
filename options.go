@@ -5,7 +5,8 @@ type DropHeadConfig struct {
 	// KeepTurnAtomicity enables atomic removal of assistant tool-call turns.
 	// Nil means true (default).
 	KeepTurnAtomicity *bool `json:"keep_turn_atomicity"`
-	MinMessages       int   `json:"min_messages"`
+	// MinMessages is the minimum retained optional block size, not protected history.
+	MinMessages int `json:"min_messages"`
 }
 
 func (cfg DropHeadConfig) keepTurnAtomicity() bool {
@@ -19,9 +20,6 @@ func (cfg DropHeadConfig) normalized() DropHeadConfig {
 	normalized := DropHeadConfig{
 		KeepTurnAtomicity: BoolPtr(cfg.keepTurnAtomicity()),
 		MinMessages:       cfg.MinMessages,
-	}
-	if normalized.MinMessages < 0 {
-		normalized.MinMessages = 0
 	}
 	return normalized
 }

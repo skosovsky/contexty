@@ -3,6 +3,7 @@ package contexty
 import (
 	"context"
 	"fmt"
+	"unicode/utf8"
 )
 
 // TokenEstimator counts tokens in semantic messages (provider-agnostic).
@@ -35,11 +36,7 @@ func (CharTokenEstimator) Estimate(ctx context.Context, msgs []Message) (int, er
 	if err != nil {
 		return 0, err
 	}
-	total := 0
-	for _, n := range per {
-		total += n
-	}
-	return total, nil
+	return sumEstimateTokens(per)
 }
 
 // EstimatePerMessage returns per-message rune weights.
@@ -52,7 +49,11 @@ func (CharTokenEstimator) EstimatePerMessage(ctx context.Context, msgs []Message
 		if err := rejectUnknownMedia(m); err != nil {
 			return nil, err
 		}
-		weights[i] = messageRuneWeight(m)
+		weight, err := messageRuneWeight(m)
+		if err != nil {
+			return nil, err
+		}
+		weights[i] = weight
 	}
 	return weights, nil
 }
@@ -65,8 +66,17 @@ func rejectUnknownMedia(message Message) error {
 		return err
 	}
 	for _, part := range message.Parts {
-		if !nilInterfaceValue(part) && part.partKind() == PartKindMedia {
+		switch value := canonicalPartValue(part).(type) {
+		case MediaPart:
 			return ErrUnknownEstimateCost
+		case ToolCallPart:
+			if len(value.Arguments.Binary) != 0 {
+				return ErrUnknownEstimateCost
+			}
+		case ToolResultPart:
+			if len(value.Payload.Binary) != 0 {
+				return ErrUnknownEstimateCost
+			}
 		}
 	}
 	return nil
@@ -81,19 +91,27 @@ func rejectOpaqueEstimateCost(message Message) error {
 	return nil
 }
 
-func messageRuneWeight(m Message) int {
-	n := 0
+func messageRuneWeight(m Message) (int, error) {
+	total := 0
 	for _, p := range m.Parts {
+		var weights [3]int
 		switch v := canonicalPartValue(p).(type) {
 		case TextPart:
-			n += len([]rune(v.Text))
+			weights[0] = utf8.RuneCountInString(v.Text)
 		case ImagePart:
-			n += len(v.URL)
+			weights[0] = len(v.URL)
 		case ToolCallPart:
-			n += len(v.Name) + len(v.Arguments.PlainText()) + len(v.ID)
+			weights = [3]int{len(v.Name), len(v.Arguments.PlainText()), len(v.ID)}
 		case ToolResultPart:
-			n += len(v.Payload.PlainText()) + len(v.ToolCallID)
+			weights = [3]int{len(v.Payload.PlainText()), len(v.ToolCallID), 0}
+		}
+		for _, weight := range weights {
+			var err error
+			total, err = addEstimateTokens(total, weight)
+			if err != nil {
+				return 0, err
+			}
 		}
 	}
-	return n
+	return total, nil
 }

@@ -2,6 +2,7 @@ package contexty
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -629,20 +630,6 @@ func (r CompileRequest) compilePendingMessages() []Message {
 	return append(pending, msg)
 }
 
-func (e *Engine) estimateSegments(
-	ctx context.Context,
-	est TokenEstimator,
-	snap ConversationSnapshot,
-	pending []Message,
-) (int, error) {
-	var msgs []Message
-	msgs = append(msgs, snap.Segment(SegmentSystem)...)
-	msgs = append(msgs, snap.Segment(SegmentMemory)...)
-	msgs = append(msgs, snap.Segment(SegmentTools)...)
-	msgs = append(msgs, pending...)
-	return est.Estimate(ctx, msgs)
-}
-
 func (e *Engine) applyBudgetHistory(
 	ctx context.Context,
 	snap ConversationSnapshot,
@@ -656,31 +643,38 @@ func (e *Engine) applyBudgetHistory(
 		}
 		return snap, nil
 	}
-	est := e.budget.estimator
-	if est == nil {
-		est = CharTokenEstimator{}
-	}
 	totalLimit, err := e.budget.cfg.Budget.Resolve()
 	if err != nil {
 		return ConversationSnapshot{}, err
 	}
-	reserved, err := e.estimateSegments(ctx, est, snap, pending)
-	if err != nil {
-		return ConversationSnapshot{}, err
-	}
-	if overflowErr := budgetReservedOverflow(ctx, est, reserved, totalLimit, pending); overflowErr != nil {
-		return ConversationSnapshot{}, overflowErr
-	}
-	available := totalLimit - reserved
-
 	history := snap.Segment(SegmentHistory)
+	allHistory := append(cloneMessageSlice(history), cloneMessageSlice(pending)...)
+	payload := e.payloadFromSnapshot(snap.WithSegment(SegmentHistory, allHistory), nil)
+	all := payload.FlattenMessages()
+	fixedIDs := make(map[string]bool)
+	pipe := *e.budget
+	pipe.fixedIDs = append([]string(nil), pipe.fixedIDs...)
+	for _, messages := range [][]Message{payload.System, payload.Tools, payload.Memory, pending} {
+		for _, message := range messages {
+			pipe.fixedIDs = append(pipe.fixedIDs, message.ID)
+			fixedIDs[message.ID] = true
+		}
+	}
+
 	ctx = withBudgetIdentitySegment(ctx, SegmentHistory)
 	ctx = withBudgetObservation(ctx, e.resolveBudgetObserver(), string(SegmentHistory))
-	budgetResult, err := e.budget.ApplyWithLimit(ctx, history, available)
+	budgetResult, err := pipe.Apply(ctx, all)
 	if err != nil {
-		return ConversationSnapshot{}, err
+		return ConversationSnapshot{}, classifyCompileBudgetError(ctx, pipe.estimator, pending, totalLimit, err)
 	}
-	trimmed, err := traceStage(ctx, "budget", history, budgetResult.Messages, false)
+	var retainedHistory []Message
+	for _, message := range budgetResult.Messages {
+		if !fixedIDs[message.ID] {
+			retainedHistory = append(retainedHistory, message)
+		}
+	}
+
+	trimmed, err := traceStage(ctx, "budget", history, retainedHistory, false)
 	if err != nil {
 		return ConversationSnapshot{}, err
 	}
@@ -688,27 +682,6 @@ func (e *Engine) applyBudgetHistory(
 		trimmed = append(trimmed, cloneMessageSlice(pending)...)
 	}
 	return snap.WithSegment(SegmentHistory, trimmed), nil
-}
-
-func budgetReservedOverflow(
-	ctx context.Context,
-	est TokenEstimator,
-	reserved, totalLimit int,
-	pending []Message,
-) error {
-	if reserved <= totalLimit {
-		return nil
-	}
-	if len(pending) > 0 {
-		pendingOnly, err := est.Estimate(ctx, pending)
-		if err != nil {
-			return fmt.Errorf("contexty: budget preflight: %w", err)
-		}
-		if pendingOnly > totalLimit {
-			return ErrPendingExceedsBudget
-		}
-	}
-	return ErrBudgetExceeded
 }
 
 func (e *Engine) applyRoleProjection(ctx context.Context, snap ConversationSnapshot) (ConversationSnapshot, error) {
@@ -807,7 +780,7 @@ func (e *Engine) estimatePayloadTokens(ctx context.Context, payload AbstractPayl
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	tokens, err := estimator.Estimate(ctx, estimatorCallbackInput(estimator, payload.FlattenMessages()))
+	tokens, err := estimateOwned(ctx, estimator, payload.FlattenMessages())
 	if canceled := ctx.Err(); canceled != nil {
 		return 0, canceled
 	}
@@ -924,4 +897,24 @@ func (p AbstractPayload) FlattenMessages() []Message {
 	out = append(out, p.Tools...)
 	out = append(out, p.Memory...)
 	return out
+}
+
+func classifyCompileBudgetError(
+	ctx context.Context,
+	estimator TokenEstimator,
+	pending []Message,
+	limit int,
+	cause error,
+) error {
+	if len(pending) == 0 || !errors.Is(cause, ErrBudgetExceeded) {
+		return cause
+	}
+	cost, err := estimateOwned(ctx, estimator, pending)
+	if err != nil {
+		return err
+	}
+	if cost > limit {
+		return ErrPendingExceedsBudget
+	}
+	return cause
 }

@@ -200,6 +200,19 @@ func compareBudgetChannels(a, b CompileBudgetDecision) int {
 }
 
 func (p *BudgetPipeline) validateBudgetPolicy() error {
+	if p == nil || nilInterfaceValue(p.estimator) || p.cfg.DropHead.MinMessages < 0 {
+		return ErrInvalidBudgetRequest
+	}
+	if (p.cfg.TruncateStrategy != nil && nilInterfaceValue(p.cfg.TruncateStrategy)) ||
+		(p.cfg.Summarizer != nil && nilInterfaceValue(p.cfg.Summarizer)) {
+		return ErrInvalidBudgetRequest
+	}
+	if strategy, ok := p.cfg.TruncateStrategy.(*dropHeadStrategy); ok && strategy.cfg.MinMessages < 0 {
+		return ErrInvalidBudgetRequest
+	}
+	if err := validateBuiltinEstimator(p.estimator); err != nil {
+		return err
+	}
 	if err := p.cfg.Retention.validate(); err != nil {
 		return err
 	}

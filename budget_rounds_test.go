@@ -127,9 +127,11 @@ func TestBudget_PendingCombinedCost(t *testing.T) {
 	// Act.
 	outBudget, err := pipeline.Apply(context.Background(), fixtureProtectedHistory())
 	out := outBudget.Messages
-	// Assert: never successful overflow, and no silent pending deletion to fit.
-	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
-	require.Nil(t, out)
+	// Assert: evicting the optional prefix makes the full candidate fit; pending is preserved.
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+	require.Equal(t, "assistant", out[0].ID)
+	require.Equal(t, "result", out[1].ID)
 }
 
 func TestBudget_RoundCompilePersistenceReplay(t *testing.T) {

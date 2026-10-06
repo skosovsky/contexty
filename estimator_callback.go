@@ -9,3 +9,25 @@ func estimatorCallbackInput(estimator TokenEstimator, messages []Message) []Mess
 	}
 	return cloneMessageSlice(messages)
 }
+
+func validateBuiltinEstimator(estimator TokenEstimator) error {
+	switch value := estimator.(type) {
+	case *FixedEstimator:
+		if value == nil || value.TokensPerMessage < 0 || value.TokensPerContentPart < 0 || value.TokensPerToolCall < 0 {
+			return ErrInconsistentEstimate
+		}
+	case *CharFallbackEstimator:
+		if value == nil || value.CharsPerToken <= 0 {
+			return ErrInvalidCharsPerToken
+		}
+		if value.TokensPerNonTextPart < 0 {
+			return ErrInconsistentEstimate
+		}
+	case *EstimateReporter:
+		if value == nil || nilInterfaceValue(value.estimator) {
+			return ErrInvalidBudgetRequest
+		}
+		return validateBuiltinEstimator(value.estimator)
+	}
+	return nil
+}

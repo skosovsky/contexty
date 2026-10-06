@@ -88,7 +88,7 @@ func (s *dropTailStrategy) Apply(
 	out := slices.Clone(msgs)
 	for len(out) > 1 {
 		out = dropTailAtomicUnit(out)
-		tokens, err := estimator.Estimate(ctx, estimatorCallbackInput(estimator, out))
+		tokens, err := estimateOwned(ctx, estimator, out)
 		if canceled := ctx.Err(); canceled != nil {
 			return nil, canceled
 		}
@@ -140,13 +140,19 @@ func (s *dropHeadStrategy) Apply(
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("contexty: drop head: %w", err)
 	}
+	if nilInterfaceValue(counter) || s.cfg.MinMessages < 0 || originalTokens < 0 || limit < 0 {
+		return nil, ErrInvalidBudgetRequest
+	}
+	if err := validateBuiltinEstimator(counter); err != nil {
+		return nil, err
+	}
 	if len(msgs) == 0 {
 		return nil, nil
 	}
 	if originalTokens <= limit {
 		return msgs, nil
 	}
-	weights, err := counter.EstimatePerMessage(ctx, msgs)
+	weights, err := counter.EstimatePerMessage(ctx, estimatorCallbackInput(counter, msgs))
 	if err != nil {
 		return nil, fmt.Errorf("contexty: drop head: %w: %w", ErrTokenCountFailed, err)
 	}
@@ -158,7 +164,21 @@ func (s *dropHeadStrategy) Apply(
 			ErrTokenCountFailed,
 		)
 	}
-	if s.usesFastPath() {
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
+	weights = slices.Clone(weights)
+	sum, err := sumEstimateTokens(weights)
+	if err != nil {
+		return nil, err
+	}
+	if sum != originalTokens {
+		return nil, ErrInconsistentEstimate
+	}
+	if s.cfg.MinMessages < 0 {
+		return nil, ErrInvalidBudgetRequest
+	}
+	if s.usesFastPath() && intrinsicAdditiveEstimator(counter) {
 		out := s.applyFastPath(msgs, weights, limit)
 		reportEvictions(ctx, msgs, out, EvictionReasonTruncate)
 		return out, nil
@@ -168,7 +188,7 @@ func (s *dropHeadStrategy) Apply(
 		weights: slices.Clone(weights),
 		deleted: make([]bool, len(msgs)),
 		total:   originalTokens,
-	}, limit)
+	}, limit, counter)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +230,12 @@ func (s *dropHeadStrategy) applyFastPath(msgs []Message, weights []int, limit in
 	return s.enforceMinMessages(slices.Clone(msgs[bestValidIdx:]))
 }
 
-func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHeadState, limit int) ([]Message, error) {
+func (s *dropHeadStrategy) applySelectivePath(
+	ctx context.Context,
+	state dropHeadState,
+	limit int,
+	counter TokenEstimator,
+) ([]Message, error) {
 	for state.total > limit {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("contexty: drop head: %w", err)
@@ -224,14 +249,16 @@ func (s *dropHeadStrategy) applySelectivePath(ctx context.Context, state dropHea
 			state.msgs[startIdx].HasToolCalls() {
 			endIdx = s.toolTurnEndIndex(state.msgs, startIdx, state.deleted)
 		}
-		for idx := startIdx; idx <= endIdx && idx < len(state.msgs); idx++ {
-			if state.deleted[idx] {
-				continue
-			}
-			state.deleted[idx] = true
-			state.total -= state.weights[idx]
-		}
+		state.removeUnit(startIdx, endIdx)
 		state.searchStart = endIdx + 1
+		if !intrinsicAdditiveEstimator(counter) {
+			candidate := retainedDropHeadMessages(state)
+			var err error
+			state.total, err = estimateOwned(ctx, counter, candidate)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	if state.total > limit {
 		return nil, nil
@@ -276,3 +303,34 @@ var (
 	_ EvictionStrategy = (*dropTailStrategy)(nil)
 	_ EvictionStrategy = (*dropHeadStrategy)(nil)
 )
+
+func retainedDropHeadMessages(state dropHeadState) []Message {
+	out := make([]Message, 0, len(state.msgs))
+	for index, message := range state.msgs {
+		if !state.deleted[index] {
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
+func intrinsicAdditiveEstimator(estimator TokenEstimator) bool {
+	switch value := estimator.(type) {
+	case CharTokenEstimator, *FixedEstimator:
+		return true
+	case *CharFallbackEstimator:
+		return value != nil && value.EstimateTool == nil
+	default:
+		return false
+	}
+}
+
+func (state *dropHeadState) removeUnit(start, end int) {
+	for index := start; index <= end && index < len(state.msgs); index++ {
+		if state.deleted[index] {
+			continue
+		}
+		state.deleted[index] = true
+		state.total -= state.weights[index]
+	}
+}
