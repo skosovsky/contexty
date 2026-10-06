@@ -1,0 +1,3 @@
+package main
+import("context";"fmt"; c "github.com/skosovsky/contexty")
+func main(){calls:=0;m:=c.TextMessage(c.RoleUser,"valid");m.ID="m1";e:=c.NewEngine(c.WithSegmentFormatter(c.SegmentName("memroy"),func(_ context.Context,ms []c.Message)([]c.Message,error){calls++;return ms,nil}));_,err:=e.CompileSnapshot(context.Background(),c.CompileRequest{Memory:[]c.Message{m}});fmt.Printf("error=%v formatterCalls=%d\n",err,calls)}

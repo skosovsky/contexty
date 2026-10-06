@@ -1019,6 +1019,11 @@ func (e *Engine) validateBaseCompileConfiguration(request CompileRequest) error 
 			return err
 		}
 	}
+	for segment, formatter := range e.formatters {
+		if !isKnownSegment(segment) || formatter == nil {
+			return ErrInvalidCompileConfiguration
+		}
+	}
 	if e.roleProjection != nil && nilInterfaceValue(e.roleProjection) {
 		return ErrInvalidCompileConfiguration
 	}

@@ -440,3 +440,8 @@ result DTOs are owned mutable copies; retain Source intact when deriving
 persistence. Quickstart is `go run ./examples/quickstart`; API reference moved
 from README into `docs/api-guide.md`. Private session/clone optimizations do not
 change checkpoint/message serialization.
+
+Segment formatter options now reject unknown/empty SegmentName and nil callback
+at compile preflight with ErrInvalidCompileConfiguration, before store/resolver
+effects, in both recording modes and both entry points. To omit a formatter, omit
+the option; this API does not define nil as a removal command.

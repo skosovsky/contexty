@@ -160,3 +160,31 @@ containers without skips. Release12currentfixturesPASS plus separately enabled
 executionsPASS; finalboundaryrace2.217s and rootlint0PASS. Measurements/tests/docs
 reports in docs/remediation-evidence/stage6/. Commit refactor: compile internals;
 SHA recorded in final audit. Final independent whole-goal audit remains required.
+
+
+## Final whole-goal audit
+
+Stage6 commit:afeca6b (refactor: compile internals), signed.
+Two independent reviewers audited reviewSHA→all6commits plus corrective diff.
+Completeness9/9DoD=100%; correctnessPASS, no unresolved confirmed findings.
+All docs/sequence checks PASS; every stage has its own completeness/correctness
+reports and short commit after acceptance.
+
+Final audit found an additional DoD3 gap: unknown segment formatter silently
+ignored. Contract updated first; both entrypoints/record modes now reject
+unknown/empty segment and nil callback before store/resolver/formatter effects.
+12-case AAA matrix, independent valid/invalid probes and race tests PASS; both
+whole-goal reviewers reaccepted. This does not rename original F01–F12 findings.
+
+Final CItrue+reviewSHAoptin makevalidate on corrected code exit0: pinnedlintall3
+zeroissues; acceptance6.946sPASS; benchguardrails46.172sPASS; rootrace35.303sPASS;
+all14localreleasefixtures21.100sPASS, no publication. Forced -race -count=1 CItrue
+fresh isolated Docker Redis16.492s/Postgres4.454sPASS, without skips. Original
+F01–12 behavior/new regressions mapped; D01–45 explicit accepted/rejected reasons;
+arithmetic/IDs/parts/codec fuzz and allocation baseline/after evidence retained.
+No sibling/provider dependencies or harness added; source worktree preserved.
+
+Final reports/logs: docs/remediation-evidence/final/.
+Final corrective/audit commit:fix: formatter validation. Its own SHA is reported
+in the final response; a commit cannot contain its own SHA. All six stage SHAs
+are recorded above. Task24 requirements complete after this signed commit.

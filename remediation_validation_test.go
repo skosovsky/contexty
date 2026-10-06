@@ -624,3 +624,70 @@ func TestRemediation_DeferredProvenanceCloneParity(t *testing.T) {
 		}
 	}
 }
+
+func TestRemediation_FormatterPreflight(t *testing.T) {
+	for flags := range 4 {
+		recording, stateless := flags&1 != 0, flags&2 != 0
+		for _, invalid := range []string{"unknown", "empty", "nil-callback"} {
+			t.Run(fmt.Sprintf("record=%v/snapshot=%v/%s", recording, stateless, invalid), func(t *testing.T) {
+				// Arrange: invalid registration plus store/resolver counters.
+				reads, resolves, formats := 0, 0, 0
+				engine := fixtureFormatterPreflightEngine(recording, invalid, &reads, &resolves, &formats)
+				request := contexty.CompileRequest{Memory: []contexty.Message{fixtureRollingText("memory", "valid")}}
+				compile := engine.Compile
+				if stateless {
+					compile = engine.CompileSnapshot
+				}
+				// Act: preflight runs before any external operation for either entry point.
+				result, err := compile(context.Background(), request)
+				// Assert: no payload or ignored configuration escapes.
+				require.ErrorIs(t, err, contexty.ErrInvalidCompileConfiguration)
+				require.Zero(t, result)
+				require.Zero(t, reads)
+				require.Zero(t, resolves)
+				require.Zero(t, formats)
+			})
+		}
+	}
+}
+
+func fixtureFormatterPreflightEngine(recording bool, invalid string, reads, resolves, formats *int) *contexty.Engine {
+	store := fixtureComponentStoreProbe{
+		ConversationStateStore: contexty.NewMemoryConversationStateStore(),
+		reads:                  reads,
+	}
+	segment := contexty.SegmentMemory
+	formatter := contexty.SegmentFormatter(
+		func(_ context.Context, messages []contexty.Message) ([]contexty.Message, error) {
+			*formats++
+			return messages, nil
+		},
+	)
+	switch invalid {
+	case "unknown":
+		segment = "memroy"
+	case "empty":
+		segment = ""
+	case "nil-callback":
+		formatter = nil
+	}
+	options := []contexty.EngineOption{
+		contexty.WithStateStore(store),
+		contexty.WithConversationID("conversation"),
+		contexty.WithSegmentFormatter(segment, formatter),
+		contexty.WithDeferredBlocks(
+			contexty.DeferredBlock{Name: "resolver", Resolve: func(context.Context) (contexty.DeferredResult, error) {
+				*resolves++
+				return contexty.DeferredResult{}, nil
+			}},
+		),
+	}
+	if recording {
+		options = append(
+			options,
+			contexty.WithTraceProfile(fixtureTraceProfile()),
+			contexty.WithCompileRecording(fixtureRecordProfile()),
+		)
+	}
+	return contexty.NewEngine(options...)
+}

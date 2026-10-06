@@ -89,7 +89,8 @@ func WithDeferredBlocks(blocks ...DeferredBlock) EngineOption {
 	}
 }
 
-// WithSegmentFormatter registers a host formatter for a segment (runs before budget).
+// WithSegmentFormatter registers a nonnil host formatter for a known segment
+// (runs before budget). Invalid registration fails compile before external effects.
 func WithSegmentFormatter(seg SegmentName, fn SegmentFormatter) EngineOption {
 	return func(e *Engine) {
 		if e.formatters == nil {
