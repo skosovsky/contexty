@@ -1,6 +1,6 @@
-# Task24 whole-goal independent correctness audit
+# remediation whole-goal independent correctness audit
 
-Reviewed committed HEAD afeca6b plus final frozen formatter-preflight diff against review SHA 2a1a7ab7fb919c436e210c2804dd615e2d80626a and the original Task24 scope/Definition of Done. Final independent correctness acceptance: PASS. No confirmed unresolved correctness findings.
+Reviewed committed HEAD afeca6b plus final frozen formatter-preflight diff against review SHA 2a1a7ab7fb919c436e210c2804dd615e2d80626a and the original remediation scope/Definition of Done. Final independent correctness acceptance: PASS. No confirmed unresolved correctness findings.
 
 ## Scope and conclusion
 
