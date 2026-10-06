@@ -86,3 +86,27 @@ Final root race41.947s PASS; affected final race1.934s PASS; pinned lint all3
 modules0 issues; baseline behavioral F03/F04/F05/F11/F12 PASS.
 Reports and logs: docs/remediation-evidence/stage3/.
 Commit fix: context validation; SHA recorded at start of stage4.
+
+## Stage 4 — budgets
+
+Stage 3 commit: 80fb346 (fix: context validation).
+Normative baseline docs/remediation-contracts.md precedes implementation.
+Scope F06/F07/F08 + D03/10/12/13/40.
+Checklist (9 equally weighted criteria):
+- [x] S4.1: explicit estimator required, nil/typednil and invalid known config rejected before callbacks on both compile entries and standalone Apply.
+- [x] S4.2: F06 owned estimator inputs and weights, cancellation before/after callbacks; mutating/retained aliases cannot change accepted context.
+- [x] S4.3: F07 checked nonnegative arithmetic, safe ceil, totals/per-message consistency and typed errors prevent false admission; builtins/tool/fallback paths covered.
+- [x] S4.4: F08 one full request estimate includes fixed/pending/current, fitting input retained unless explicit soft compaction; no cross-request additivity assumption.
+- [x] S4.5: overflow eviction evaluates complete candidates, keeps required/tool rounds, mandatory final output validation for main/targets/views.
+- [x] S4.6: D12/D40 MinMessages optional block threshold/defaults documented; negative configuration errors, explicit retention used for protection.
+- [x] S4.7: built-in approximation rejects unsupported media/binary payload, FixedEstimator structural meaning and quality/fallback distinctions documented.
+- [x] S4.8: preserved baseline F06/F07/F08 behavioral probes executed at review SHA; equivalent AAA regressions and deterministic arithmetic fuzz seeds.
+- [x] S4.9: root race/pinned lint/appropriate guardrails pass, contracts/migration/examples synchronized; independent100%/PASS acceptance before commit.
+
+Stage 4 acceptance: completeness9/9=100%; correctnessPASS. Cross-request subset
+preflight, empty-cost bypass and atomicity-path P2 findings corrected; final
+candidate re-estimate also hard-checked. All independent repros now pass.
+Root race50.281s PASS; affected final race1.510s PASS; pinned lint all3 zeroissues;
+fuzz10s+10s PASS; benchguardrails before/afterPASS513→514truncateallocs/op.
+Preserved reviewSHA F06/F07/F08 behavioral baseline PASS. Reports/logs/measurements:
+docs/remediation-evidence/stage4/. Commit fix: budget accounting; SHA in stage5.

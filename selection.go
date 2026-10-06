@@ -450,7 +450,7 @@ func selectionFits(
 		return false, err
 	}
 	if tokens < 0 {
-		return false, ErrTokenCountFailed
+		return false, ErrInconsistentEstimate
 	}
 	limit, err := pipe.cfg.Budget.Resolve()
 	if err != nil {
@@ -467,10 +467,7 @@ func estimateSelection(
 ) (int, error) {
 	reporter, ok := pipe.estimator.(*EstimateReporter)
 	if !ok {
-		return pipe.estimator.Estimate(
-			ctx,
-			estimatorCallbackInput(pipe.estimator, selectionMessages(candidates, admitted)),
-		)
+		return estimateOwned(ctx, pipe.estimator, selectionMessages(candidates, admitted))
 	}
 	segments := []EstimateSegment{{Name: manifestMessagesSegment, Messages: selectionMessages(candidates, admitted)}}
 	if finalBudgetChannel(ctx).kind == ManifestMainOutput {

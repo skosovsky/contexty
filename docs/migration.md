@@ -416,4 +416,11 @@ Identity/configuration remediation now requires these consumer updates:
   invalid media and tool call/result parts are rejected. Custom provenance
   decoders must return a nonnil value with the registered discriminator.
 
-Explicit estimator and arithmetic budget gates remain assigned to stage 4.
+Budget remediation requires an explicit nonnil estimator in NewBudgetPipeline;
+no default character counter is inserted. Invalid built-in weights, typed nil,
+negative MinMessages, overflowing or inconsistent estimates return errors.
+Compile BudgetDecision capacities and soft percentages now describe the complete
+request, including fixed sections and active input. Already fitting history survives
+once-per-request overhead accounting. Update decisions/soft-target assertions that
+previously used a separately reduced history limit. MinMessages remains an optional
+block-size threshold; use RetentionPolicy for protection.

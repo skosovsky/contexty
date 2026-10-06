@@ -525,3 +525,15 @@ func ownCompileMessage(msg Message) (Message, error) {
 	}
 	return owned, nil
 }
+
+func ownCompileMessages(messages []Message) ([]Message, error) {
+	out := make([]Message, len(messages))
+	for index, message := range messages {
+		owned, err := ownCompileMessage(message)
+		if err != nil {
+			return nil, err
+		}
+		out[index] = owned
+	}
+	return out, nil
+}

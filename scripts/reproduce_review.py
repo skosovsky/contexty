@@ -12,6 +12,8 @@ ASSERTIONS = {
     "compile": ['segment="memroy" policy="append" err=<nil> calls=1', 'policy="replcae" err=<nil> calls=1'],
     "materialization": ["pointer=false err=contexty: invalid artifact materialization", "pointer=true err=<nil>"],
     "views": ['custom_called=false out="user: ORIGINAL\\n" err=<nil>'],
+    "budget": ['caller="original-b" output="mutated"', "fixed total=2 err=<nil>", "fixed admitted=2", "char 2-runes/max=-1 err=<nil>"],
+    "overhead": ["full_input_cost=12 limit=12 err=<nil> kept_history=0"],
     "arch": ['provenance: err=<nil> encoding_error=<nil> reencoded={"type_id":"system"'],
 }
 
@@ -37,7 +39,7 @@ def main():
             for marker in markers:
                 if marker not in result.stdout:
                     raise AssertionError(f"missing behavioral evidence {marker!r}")
-        print("Baseline F03/F04/F05/F11/F12 behavioral assertions PASS", flush=True)
+        print("Baseline F03/F04/F05/F06/F07/F08/F11/F12 behavioral assertions PASS", flush=True)
 
 
 if __name__ == "__main__":

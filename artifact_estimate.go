@@ -50,7 +50,7 @@ func estimateArtifact(
 		estimate.Tokens, estimate.Quality, estimate.Report = report.Total, report.Quality, &report
 		return estimate, nil
 	}
-	estimate.Tokens, err = estimator.Estimate(ctx, []Message{message})
+	estimate.Tokens, err = estimateOwned(ctx, estimator, []Message{message})
 	if err != nil {
 		return ArtifactBudgetEstimate{}, err
 	}

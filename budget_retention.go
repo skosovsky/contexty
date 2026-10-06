@@ -27,7 +27,7 @@ func (p *BudgetPipeline) selectRequired(
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		selected[i] = slices.Contains(p.cfg.Retention.Roles, message.Role) ||
+		selected[i] = slices.Contains(p.fixedIDs, message.ID) || slices.Contains(p.cfg.Retention.Roles, message.Role) ||
 			slices.Contains(p.cfg.Retention.MessageIDs, message.ID)
 		if slices.Contains(p.cfg.Retention.MessageIDs, message.ID) {
 			ids[message.ID] = true

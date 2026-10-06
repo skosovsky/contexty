@@ -314,7 +314,7 @@ func TestAcceptance_BudgetSummaryReservations(t *testing.T) {
 					func(_ context.Context, request contexty.SummaryRequest) (contexty.Message, error) {
 						calls++
 						require.Equal(t, capacity-3, request.MaxTokens)
-						require.Equal(t, capacity/2-3, request.TargetTokens)
+						require.Equal(t, max(0, 17/2-(3+len(turnText)+3)), request.TargetTokens)
 						return fixtureRollingText("summary", "ok"), nil
 					},
 				),
@@ -344,7 +344,7 @@ func TestAcceptance_BudgetSummaryReservations(t *testing.T) {
 					compiled.Payload.History[2].ID,
 				},
 			)
-			require.Equal(t, capacity, compiled.BudgetDecisions[0].Decision.HardLimit)
+			require.Equal(t, 17, compiled.BudgetDecisions[0].Decision.HardLimit)
 		})
 	}
 }
