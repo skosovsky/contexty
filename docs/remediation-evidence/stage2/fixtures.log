@@ -1,0 +1,19 @@
+test_atomic_unsupported_fails_without_partial_tags (__main__.ReleaseTests.test_atomic_unsupported_fails_without_partial_tags) ... ok
+test_clean_root_only (__main__.ReleaseTests.test_clean_root_only) ... ok
+test_dirty_index_and_worktree_rejected (__main__.ReleaseTests.test_dirty_index_and_worktree_rejected) ... ok
+test_interrupted_push_with_transaction_in_flight (__main__.ReleaseTests.test_interrupted_push_with_transaction_in_flight) ... ok
+test_invalid_module_traversal (__main__.ReleaseTests.test_invalid_module_traversal) ... ok
+test_lost_push_response_observed_publication (__main__.ReleaseTests.test_lost_push_response_observed_publication) ... ok
+test_lost_push_response_unknown_outcome (__main__.ReleaseTests.test_lost_push_response_unknown_outcome) ... ok
+test_preparation_failure (__main__.ReleaseTests.test_preparation_failure) ... ok
+test_published_version_selection (__main__.ReleaseTests.test_published_version_selection) ... ok
+test_rejected_push_cleanup_and_retry (__main__.ReleaseTests.test_rejected_push_cleanup_and_retry) ... ok
+test_review_sha_reproduces_detached_failure (__main__.ReleaseTests.test_review_sha_reproduces_detached_failure) ... ok
+test_review_sha_reproduces_untracked_and_tag_defects (__main__.ReleaseTests.test_review_sha_reproduces_untracked_and_tag_defects) ... ok
+test_success_isolates_untracked_and_exact_refs (__main__.ReleaseTests.test_success_isolates_untracked_and_exact_refs) ... ok
+test_tag_failure (__main__.ReleaseTests.test_tag_failure) ... ok
+
+----------------------------------------------------------------------
+Ran 14 tests in 21.319s
+
+OK

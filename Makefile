@@ -6,7 +6,7 @@ GOLANGCI_LINT_RUN := env GOLANGCI_LINT_CACHE=$(GOLANGCI_LINT_CACHE) $(GOLANGCI_L
 MODULES := $(shell find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \;)
 ACCEPTANCE_TESTS := ^(TestAcceptance_|TestApplyMergePolicy_|TestDropHeadStrategy_AtomicityOptOut$$|TestBudgetPipeline_RejectsStrategyOrphans$$|TestObserver_|TestArchitecture_|TestStateless)
 
-.PHONY: lint fix test test-acceptance validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
+.PHONY: lint fix test test-acceptance test-release validate bench bench-guardrails bench-hotpath fuzz cover release-patch release-break
 
 lint:
 	@for dir in $(MODULES); do \
@@ -36,7 +36,10 @@ test-acceptance:
 		fi
 	@$(GO) test -v -race -run='$(ACCEPTANCE_TESTS)' ./...
 
-validate: lint test-acceptance bench-guardrails test
+test-release:
+	@python3 scripts/test_release.py
+
+validate: lint test-acceptance bench-guardrails test test-release
 
 bench:
 	@for dir in $(MODULES); do \
@@ -66,10 +69,10 @@ cover:
 		(cd "$$dir" && $(GO) test -coverprofile=coverage.out ./... && $(GO) tool cover -func=coverage.out) || exit 1; \
 	done
 
-release-patch: lint test
+release-patch: validate
 	@chmod +x ./scripts/release.sh
 	@./scripts/release.sh patch "$(MODULES)"
 
-release-break: lint test
+release-break: validate
 	@chmod +x ./scripts/release.sh
 	@./scripts/release.sh break "$(MODULES)"
