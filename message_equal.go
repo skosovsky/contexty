@@ -90,7 +90,7 @@ func provenanceEqual(a, b Provenance) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if a.provenanceType() != b.provenanceType() {
+	if a.ProvenanceType() != b.ProvenanceType() {
 		return false
 	}
 	ja, err := json.Marshal(a)

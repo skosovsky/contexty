@@ -141,7 +141,7 @@ func TestAcceptance_SelectionMandatoryOverflowIsAtomic(t *testing.T) {
 	// Act.
 	result, err := fixtureEngine(
 		contexty.WithSelectionPolicy(policy),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	).
 		CompileSnapshot(
 			t.Context(), contexty.CompileRequest{History: []contexty.Message{message}})
@@ -172,7 +172,7 @@ func TestAcceptance_SelectionPrioritySharesCapacityAcrossHistoryAndArtifacts(t *
 	// Act.
 	result, err := fixtureEngine(
 		contexty.WithSelectionPolicy(policy),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	).
 		CompileSnapshot(t.Context(), request)
 	// Assert.
@@ -216,7 +216,7 @@ func TestAcceptance_SelectionOutputsPinDifferentModelProfiles(t *testing.T) {
 		consumerReporter,
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, mainBudget),
+		contexty.WithBudgetPipeline(mainBudget),
 		contexty.WithTraceProfile(
 			fixtureTraceProfile(),
 		),

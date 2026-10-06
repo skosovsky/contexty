@@ -21,7 +21,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncatedByDropHead(t *testing.T)
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 15},
 	)
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(pipe))
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{
@@ -151,7 +151,7 @@ func TestAcceptance_PersistenceProjection_IncludesSummary(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -322,7 +322,7 @@ func TestAcceptance_PersistenceProjection_SummaryPlusTextReplacement(t *testing.
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -377,7 +377,7 @@ func TestAcceptance_PersistenceProjection_DropsTruncated(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -518,7 +518,7 @@ func TestAcceptance_PersistenceProjection_SummarizeReusesTruncatedID(t *testing.
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -570,7 +570,7 @@ func TestAcceptance_PersistenceProjection_OversizedSummaryRejected(t *testing.T)
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -715,7 +715,7 @@ func TestAcceptance_PersistenceProjection_DropsBudgetEvicted(t *testing.T) {
 		},
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(pipe))
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		History: []contexty.Message{

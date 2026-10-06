@@ -31,7 +31,7 @@ func TestLineage_Stages(t *testing.T) {
 		contexty.WithRoleProjectionPolicy(contexty.RoleProjectionFunc(func(contexty.Message) (contexty.Role, error) {
 			return contexty.RoleUser, nil
 		})),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{
 				Budget: contexty.EffectiveInputBudget(12),
 				Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {

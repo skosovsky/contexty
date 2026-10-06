@@ -94,7 +94,7 @@ func TestSummarizer_CallbackOwnership(t *testing.T) {
 		})}, contexty.CharTokenEstimator{}, contexty.WithSummarizerDescriptor(profile.Stages["summarize"]))
 	engine := fixtureEngine(
 		contexty.WithTraceProfile(profile),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(

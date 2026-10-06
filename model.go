@@ -52,7 +52,7 @@ func (m Message) Clone() Message {
 		}
 	}
 	if m.Provenance != nil {
-		cloned.Provenance = m.Provenance.cloneProvenance()
+		cloned.Provenance = m.Provenance.CloneProvenance()
 	}
 	return cloned
 }

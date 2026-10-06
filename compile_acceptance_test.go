@@ -165,12 +165,10 @@ func TestAcceptance_CompileResult_ImmutableContract(t *testing.T) {
 		Parts: []contexty.ContentPart{contexty.TextPart{Text: "current turn"}},
 	}
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
-				&contexty.FixedEstimator{TokensPerMessage: 10},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
+			&contexty.FixedEstimator{TokensPerMessage: 10},
+		),
 		),
 	)
 	// Act.
@@ -230,7 +228,7 @@ func TestAcceptance_Pending_NeverEvicted(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	pending := contexty.Message{
 		ID:    "pending-protected",
@@ -260,12 +258,10 @@ func TestAcceptance_Pending_ExceedsBudget(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(50)},
-				&contexty.FixedEstimator{TokensPerMessage: 30},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(50)},
+			&contexty.FixedEstimator{TokensPerMessage: 30},
+		),
 		),
 	)
 	// Act.
@@ -313,10 +309,7 @@ func TestAcceptance_Formatter_AffectsTokenBudget(t *testing.T) {
 	}
 	// Act.
 	without, err := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(basePipe, est),
-		),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(basePipe, est)),
 	).CompileSnapshot(ctx, req)
 	// Assert.
 	require.NoError(t, err)
@@ -330,10 +323,7 @@ func TestAcceptance_Formatter_AffectsTokenBudget(t *testing.T) {
 		return append(cloneMsgs(msgs), extra), nil
 	}
 	with, err := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(basePipe, est),
-		),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(basePipe, est)),
 		contexty.WithSegmentFormatter(contexty.SegmentMemory, expandFormatter),
 	).CompileSnapshot(ctx, req)
 	require.NoError(t, err)
@@ -377,12 +367,10 @@ func TestAcceptance_Compile_SnapshotSelfContained(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithStateStore(store),
 		contexty.WithConversationID("ignored"),
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
-				&contexty.FixedEstimator{TokensPerMessage: 10},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
+			&contexty.FixedEstimator{TokensPerMessage: 10},
+		),
 		),
 	)
 	tools := []contexty.Message{{
@@ -456,12 +444,10 @@ func TestAcceptance_Strict_SystemExceedsBudget(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(15)},
-				&contexty.FixedEstimator{TokensPerMessage: 20},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(15)},
+			&contexty.FixedEstimator{TokensPerMessage: 20},
+		),
 		),
 	)
 	// Act.
@@ -527,7 +513,7 @@ func TestAcceptance_Summarize_TransformationByMessageID(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 10},
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
@@ -1045,15 +1031,13 @@ func TestAcceptance_Context_ArtifactsLifecycleAndBudgetPreflight(t *testing.T) {
 	).ContextArtifact.WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 3})
 
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{
-					Budget:   contexty.EffectiveInputBudget(30),
-					DropHead: contexty.DropHeadConfig{MinMessages: 1},
-				},
-				&contexty.FixedEstimator{TokensPerMessage: 10},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{
+				Budget:   contexty.EffectiveInputBudget(30),
+				DropHead: contexty.DropHeadConfig{MinMessages: 1},
+			},
+			&contexty.FixedEstimator{TokensPerMessage: 10},
+		),
 		),
 	)
 	// Act.

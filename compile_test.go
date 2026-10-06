@@ -22,12 +22,10 @@ func TestStatelessCompile(t *testing.T) {
 		contexty.TextMessage(contexty.RoleUser, "world"),
 	}
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
-				&contexty.FixedEstimator{TokensPerMessage: 10},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(1000)},
+			&contexty.FixedEstimator{TokensPerMessage: 10},
+		),
 		),
 	)
 	// Act.
@@ -49,7 +47,7 @@ func TestStatelessCompile_RedactionAndBudget(t *testing.T) {
 	)
 	engine := fixtureEngine(
 		contexty.WithTransformHooks(fixtureEmailTransform()),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	req := reqHistory([]contexty.Message{
 		contexty.TextMessage(contexty.RoleUser, "contact me at user@example.com"),
@@ -82,7 +80,7 @@ func TestStatelessCompile_ObserverTelemetry(t *testing.T) {
 		contexty.WithBudgetObserver(rec),
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.
@@ -161,7 +159,7 @@ func TestStatelessCompile_ContextPropagation(t *testing.T) {
 		contexty.WithBudgetObserver(rec),
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.

@@ -61,7 +61,7 @@ func fixtureCompactionCaptureProfiles(t *testing.T, denyOutput, distinct bool) (
 			profile.Privacy,
 			policy,
 		),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
+		contexty.WithBudgetPipeline(main),
 	)
 	a := contexty.TextMessage(contexty.RoleUser, "12345678")
 	a.ID = "a"

@@ -51,7 +51,7 @@ func TestExact_Replay(t *testing.T) {
 			fixtureBinding(contexty.RecordingViewRenderer, "xml", "", 0),
 		)),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"}, policy),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithTransformHooks(
 			fixtureTextTransform{Replacer: func(text string) string { hooks++; return text + "!" }},
 		),

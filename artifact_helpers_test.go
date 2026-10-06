@@ -39,8 +39,9 @@ func fixtureArtifactEstimateFixture(t *testing.T) (contexty.CompileResult, *int)
 			contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent),
 		),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, reporter)),
+		contexty.WithBudgetPipeline(
+			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, reporter),
+		),
 	)
 	result, err := engine.CompileSnapshot(
 		context.Background(),

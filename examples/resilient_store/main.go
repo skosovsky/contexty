@@ -120,7 +120,7 @@ func main() {
 	message := contexty.TextMessage(contexty.RoleUser, "hello")
 	message.ID = "host-write-1/message"
 	delta := contexty.ConversationDelta{Operation: contexty.DeltaAppendMessages, Segment: contexty.SegmentHistory,
-		Messages: []contexty.Message{message}, MessageIDs: nil, Artifact: nil, ToolRound: nil}
+		Messages: []contexty.Message{message}, MessageIDs: nil, ArtifactIDs: nil, Artifact: nil, ToolRound: nil}
 	err = store.CommitState(ctx, "demo", before.Version(), delta)
 	if !errors.Is(err, contexty.ErrUnavailable) {
 		panic("expected an ambiguous response")

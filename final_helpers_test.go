@@ -27,5 +27,5 @@ func fixtureFinalCancellationRequest(
 	request.Options = []contexty.CompileOption{contexty.WithTextReplacement(contexty.TextReplacement{
 		Segment: contexty.SegmentHistory, MessageID: "input", Text: "final",
 	})}
-	return fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)), request
+	return fixtureEngine(contexty.WithBudgetPipeline(pipe)), request
 }

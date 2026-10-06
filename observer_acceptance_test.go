@@ -45,7 +45,7 @@ func TestAcceptance_Observer_EvictionTelemetry(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("evict-obs"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	_, err = engine.Compile(ctx, contexty.CompileRequest{})
@@ -106,7 +106,7 @@ func TestAcceptance_Observer_DoesNotBreakCompile(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("obs-passive"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.

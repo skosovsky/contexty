@@ -47,7 +47,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		contexty.WithArtifactMaterialization(*hostMaterialization()),
 		contexty.WithConversationID("demo"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(compileObserver{}),
 		contexty.WithOutputPolicy(*hostEmailPolicy()),
 		contexty.WithDeferredBlocks(

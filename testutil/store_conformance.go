@@ -28,7 +28,7 @@ func CheckStateStore(t *testing.T, store contexty.ConversationStateStore, id str
 	ctx := context.Background()
 	old := contexty.ConversationDelta{Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentHistory,
 		Messages:   []contexty.Message{contexty.TextMessage(contexty.RoleUser, "private old data")},
-		MessageIDs: nil, Artifact: nil, ToolRound: nil}
+		MessageIDs: nil, ArtifactIDs: nil, Artifact: nil, ToolRound: nil}
 	// Arrange: a writer holds a token belonging to the deleted state.
 	initial, err := store.LoadState(ctx, id)
 	check(err)

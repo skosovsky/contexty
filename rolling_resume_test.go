@@ -131,7 +131,7 @@ func TestRolling_SummaryTargets(t *testing.T) {
 		contexty.WithCompactionCapture(targetProfile),
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
+		contexty.WithBudgetPipeline(main),
 		contexty.WithTraceProfile(
 			fixtureTraceProfile(),
 		),

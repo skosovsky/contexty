@@ -17,7 +17,7 @@ func TestFinal_Budget(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)},
 		contexty.CharTokenEstimator{},
 	)
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(pipe))
 	input := contexty.TextMessage(contexty.RoleUser, "x")
 	input.ID = "h"
 	req := contexty.CompileRequest{
@@ -87,7 +87,7 @@ func TestFinal_BudgetPersistence(t *testing.T) {
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)},
 		contexty.CharTokenEstimator{},
 	)
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+	engine := fixtureEngine(contexty.WithBudgetPipeline(pipe))
 	input := contexty.TextMessage(contexty.RoleUser, "raw")
 	input.ID = "h"
 	req := contexty.CompileRequest{

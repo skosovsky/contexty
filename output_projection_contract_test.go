@@ -206,7 +206,7 @@ func TestAcceptance_OutputBoundaryRequiredRefsAndAcceptedReplay(t *testing.T) {
 	engine := contexty.NewEngine(
 		contexty.WithOutputPolicy(fixtureOutputRedactor(calls, map[string][]string{})),
 		contexty.WithSelectionPolicy(selection),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithTraceProfile(
 			fixtureTraceProfile(),
 		),
@@ -335,7 +335,7 @@ func TestAcceptance_OutputBoundaryFinalBudgetAndAtomicFailures(t *testing.T) {
 			)
 			engine := contexty.NewEngine(
 				contexty.WithOutputPolicy(policy),
-				contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+				contexty.WithBudgetPipeline(pipe),
 			)
 			// Act.
 			result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{History: history})
@@ -369,7 +369,7 @@ func TestAcceptance_OutputBoundaryMaterializesChosenRepresentation(t *testing.T)
 	)
 	engine := contexty.NewEngine(
 		contexty.WithArtifactMaterialization(materializer),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(

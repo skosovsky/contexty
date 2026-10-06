@@ -43,7 +43,7 @@ err = store.CommitState(ctx, "chat-1", initial.Version(),
 if err != nil { return err }
 engine := contexty.NewEngine(
     contexty.WithConversationID("chat-1"), contexty.WithStateStore(store),
-    contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+    contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
         contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(4000)}, contexty.CharTokenEstimator{},
     )),
 )
@@ -116,7 +116,7 @@ The current clear-break contract is summarized below and in the [migration guide
 
 ```go
 engine := contexty.NewEngine(
-    contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+    contexty.WithBudgetPipeline(pipe),
 )
 result, _ := engine.CompileSnapshot(ctx, contexty.CompileRequest{
     History:                msgs,
@@ -448,7 +448,7 @@ pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 }, &contexty.CharFallbackEstimator{CharsPerToken: 4})
 
 engine := contexty.NewEngine(
-    contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+    contexty.WithBudgetPipeline(pipe),
 )
 ```
 
@@ -676,7 +676,7 @@ func (metricsObserver) OnPipelineCompiled(ctx context.Context, totalCost int, du
 
 engine := contexty.NewEngine(
     contexty.WithObserver(metricsObserver{}),
-    contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+    contexty.WithBudgetPipeline(pipe),
 )
 
 // Or attach observer only to budget events:

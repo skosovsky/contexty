@@ -139,7 +139,7 @@ func TestBudget_RoundCompilePersistenceReplay(t *testing.T) {
 		&contexty.FixedEstimator{TokensPerMessage: 5})
 	target := contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10),
 		TruncateStrategy: contexty.NewDropStrategy()}, &contexty.FixedEstimator{TokensPerMessage: 5})
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
+	engine := fixtureEngine(contexty.WithBudgetPipeline(main),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("pending")),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
@@ -191,13 +191,16 @@ func TestInterrupted_RepairCompileReplay(t *testing.T) {
 	projection, err := contexty.RepairInterruptedToolRounds(context.Background(), messages,
 		map[string]contexty.ToolRoundState{"assistant": contexty.ToolRoundInterrupted}, fixtureRepairPolicy(), codec)
 	require.NoError(t, err)
-	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory,
+	engine := fixtureEngine(
+		contexty.WithTraceProfile(fixtureTraceProfile()),
+		contexty.WithBudgetPipeline(
 			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(15)},
-				&contexty.FixedEstimator{TokensPerMessage: 5})),
+				&contexty.FixedEstimator{TokensPerMessage: 5}),
+		),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
-			fixtureContentPolicy(fixtureAllowContent)))
+			fixtureContentPolicy(fixtureAllowContent)),
+	)
 	request := contexty.CompileRequest{CompilationID: "repaired-compile", History: projection.Messages,
 		Lineage: projection.Lineage}
 	// Act.

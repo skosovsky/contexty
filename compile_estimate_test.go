@@ -65,7 +65,7 @@ func TestCompile_EstimateReport(t *testing.T) {
 			contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent),
 		),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, mainBudget),
+		contexty.WithBudgetPipeline(mainBudget),
 		contexty.WithTransformHooks(fixtureTextTransform{Replacer: func(text string) string { return text + "!" }}),
 	)
 	// Act.
@@ -147,7 +147,7 @@ func TestCompile_EstimateFailures(t *testing.T) {
 	require.ErrorIs(t, err, contexty.ErrBudgetExceeded)
 	require.Zero(t, result)
 	// Arrange / Act / Assert: reporting works without recording; media strictness also applies before truncation.
-	plain, err := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
+	plain, err := fixtureEngine(contexty.WithBudgetPipeline(pipe)).CompileSnapshot(
 		context.Background(), contexty.CompileRequest{History: []contexty.Message{message}})
 	require.NoError(t, err)
 	require.Nil(t, plain.Manifest)
@@ -155,7 +155,7 @@ func TestCompile_EstimateFailures(t *testing.T) {
 	require.Equal(t, 1, plain.Estimates[0].Report.Total)
 	media := message.Clone()
 	media.Parts = []contexty.ContentPart{contexty.ImagePart{URL: "private-url"}}
-	result, err = fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).CompileSnapshot(
+	result, err = fixtureEngine(contexty.WithBudgetPipeline(pipe)).CompileSnapshot(
 		context.Background(), contexty.CompileRequest{History: []contexty.Message{media}})
 	require.ErrorIs(t, err, contexty.ErrUnknownEstimateCost)
 	require.Zero(t, result)
@@ -179,9 +179,16 @@ func TestCompile_EstimateFailures(t *testing.T) {
 			contexty.DefaultJSONSerializer(),
 		)
 		require.NoError(t, createErr)
-		engine := fixtureEngine(deferred, contexty.WithTraceProfile(fixtureTraceProfile()),
-			contexty.WithCompileRecording(fixtureRecordProfile()), contexty.WithBudgetPipeline(contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}, bad)))
+		engine := fixtureEngine(
+			deferred,
+			contexty.WithTraceProfile(fixtureTraceProfile()),
+			contexty.WithCompileRecording(
+				fixtureRecordProfile(),
+			),
+			contexty.WithBudgetPipeline(
+				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}, bad),
+			),
+		)
 		_, compileErr := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "bad"})
 		require.ErrorIs(t, compileErr, contexty.ErrStaleEstimate)
 		require.Zero(t, calls)

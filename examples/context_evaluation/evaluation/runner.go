@@ -186,7 +186,7 @@ func budgetPipeline(cfg Config, reporter *contexty.EstimateReporter, fixture Fix
 
 func compileRequest(ctx context.Context, request contexty.CompileRequest,
 	pipeline *contexty.BudgetPipeline) (contexty.CompileResult, error) {
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeline),
+	engine := contexty.NewEngine(contexty.WithBudgetPipeline(pipeline),
 		contexty.WithArtifactMaterialization(materialization()))
 	return engine.CompileSnapshot(ctx, request)
 }

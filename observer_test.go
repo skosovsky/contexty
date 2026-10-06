@@ -169,7 +169,7 @@ func TestObserver_CompilePipelineEvent(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("obs"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.
@@ -276,7 +276,7 @@ func TestObserver_CompilePassiveOnTelemetryEstimateFailure(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("passive"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.
@@ -315,7 +315,7 @@ func TestObserver_CompileAndBudgetObserverPriority(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("priority"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(engineRec),
 	)
 	// Act.
@@ -356,7 +356,7 @@ func TestObserver_EngineOnlyObserverGetsCompileEventOnly(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithConversationID("engine-only"),
 		contexty.WithStateStore(store),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.
@@ -388,7 +388,7 @@ func TestObserver_SharedAdapterForEngineAndBudget(t *testing.T) {
 		contexty.WithBudgetObserver(rec),
 	)
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithObserver(rec),
 	)
 	// Act.

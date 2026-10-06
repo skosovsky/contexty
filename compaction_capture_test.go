@@ -194,7 +194,7 @@ func TestCompaction_CaptureIdleProfile(t *testing.T) {
 	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithCompileContentCapture(profile.Privacy, fixtureContentPolicy(
 			func(context.Context, contexty.CaptureCandidate) (bool, error) { return true, nil })),
 	)
@@ -227,7 +227,7 @@ func TestCompaction_CaptureRequiresConfiguration(t *testing.T) {
 		})},
 		contexty.CharTokenEstimator{}, contexty.WithCompactionCapture(profile))
 	// Act.
-	compiled, err := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)).
+	compiled, err := fixtureEngine(contexty.WithBudgetPipeline(pipe)).
 		CompileSnapshot(context.Background(), contexty.CompileRequest{})
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrMissingRecordPolicy)
@@ -269,7 +269,7 @@ func TestCompaction_CaptureProfileMismatch(t *testing.T) {
 						func(context.Context, contexty.CaptureCandidate) (bool, error) { calls++; return true, nil },
 					),
 				),
-				contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+				contexty.WithBudgetPipeline(pipe),
 			)
 			// Act.
 			compiled, err := engine.CompileSnapshot(

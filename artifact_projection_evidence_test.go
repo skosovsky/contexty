@@ -26,7 +26,7 @@ func fixtureArtifactProjectionEvidence(t *testing.T) contexty.CompileResult {
 	engine := fixtureEngine(
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("consumer")),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, mainReporter)),
 	)
 	result, err := engine.CompileSnapshot(t.Context(), contexty.CompileRequest{
@@ -115,7 +115,7 @@ func TestAcceptance_ArtifactGlobalPackingBelowLocalCap(t *testing.T) {
 			return plan, nil
 		}}
 	engine := fixtureEngine(contexty.WithSelectionPolicy(policy),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{
 				Budget: contexty.EffectiveInputBudget(1),
 			},
