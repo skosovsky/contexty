@@ -337,6 +337,7 @@ func selectOutput(
 	}
 	out := EmptySnapshot().WithVersion(snap.Version()).WithArtifacts(snap.Artifacts())
 	pendingIDs := messageIDSet(pending)
+	selectedSegments := make(map[SegmentName][]Message)
 	for _, candidate := range candidates {
 		reason := coverageNotSelected
 		if admitted[candidate.Ref] {
@@ -366,9 +367,12 @@ func selectOutput(
 		}
 		for _, message := range candidate.Messages {
 			if _, isPending := pendingIDs[message.ID]; !isPending {
-				out = out.WithSegment(candidate.Segment, append(out.Segment(candidate.Segment), message))
+				selectedSegments[candidate.Segment] = append(selectedSegments[candidate.Segment], message)
 			}
 		}
+	}
+	for segment, messages := range selectedSegments {
+		out = out.WithSegment(segment, messages)
 	}
 	return out, decision, nil
 }

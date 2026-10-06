@@ -66,7 +66,7 @@ func (s ConversationState) SegmentNames() []SegmentName {
 	return names
 }
 
-// AllSegments returns shallow copies of every segment (COW container).
+// AllSegments returns caller-owned deep copies of every segment.
 func (s ConversationState) AllSegments() map[SegmentName][]Message {
 	if len(s.segments) == 0 {
 		return nil
@@ -89,13 +89,18 @@ func (s ConversationState) AllSegmentsSnapshot() ConversationSnapshot {
 
 // WithSegment returns a new snapshot sharing unchanged segments (structural sharing).
 func (s ConversationState) WithSegment(name SegmentName, msgs []Message) ConversationState {
+	return s.withOwnedSegment(name, cloneMessageSlice(msgs))
+}
+
+// withOwnedSegment transfers a private slice; no caller-owned data may be passed.
+func (s ConversationState) withOwnedSegment(name SegmentName, msgs []Message) ConversationState {
 	segs := s.segments
 	if segs == nil {
 		segs = map[SegmentName][]Message{}
 	}
 	next := make(map[SegmentName][]Message, len(segs)+1)
 	maps.Copy(next, segs)
-	next[name] = cloneMessageSlice(msgs)
+	next[name] = msgs
 	return ConversationState{
 		segments:  next,
 		artifacts: s.artifacts,

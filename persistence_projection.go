@@ -1,7 +1,7 @@
 package contexty
 
 // derivePersistenceSegment returns the source-aware persistence segment,
-// using immutable Source and compile transformations (excludes evicted/truncated;
+// using the owned Source baseline and compile transformations (excludes evicted/truncated;
 // in-place formatted/ephemeral changes revert to Source or Introduced originals;
 // structural replacements and deferred merge removals use payload adds; Pending excluded from history).
 func (r CompileResult) derivePersistenceSegment(seg SegmentName) []Message {

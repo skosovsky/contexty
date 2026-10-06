@@ -24,7 +24,7 @@ type DeferredResult struct {
 	Resources []ResolvedResource
 }
 
-// AbstractPayload is the provider-agnostic compiled context tree (immutable LLM-ready output).
+// AbstractPayload is the provider-agnostic context tree with caller-owned mutable slices.
 type AbstractPayload struct {
 	System  []Message `json:"system"`
 	History []Message `json:"history"`
@@ -304,13 +304,12 @@ func (e *Engine) finalizeCompileRecording(ctx context.Context, result CompileRes
 }
 
 type preparedCompile struct {
-	Context         context.Context
+	Session         *compileSession
 	Snapshot        ConversationSnapshot
 	Transformations map[string]TransformChain
 	Artifacts       []ContextArtifact
 	Pending         []Message
 	Options         compileOptions
-	Recorder        *transformRecorder
 }
 
 type compilePipelineResult struct {
@@ -344,6 +343,7 @@ func (e *Engine) startCompileEvidence(ctx context.Context, req CompileRequest) c
 }
 
 func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (preparedCompile, error) {
+	ctx = newCompileSession(ctx).bind()
 	ctx, opaqueErr := e.initializeOpaqueCompileContext(ctx, req)
 	if opaqueErr != nil {
 		return preparedCompile{}, opaqueErr
@@ -414,13 +414,12 @@ func (e *Engine) prepareCompile(ctx context.Context, req CompileRequest) (prepar
 		preparedOutput{pending: cloneMessageSlice(compilePending), options: compileOpts},
 	)
 	return preparedCompile{
-		Context:         preparedContext,
+		Session:         forkCompileSession(preparedContext),
 		Snapshot:        preparedSnapshot,
 		Transformations: preparedTransforms,
 		Artifacts:       preparedArtifacts,
 		Pending:         compilePending,
 		Options:         compileOpts,
-		Recorder:        recorder,
 	}, nil
 }
 
@@ -429,7 +428,7 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	if err != nil {
 		return compilePipelineResult{}, err
 	}
-	preparedContext := prepared.Context
+	preparedContext := prepared.Session.Context
 	preparedSnapshot := prepared.Snapshot
 	preparedTransforms := prepared.Transformations
 	preparedArtifacts := prepared.Artifacts
@@ -437,7 +436,7 @@ func (e *Engine) runCompilePipeline(ctx context.Context, req CompileRequest) (co
 	activeArtifacts := cloneArtifacts(prepared.Artifacts)
 	compilePending := prepared.Pending
 	compileOpts := prepared.Options
-	recorder := prepared.Recorder
+	recorder := prepared.Session.Recorder
 
 	ctx = preparedContext
 	if trace := traceFromContext(ctx); trace != nil {

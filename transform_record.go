@@ -60,14 +60,15 @@ func (c TransformChain) Final() TransformRecord {
 	return final
 }
 
-// CompileResult is the immutable compile output plus O(1) traceability by Message.ID.
+// CompileResult contains caller-owned mutable DTOs and immutable state views,
+// with O(1) traceability by Message.ID.
 type CompileResult struct {
 	PreparedSnapshot   ConversationSnapshot
 	Selection          *SelectionDecision
 	BudgetDecisions    []CompileBudgetDecision
 	Payload            AbstractPayload
 	Transformations    map[string]TransformChain
-	Source             CompileRequest     // immutable freeze after Normalize, before pipeline mutations
+	Source             CompileRequest     // owned normalized input, before pipeline mutations
 	Introduced         map[string]Message // deep-cloned baseline for payload-born IDs (post-deferred, pre-hooks/patches)
 	Artifacts          []ContextArtifact
 	NormalizedSnapshot ConversationSnapshot
@@ -111,9 +112,9 @@ func (r CompileRequest) Normalize() (CompileRequest, []MessageIdentityWriteback,
 	return normalizeCompileRequest(r)
 }
 
-// Freeze returns a deep copy of all messages for immutable CompileResult.Source.
+// Freeze returns owned deep copies for CompileResult.Source.
 func (r CompileRequest) Freeze() CompileRequest {
-	return CompileRequest{ //nolint:exhaustruct_v5 // Options omitted from immutable source snapshot
+	return CompileRequest{ //nolint:exhaustruct_v5 // Options omitted from owned source DTO
 		DeferredResources:      cloneResourceSelections(r.DeferredResources),
 		TurnID:                 r.TurnID,
 		System:                 cloneCompileInputMessages(r.System),

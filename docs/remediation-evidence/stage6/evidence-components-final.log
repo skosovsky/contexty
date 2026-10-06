@@ -1,0 +1,15 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/skosovsky/contexty
+cpu: Apple M1 Max
+BenchmarkRemediation_EvidenceComponents/digest/10-10         	    1980	     64722 ns/op	   32798 B/op	     630 allocs/op
+BenchmarkRemediation_EvidenceComponents/estimate/10-10       	  292634	       425.2 ns/op	      80 B/op	       1 allocs/op
+BenchmarkRemediation_EvidenceComponents/report/10-10         	     349	    345583 ns/op	  182137 B/op	    3255 allocs/op
+BenchmarkRemediation_EvidenceComponents/codec-roundtrip/10-10         	    4774	     28048 ns/op	   10822 B/op	     190 allocs/op
+BenchmarkRemediation_EvidenceComponents/digest/100-10                 	     195	    617326 ns/op	  328225 B/op	    6356 allocs/op
+BenchmarkRemediation_EvidenceComponents/estimate/100-10               	   31099	      3849 ns/op	     896 B/op	       1 allocs/op
+BenchmarkRemediation_EvidenceComponents/report/100-10                 	      51	   2454511 ns/op	 1499256 B/op	   24980 allocs/op
+BenchmarkRemediation_EvidenceComponents/codec-roundtrip/100-10        	     403	    277552 ns/op	  108271 B/op	    1947 allocs/op
+BenchmarkRemediation_LabelRoundtrip-10                                	   10000	     13475 ns/op	    8741 B/op	     184 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty	2.306s

@@ -67,10 +67,11 @@ func ApplyDelta(state ConversationState, delta ConversationDelta) (ConversationS
 }
 
 func applyAppendMessages(state ConversationState, delta ConversationDelta) ConversationState {
-	existing := state.Segment(delta.Segment)
-	combined := cloneMessageSlice(existing)
+	existing := state.segments[delta.Segment]
+	combined := make([]Message, 0, len(existing)+len(delta.Messages))
+	combined = append(combined, cloneMessageSlice(existing)...)
 	combined = append(combined, cloneMessageSlice(delta.Messages)...)
-	return state.WithSegment(delta.Segment, combined)
+	return state.withOwnedSegment(delta.Segment, combined)
 }
 
 func applyRemoveMessages(state ConversationState, delta ConversationDelta) (ConversationState, error) {

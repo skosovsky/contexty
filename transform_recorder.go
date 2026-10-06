@@ -4,8 +4,6 @@ import (
 	"context"
 )
 
-type transformRecorderKey struct{}
-
 type transformRecorder struct {
 	records    map[string]TransformChain
 	introduced map[string]Message
@@ -15,12 +13,17 @@ func withTransformRecorder(ctx context.Context, rec *transformRecorder) context.
 	if rec == nil {
 		return ctx
 	}
-	return context.WithValue(ctx, transformRecorderKey{}, rec)
+	session := forkCompileSession(ctx)
+	session.Recorder = rec
+	return session.bind()
 }
 
 func transformRecorderFrom(ctx context.Context) *transformRecorder {
-	rec, _ := ctx.Value(transformRecorderKey{}).(*transformRecorder)
-	return rec
+	session := compileSessionFrom(ctx)
+	if session == nil {
+		return nil
+	}
+	return session.Recorder
 }
 
 func (r *transformRecorder) introduceIfAbsent(m Message) {

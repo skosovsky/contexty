@@ -5,8 +5,6 @@ import (
 	"slices"
 )
 
-type resourceCompileKey struct{}
-
 // Records remain operation-local until host privacy capture approves bytes.
 type resourceCompileState struct {
 	turnID    string
@@ -29,12 +27,17 @@ func startResourceCompile(ctx context.Context, request CompileRequest) context.C
 	for _, artifact := range request.Artifacts {
 		state.ids[artifact.ID] = true
 	}
-	return context.WithValue(ctx, resourceCompileKey{}, state)
+	session := forkCompileSession(ctx)
+	session.Resources = state
+	return session.bind()
 }
 
 func resourceStateFrom(ctx context.Context) *resourceCompileState {
-	state, _ := ctx.Value(resourceCompileKey{}).(*resourceCompileState)
-	return state
+	session := compileSessionFrom(ctx)
+	if session == nil {
+		return nil
+	}
+	return session.Resources
 }
 
 func (e *Engine) admitDeferredResource(ctx context.Context, resource ResolvedResource) (bool, error) {

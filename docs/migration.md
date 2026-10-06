@@ -432,3 +432,11 @@ old payload with a known matching token; it writes a standard empty checkpoint
 without host codec callbacks. Load/commit retain their lossless codec requirement.
 The memory reference store keeps codec execution under its global mutex; callbacks
 must not reenter it. See checkpoint-store.md for ownership and concurrency limits.
+
+
+Event TurnID and policy prefix must be valid UTF-8; malformed byte strings now
+return ErrMissingEventIdentity instead of colliding after JSON replacement. Public
+result DTOs are owned mutable copies; retain Source intact when deriving
+persistence. Quickstart is `go run ./examples/quickstart`; API reference moved
+from README into `docs/api-guide.md`. Private session/clone optimizations do not
+change checkpoint/message serialization.

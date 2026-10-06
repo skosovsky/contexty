@@ -1,0 +1,19 @@
+File: contexty-stage6-bench.test
+Type: cpu
+Time: 2026-10-06 15:57:31 +07
+Duration: 1.62s, Total samples = 1230ms (76.11%)
+Showing nodes accounting for 890ms, 72.36% of 1230ms total
+Showing top 12 nodes out of 241
+      flat  flat%   sum%        cum   cum%
+     290ms 23.58% 23.58%      290ms 23.58%  runtime.madvise
+      90ms  7.32% 30.89%       90ms  7.32%  runtime.kevent
+      90ms  7.32% 38.21%       90ms  7.32%  runtime.pthread_cond_signal
+      80ms  6.50% 44.72%       80ms  6.50%  runtime.pthread_cond_wait
+      80ms  6.50% 51.22%       80ms  6.50%  runtime.usleep
+      70ms  5.69% 56.91%       70ms  5.69%  runtime.pthread_kill
+      50ms  4.07% 60.98%       50ms  4.07%  runtime.pthread_cond_timedwait_relative_np
+      40ms  3.25% 64.23%       60ms  4.88%  runtime.tryDeferToSpanScan
+      30ms  2.44% 66.67%       70ms  5.69%  runtime.scanObject
+      30ms  2.44% 69.11%       50ms  4.07%  runtime.scanObjectsSmall
+      20ms  1.63% 70.73%       70ms  5.69%  github.com/skosovsky/contexty.Message.Clone
+      20ms  1.63% 72.36%       20ms  1.63%  runtime.heapArenaOf (inline)
