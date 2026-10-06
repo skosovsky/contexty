@@ -133,3 +133,30 @@ and addressed live Postgres3.416s PASS. Original F09/F10 baseline -race count10
 PASS. Mutex benchmark samples/repeat document callback cost and timing noise,
 without throughput claims. Evidence docs/remediation-evidence/stage5/.
 Commit fix: store boundaries; SHA recorded at start of stage6.
+
+## Stage 6 — private implementation and docs
+
+Stage5 commit:4cb73bb (fix: store boundaries), signed.
+Scope D14/D18/D23/D37/D38/D42, final docs and D01–45 decisions/DoD.
+Checklist (10 equally weighted criteria):
+- [x] S6.1: reproducible baseline/after history×target and append allocation measurements; repeated estimation/digest costs measured without callback purity/cache assumptions.
+- [x] S6.2: D18 early cancellation/known size rejection before clone/hash/authorization; retained prepublication checks and AAA regressions.
+- [x] S6.3: D23 private append ownership transfer reduces redundant clones; public immutable state/input/result isolation preserved and regression tested.
+- [x] S6.4: D38 private compileSession explicitly groups recorder/resources/identity, branch-local bindings and callback context propagation; old dependency keys removed without public framework.
+- [x] S6.5: D42 obsolete file/text migration tests removed or replaced by typed/behavioral contracts; import and semantic boundaries retained.
+- [x] S6.6: runnable durable quickstart, compact README/navigation, glossary, owned DTO GoDoc and concrete final migration/scopes; useful old README details preserved in thematic docs.
+- [x] S6.7: every D01–D45 explicitly accepted/rejected with reason and evidence; F01–F12 old behavior/new regression evidence mapped; CTX reconciliation retained.
+- [x] S6.8: concurrency/ownership matrix claims backed by race-tested Engine/BudgetPipeline/registry/store reuse and branch isolation tests; host synchronization/nonreentrancy limitations explicit.
+- [x] S6.9: addressed reproducible fuzz/edge checks for arithmetic, event IDs, pointer/value and codec boundaries; no implicit estimators/unknown enum fallback in chosen production paths.
+- [x] S6.10: final all3 race/pinned lint/isolated Redis+Postgres without skips, acceptance/bench/release fixtures/oldSHA repro and independence gates PASS; both reviewers accept final diff100%/PASS before commit.
+
+
+Stage 6 acceptance: completeness10/10=100%; correctnessPASS. Evidence component
+measurement gap and RenderView/stale preflight wording resolved, both reviewers
+reaccepted final state. CItrue makevalidate exit0: all3 pinnedlint0, acceptancePASS,
+benchguardrailsPASS, rootrace37.137s/Redis17.131s/Postgres4.796sPASS in isolated
+containers without skips. Release12currentfixturesPASS plus separately enabled
+2oldSHAfixturesPASS; F03–12 original probesPASS. IDs/parts/codec fuzz167864/325332
+executionsPASS; finalboundaryrace2.217s and rootlint0PASS. Measurements/tests/docs
+reports in docs/remediation-evidence/stage6/. Commit refactor: compile internals;
+SHA recorded in final audit. Final independent whole-goal audit remains required.

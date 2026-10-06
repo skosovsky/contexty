@@ -459,3 +459,30 @@ func TestCanceledReleaseAndCollection(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, deleted)
 }
+
+func TestRemediation_EarlyPutRejection(t *testing.T) {
+	for _, canceled := range []bool{false, true} {
+		// Arrange: large known input and an authorization callback that must not run.
+		calls := 0
+		store := backend(t, func(context.Context, memory.Access) error { calls++; return nil })
+		put := request("early")
+		put.Content.Bytes = make([]byte, 1024)
+		ctx, cancel := context.WithCancel(context.Background())
+		if canceled {
+			cancel()
+		}
+		// Act.
+		_, err := store.Put(ctx, put)
+		cancel()
+		// Assert: early admission costs do not run host policy or publish state.
+		if canceled {
+			require.ErrorIs(t, err, context.Canceled)
+		} else {
+			require.ErrorIs(t, err, contexty.ErrBlobSizeLimit)
+		}
+		require.Zero(t, calls)
+		put.Content.Bytes = []byte("valid")
+		_, err = store.Put(context.Background(), put)
+		require.NoError(t, err)
+	}
+}

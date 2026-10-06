@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 )
 
 // MessageIdentityContext describes where an ID is needed during normalization.
@@ -50,7 +51,8 @@ func NewStableMessageIdentityPolicy(prefix string) StableMessageIdentityPolicy {
 // ResolveMessageID binds a new event to host TurnID, event kind and turn ordinal.
 // Content and prompt projections do not change logical identity.
 func (p StableMessageIdentityPolicy) ResolveMessageID(ctx MessageIdentityContext, _ Message) (string, error) {
-	if ctx.TurnID == "" || ctx.Ordinal < 0 || (!ctx.CurrentTurn && !ctx.Pending) {
+	if ctx.TurnID == "" || ctx.Ordinal < 0 || (!ctx.CurrentTurn && !ctx.Pending) || !utf8.ValidString(ctx.TurnID) ||
+		!utf8.ValidString(p.Prefix) {
 		return "", ErrMissingEventIdentity
 	}
 	kind := "pending_event"
@@ -69,8 +71,6 @@ func (p StableMessageIdentityPolicy) ResolveMessageID(ctx MessageIdentityContext
 	return "event:" + hex.EncodeToString(digest[:]), nil
 }
 
-type compileIdentityKey struct{}
-
 type compileIdentitySettings struct {
 	policy         MessageIdentityPolicy
 	requireDurable bool
@@ -88,20 +88,26 @@ func withCompileIdentity(
 	if policy == nil && !requireDurable && turnID == "" && targetName == "" {
 		return ctx
 	}
-	return context.WithValue(ctx, compileIdentityKey{}, compileIdentitySettings{
+	session := forkCompileSession(ctx)
+	session.Identity = compileIdentitySettings{
 		policy:         policy,
 		requireDurable: requireDurable,
 		turnID:         turnID,
 		targetName:     targetName,
-	})
+	}
+	session.HasIdentity = true
+	return session.bind()
 }
 
 func compileIdentityFromContext(ctx context.Context) (compileIdentitySettings, bool) {
 	if ctx == nil {
 		return compileIdentitySettings{}, false
 	}
-	settings, ok := ctx.Value(compileIdentityKey{}).(compileIdentitySettings)
-	return settings, ok
+	session := compileSessionFrom(ctx)
+	if session == nil {
+		return compileIdentitySettings{}, false
+	}
+	return session.Identity, session.HasIdentity
 }
 
 func ensureMessageIDsFromContext(

@@ -1,0 +1,8 @@
+fuzz: elapsed: 0s, gathering baseline coverage: 0/3 completed
+fuzz: elapsed: 0s, gathering baseline coverage: 3/3 completed, now fuzzing with 10 workers
+fuzz: elapsed: 3s, execs: 66196 (22048/sec), new interesting: 69 (total: 72)
+fuzz: elapsed: 6s, execs: 112483 (15434/sec), new interesting: 81 (total: 84)
+fuzz: elapsed: 9s, execs: 158367 (15296/sec), new interesting: 87 (total: 90)
+fuzz: elapsed: 11s, execs: 167864 (4644/sec), new interesting: 88 (total: 91)
+PASS
+ok  	github.com/skosovsky/contexty	11.611s

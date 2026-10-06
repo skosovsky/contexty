@@ -51,7 +51,7 @@ func (r *EstimateReporter) EstimatePerMessage(ctx context.Context, messages []Me
 }
 
 func finalBudgetChannel(ctx context.Context) manifestChannelKey {
-	settings, _ := ctx.Value(compileIdentityKey{}).(compileIdentitySettings)
+	settings, _ := compileIdentityFromContext(ctx)
 	if settings.targetName != "" {
 		return manifestChannelKey{kind: ManifestTargetOutput, name: settings.targetName}
 	}

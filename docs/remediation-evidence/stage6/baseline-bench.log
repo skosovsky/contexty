@@ -1,0 +1,18 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/skosovsky/contexty
+cpu: Apple M1 Max
+BenchmarkRemediation_Append/10-10           	   30860	      4084 ns/op	    9520 B/op	      71 allocs/op
+BenchmarkRemediation_Append/100-10          	    4124	     32377 ns/op	   92145 B/op	     611 allocs/op
+BenchmarkRemediation_Append/1000-10         	     469	    258813 ns/op	  784755 B/op	    6011 allocs/op
+BenchmarkRemediation_CompileSnapshots/history10/targets0-10         	     364	    334753 ns/op	  325934 B/op	    3552 allocs/op
+BenchmarkRemediation_CompileSnapshots/history10/targets1-10         	     127	   1224341 ns/op	  662029 B/op	    7244 allocs/op
+BenchmarkRemediation_CompileSnapshots/history10/targets4-10         	      57	   2272308 ns/op	 1672227 B/op	   18322 allocs/op
+BenchmarkRemediation_CompileSnapshots/history100/targets0-10        	      25	   9591893 ns/op	 6329486 B/op	   51134 allocs/op
+BenchmarkRemediation_CompileSnapshots/history100/targets1-10        	      13	   8568131 ns/op	12697325 B/op	  103600 allocs/op
+BenchmarkRemediation_CompileSnapshots/history100/targets4-10        	       5	  23497858 ns/op	31802827 B/op	  261000 allocs/op
+BenchmarkRemediation_CompileSnapshots/history1000/targets0-10       	       1	 247829584 ns/op	343768840 B/op	 2311672 allocs/op
+BenchmarkRemediation_CompileSnapshots/history1000/targets1-10       	       1	 364493333 ns/op	687868176 B/op	 4636199 allocs/op
+BenchmarkRemediation_CompileSnapshots/history1000/targets4-10       	       1	1002797250 ns/op	1720130000 B/op	11609632 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty	4.171s

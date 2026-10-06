@@ -1,0 +1,8 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/skosovsky/contexty
+cpu: Apple M1 Max
+BenchmarkRemediation_CompileSnapshots/history100/targets1-10         	      50	  18480212 ns/op	12703356 B/op	  103639 allocs/op
+BenchmarkRemediation_CompileSnapshots/history1000/targets1-10        	       1	 533331625 ns/op	687857368 B/op	 4636138 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty	2.418s

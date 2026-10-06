@@ -1,0 +1,19 @@
+File: contexty-stage6-bench.test
+Type: alloc_space
+Time: 2026-10-06 15:57:33 +07
+Showing nodes accounting for 1138MB, 89.22% of 1275.46MB total
+Dropped 150 nodes (cum <= 6.38MB)
+Showing top 12 nodes out of 79
+      flat  flat%   sum%        cum   cum%
+  384.74MB 30.16% 30.16%  1007.87MB 79.02%  github.com/skosovsky/contexty.selectOutput
+  271.34MB 21.27% 51.44%   324.84MB 25.47%  github.com/skosovsky/contexty.ConversationState.Segment
+  262.09MB 20.55% 71.99%   318.09MB 24.94%  github.com/skosovsky/contexty.cloneMessageSlice
+      57MB  4.47% 76.46%   110.50MB  8.66%  github.com/skosovsky/contexty.Message.Clone
+   53.50MB  4.19% 80.65%    53.50MB  4.19%  github.com/skosovsky/contexty.TextPart.clonePart
+   32.01MB  2.51% 83.16%    32.01MB  2.51%  reflect.mapassign_faststr0
+      26MB  2.04% 85.20%       26MB  2.04%  reflect.unsafe_New
+      14MB  1.10% 86.30%       14MB  1.10%  bytes.Clone (inline)
+   11.31MB  0.89% 87.18%    26.14MB  2.05%  github.com/skosovsky/contexty.snapshotAllMessages
+       9MB  0.71% 87.89%       16MB  1.25%  github.com/skosovsky/contexty.DefaultProvenanceRegistry
+    8.50MB  0.67% 88.56%     8.50MB  0.67%  encoding/json/jsontext.NewDecoder (inline)
+    8.50MB  0.67% 89.22%     8.50MB  0.67%  encoding/json/jsontext.(*decoderState).fetch

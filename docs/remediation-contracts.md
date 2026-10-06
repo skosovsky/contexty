@@ -119,3 +119,23 @@ CTX-005: F06–08 and D03/10/13 enforce ownership/arithmetic/aggregate accountin
 no provider SDK or measured usage is added. CTX-006: semantic prefix diagnostics
 remain; wire/cache-hit confirmation belongs to the adapter (D35). These changes
 close concrete contract gaps without duplicating the six existing features.
+
+## Private stage 6 changes
+
+Append may transfer privately owned message slices into immutable state without a
+second clone. Caller-owned delta messages remain cloned, and returned snapshots
+retain independent mutable getters. No host callback purity or address-based cache
+is assumed; repeated estimates keep their final validation gates.
+
+Blob memory Put checks cancellation and known byte length before cloning, hashing
+or authorization, then retains cancellation/size checks before publication. This
+changes invalid-input error precedence deliberately, without weakening admission.
+
+A private compileSession groups execution context, recorder, resource state and
+stage identity explicitly. Prepared/main/target stages retain separate bindings;
+a private context bridge carries these dependencies through existing contextual
+callbacks and helper paths. It does not add a public orchestrator or cache callbacks.
+
+Durable event TurnID and identity prefix must be valid UTF-8. Invalid byte strings
+are rejected with ErrMissingEventIdentity, because JSON replacement of malformed
+UTF-8 would otherwise make distinct host strings share an ID.

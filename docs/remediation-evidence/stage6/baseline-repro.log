@@ -1,0 +1,107 @@
+=== identity @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+first <nil>
+persist <nil>
+history 1 chat:current_turn:0:9d9cf6283341a656
+second <nil> history 2
+chat:current_turn:0:9d9cf6283341a656 yes
+chat:current_turn:1:9d9cf6283341a656 yes
+persist2 <nil> 2
+third after trimming oldest contexty: compile request: contexty: duplicate message id in compile request
+different images same generated ID true
+
+=== compile @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+segment="memroy" policy="append" err=<nil> calls=1 payload=[{f1a039e3e58b3ef3b93282df26c1589a system <nil> [{OLD RULE}] {<nil>} [] [] <nil> <nil> <nil>}] prepared_segments=[memory history memroy]
+segment="memory" policy="replcae" err=<nil> calls=1 payload=[{14495abb67450eedba9f79222728e7d2 system <nil> [{OLD RULE}] {<nil>} [] [] <nil> <nil> <nil>} {d087004b1390e06f9d942224cbdd34c2 system <nil> [{NEW RULE}] {<nil>} [] [] <nil> <nil> <nil>}] prepared_segments=[history memory]
+role projection err=<nil> called=1 roles=system user 
+
+=== materialization @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+pointer=false err=contexty: invalid artifact materialization payload={System:[] History:[] Tools:[] Memory:[]}
+pointer=true err=<nil> payload={System:[] History:[] Tools:[] Memory:[{ID:artifact:data Role:assistant Actor:<nil> Parts:[{ID:call Name:execute Arguments:{Text:{} Data:null Binary:[] MIMEType: Error:<nil> Progress:<nil> Control:<nil>} ArgumentsBlob:<nil>}] Annotations:{Timestamp:<nil>} SourceRefs:[] Extensions:[] Origin:<nil> LLMCache:<nil> Provenance:<nil>}]}
+
+=== views @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+custom_called=false out="user: ORIGINAL\n" err=<nil>
+
+=== budget @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+mutation err=<nil> caller="original-b" output="mutated"
+fixed total=2 err=<nil>
+fixed admitted=2 tokens=2 err=<nil>
+char 2-runes/max=-1 err=<nil>
+
+=== overhead @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+full_input_cost=12 limit=12 err=<nil> kept_history=0
+
+=== arch @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+budget("history"): history=0 memory=1 err=<nil>
+budget("memory"): history=0 memory=1 err=<nil>
+budget("typo"): history=0 memory=1 err=<nil>
+provenance: err=<nil> encoding_error=<nil> reencoded={"type_id":"system","payload":{"component":"service"}}
+
+=== cancel overlay @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+=== RUN   TestReviewClearCanceledWhileWaiting
+    zz_review_probe_test.go:16: ClearState returned nil and published version=1 after ctx cancellation
+--- PASS: TestReviewClearCanceledWhileWaiting (0.00s)
+PASS
+ok  	github.com/skosovsky/contexty	1.542s
+
+=== ttl overlay @ 2a1a7ab7fb919c436e210c2804dd615e2d80626a ===
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+=== RUN   TestReviewSubMillisecondTTL
+    zz_review_probe_test.go:24: positive TTL 500µs reached Lua as 0 ms; PEXPIRE branch is skipped
+--- PASS: TestReviewSubMillisecondTTL (0.00s)
+PASS
+ok  	github.com/skosovsky/contexty/adapters/store/redis	1.508s
+
+Baseline F03-F12 behavioral assertions PASS

@@ -532,7 +532,7 @@ Manifest validation rejects a resolved limit that disagrees with the original
 request. Replay compares the entire request: different reservations remain a
 mismatch even if their effective limits happen to coincide. Configuration is
 checked before loading the conversation store and before executing callbacks.
-Tests cover independent target capacities, one-time system/pending preflight,
+Tests cover independent target capacities, whole-request fitting and nonadditive candidate accounting,
 zero capacity, maximal integers, invalid/ambiguous requests and bounded history
 sub-limits. Optional estimate quality/coverage reports use the reporter contract
 below without changing the required integer estimator interface.

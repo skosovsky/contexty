@@ -115,7 +115,14 @@ func (s *Store) authorize(ctx context.Context, access Access) error {
 	return err
 }
 
+// Put rejects cancellation and known oversized input before copy/hash/authorization.
 func (s *Store) Put(ctx context.Context, request contexty.BlobPutRequest) (contexty.BlobDescriptor, error) {
+	if err := ctx.Err(); err != nil {
+		return contexty.BlobDescriptor{}, err
+	}
+	if s != nil && int64(len(request.Content.Bytes)) > s.config.MaxObjectBytes {
+		return contexty.BlobDescriptor{}, contexty.ErrBlobSizeLimit
+	}
 	request.Content.Bytes = slices.Clone(request.Content.Bytes)
 	request.Sources = slices.Clone(request.Sources)
 	digest := sha256.Sum256(request.Content.Bytes)

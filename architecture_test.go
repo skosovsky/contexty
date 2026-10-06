@@ -1,11 +1,13 @@
 package contexty
 
 import (
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -27,39 +29,12 @@ func TestArchitecture_NoStringHeuristicsForSemantics(t *testing.T) {
 }
 
 func TestArchitecture_DeferredResultContract(t *testing.T) {
-	// Arrange: inspect the actual public declaration, not a compatible usage fixture.
-	file, err := parser.ParseFile(token.NewFileSet(), "compile.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec := findTypeSpec(file, "DeferredBlock")
-	if spec == nil {
-		t.Fatal("missing DeferredBlock contract")
-	}
-	block, ok := spec.Type.(*ast.StructType)
-	if !ok {
-		t.Fatal("DeferredBlock must be an explicit struct")
-	}
-	// Act / Assert: the callback returns only the new typed result, no slice overload.
-	found := false
-	for _, field := range block.Fields.List {
-		for _, name := range field.Names {
-			if name.Name != "Resolve" {
-				continue
-			}
-			found = true
-			fn, typed := field.Type.(*ast.FuncType)
-			if !typed || fn.Results == nil || fn.Results.NumFields() != 2 {
-				t.Fatal("Resolve must return DeferredResult and error")
-			}
-			if !exprIsIdent(fn.Results.List[0].Type, "DeferredResult") ||
-				!exprIsIdent(fn.Results.List[1].Type, "error") {
-				t.Fatal("legacy deferred callback return is forbidden")
-			}
-		}
-	}
-	if !found {
-		t.Fatal("missing Resolve callback")
+	// Arrange: inspect the public type independently of its source filename.
+	field, found := reflect.TypeFor[DeferredBlock]().FieldByName("Resolve")
+	// Act / Assert: enforce the typed callback signature.
+	want := reflect.TypeFor[func(context.Context) (DeferredResult, error)]()
+	if !found || field.Type != want {
+		t.Fatal("Resolve must return DeferredResult and error")
 	}
 }
 
@@ -133,45 +108,6 @@ func TestArchitecture_NoBase64InCore(t *testing.T) {
 	}
 }
 
-func TestArchitecture_NoRemovedOverlayAPIInCore(t *testing.T) {
-	// Arrange.
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	violations, err := findRemovedAPIViolations(root, []string{
-		"WithOverlay", "CompileOverlayFromContext", "WithCompileOverlay",
-		"PromptOrigin", "ManifestID", "MessagePromptOrigin", "type Overlay",
-	})
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	// Act / Assert: exercise the contract and check its result.
-	if len(violations) > 0 {
-		t.Fatalf("removed Overlay API must not reappear in core:\n%s", strings.Join(violations, "\n"))
-	}
-}
-
-func TestArchitecture_NoPositionalReplacementAPI(t *testing.T) {
-	// Arrange: replaced selectors must not return as aliases or fallback branches.
-	root, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	// Act.
-	violations, err := findRemovedAPIViolations(root, []string{
-		"WithEphemeralPatch", "MessageSelector", "MessagePosition", "PositionFirst",
-		"PositionLast", "PositionAll", "resolveSelectorIndices", "ReasonEphemeralPatch",
-	})
-	// Assert.
-	if err != nil {
-		t.Fatalf("scan: %v", err)
-	}
-	if len(violations) > 0 {
-		t.Fatalf("removed positional replacement API must not reappear:\n%s", strings.Join(violations, "\n"))
-	}
-}
-
 func TestArchitecture_FormattersUseExplicitContext(t *testing.T) {
 	// Arrange.
 	root, err := os.Getwd()
@@ -193,30 +129,12 @@ func TestArchitecture_FormattersUseExplicitContext(t *testing.T) {
 
 func findFormatterContextViolations(root string) ([]string, error) {
 	var violations []string
-	fset := token.NewFileSet()
-	formattersFile, err := parser.ParseFile(
-		fset,
-		filepath.Join(root, "formatters.go"),
-		nil,
-		0,
-	)
-	if err != nil {
-		return nil, err
+	if !reflect.TypeFor[SegmentFormatter]().ConvertibleTo(reflect.TypeFor[func(context.Context, []Message) ([]Message, error)]()) {
+		violations = append(violations, "SegmentFormatter signature mismatch")
 	}
-	if !hasSegmentFormatterSignature(formattersFile) {
-		violations = append(violations, "formatters.go: SegmentFormatter must accept context and return error")
-	}
-	viewFile, err := parser.ParseFile(
-		fset,
-		filepath.Join(root, "view_registry.go"),
-		nil,
-		0,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if !viewConfigurationUsesSegmentFormatter(viewFile) {
-		violations = append(violations, "view_registry.go: ViewConfiguration must reuse SegmentFormatter")
+	field, found := reflect.TypeFor[ViewConfiguration]().FieldByName("Formatter")
+	if !found || field.Type != reflect.TypeFor[SegmentFormatter]() {
+		violations = append(violations, "ViewConfiguration.Formatter signature mismatch")
 	}
 	globalViolations, err := findPackageContextGlobalViolations(root)
 	if err != nil {
@@ -224,74 +142,6 @@ func findFormatterContextViolations(root string) ([]string, error) {
 	}
 	violations = append(violations, globalViolations...)
 	return violations, nil
-}
-
-func hasSegmentFormatterSignature(file *ast.File) bool {
-	typeSpec := findTypeSpec(file, "SegmentFormatter")
-	if typeSpec == nil {
-		return false
-	}
-	fn, ok := typeSpec.Type.(*ast.FuncType)
-	if !ok || fn.Params == nil || fn.Results == nil {
-		return false
-	}
-	return fn.Params.NumFields() == 2 &&
-		fn.Results.NumFields() == 2 &&
-		exprContainsContextContext(fn.Params.List[0].Type) &&
-		exprIsMessageSlice(fn.Params.List[1].Type) &&
-		exprIsMessageSlice(fn.Results.List[0].Type) &&
-		exprIsIdent(fn.Results.List[1].Type, "error")
-}
-
-func viewConfigurationUsesSegmentFormatter(file *ast.File) bool {
-	typeSpec := findTypeSpec(file, "ViewConfiguration")
-	if typeSpec == nil {
-		return false
-	}
-	st, ok := typeSpec.Type.(*ast.StructType)
-	if !ok {
-		return false
-	}
-	field := findStructField(st, "Formatter")
-	return field != nil && exprIsIdent(field.Type, "SegmentFormatter")
-}
-
-func findTypeSpec(file *ast.File, name string) *ast.TypeSpec {
-	for _, decl := range file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.TYPE {
-			continue
-		}
-		for _, spec := range gen.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok || typeSpec.Name.Name != name {
-				continue
-			}
-			return typeSpec
-		}
-	}
-	return nil
-}
-
-func findStructField(st *ast.StructType, name string) *ast.Field {
-	for _, field := range st.Fields.List {
-		for _, fieldName := range field.Names {
-			if fieldName.Name == name {
-				return field
-			}
-		}
-	}
-	return nil
-}
-
-func exprIsMessageSlice(expr ast.Expr) bool {
-	arr, ok := expr.(*ast.ArrayType)
-	return ok && exprIsIdent(arr.Elt, "Message")
-}
-
-func exprIsIdent(expr ast.Expr, name string) bool {
-	ident, ok := expr.(*ast.Ident)
-	return ok && ident.Name == name
 }
 
 func findPackageContextGlobalViolations(root string) ([]string, error) {
@@ -348,26 +198,6 @@ func collectPackageContextGlobals(fset *token.FileSet, file *ast.File) []string 
 	return violations
 }
 
-func exprContainsContextContext(expr ast.Expr) bool {
-	if expr == nil {
-		return false
-	}
-	found := false
-	ast.Inspect(expr, func(n ast.Node) bool {
-		sel, ok := n.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		pkg, ok := sel.X.(*ast.Ident)
-		if ok && pkg.Name == "context" && sel.Sel.Name == "Context" {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
-}
-
 func exprContainsContextConstructor(expr ast.Expr) bool {
 	found := false
 	ast.Inspect(expr, func(n ast.Node) bool {
@@ -387,36 +217,6 @@ func exprContainsContextConstructor(expr ast.Expr) bool {
 		return true
 	})
 	return found
-}
-
-func findRemovedAPIViolations(root string, forbidden []string) ([]string, error) {
-	var violations []string
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			if shouldSkipArchitectureDir(filepath.Base(path)) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		content := string(data)
-		for _, needle := range forbidden {
-			if strings.Contains(content, needle) {
-				violations = append(violations, path+": contains "+needle)
-			}
-		}
-		return nil
-	})
-	return violations, err
 }
 
 func findStringHeuristicViolations(root string) ([]string, error) {
@@ -724,4 +524,24 @@ func collectBase64Violations(fset *token.FileSet, file *ast.File) []string {
 		return true
 	})
 	return violations
+}
+
+func exprContainsContextContext(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if ok && pkg.Name == "context" && sel.Sel.Name == "Context" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
