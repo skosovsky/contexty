@@ -165,6 +165,9 @@ func validateOutputPolicySegment(before, after []Message) error {
 
 func validateOutputPolicyToolParts(before, after Message) error {
 	for i, part := range before.Parts {
+		if nilInterfaceValue(part) {
+			return ErrInvalidOutputPolicy
+		}
 		if part.partKind() != PartKindToolCall && part.partKind() != PartKindToolResult {
 			continue
 		}
@@ -176,6 +179,9 @@ func validateOutputPolicyToolParts(before, after Message) error {
 		}
 	}
 	for i, part := range after.Parts {
+		if nilInterfaceValue(part) {
+			return ErrInvalidOutputPolicy
+		}
 		if part.partKind() != PartKindToolCall && part.partKind() != PartKindToolResult {
 			continue
 		}
@@ -187,12 +193,12 @@ func validateOutputPolicyToolParts(before, after Message) error {
 }
 
 func sameOutputPolicyToolIdentity(before, after ContentPart) bool {
-	switch original := before.(type) {
+	switch original := canonicalPartValue(before).(type) {
 	case ToolCallPart:
-		accepted, ok := after.(ToolCallPart)
+		accepted, ok := canonicalPartValue(after).(ToolCallPart)
 		return ok && original.ID == accepted.ID && original.Name == accepted.Name
 	case ToolResultPart:
-		accepted, ok := after.(ToolResultPart)
+		accepted, ok := canonicalPartValue(after).(ToolResultPart)
 		return ok && original.ToolCallID == accepted.ToolCallID && original.Name == accepted.Name &&
 			original.IsError == accepted.IsError
 	default:

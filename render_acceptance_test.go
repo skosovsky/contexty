@@ -72,7 +72,7 @@ func TestAcceptance_RenderView_BuiltinParity(t *testing.T) {
 	}
 }
 
-func TestAcceptance_RenderView_BuiltinTakesPrecedenceOverRegistry(t *testing.T) {
+func TestAcceptance_RenderView_BuiltinCollisionRejected(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
@@ -92,8 +92,7 @@ func TestAcceptance_RenderView_BuiltinTakesPrecedenceOverRegistry(t *testing.T) 
 		contexty.TextMessage(contexty.RoleUser, "hello"),
 	})
 	out, err := engine.RenderView(ctx, snap, string(contexty.ViewLLMXML))
-	require.NoError(t, err)
-	assert.Contains(t, out, "<user>hello</user>")
-	// Act / Assert: exercise the contract and check its result.
-	assert.NotContains(t, out, "OVERRIDDEN")
+	// Assert: registration cannot silently lose to builtin dispatch.
+	require.ErrorIs(t, err, contexty.ErrInvalidCompileConfiguration)
+	require.Empty(t, out)
 }

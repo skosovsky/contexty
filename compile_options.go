@@ -158,7 +158,7 @@ func patchTextOnMessage(m Message, text string) Message {
 	cloned := m.Clone()
 	var nonText []ContentPart
 	for _, p := range cloned.Parts {
-		if _, ok := p.(TextPart); !ok {
+		if _, ok := canonicalPartValue(p).(TextPart); !ok {
 			nonText = append(nonText, p)
 		}
 	}

@@ -103,7 +103,7 @@ func validateHistoricalArguments(
 func validateHistoricalArgumentPayload(ctx context.Context, message Message, part int,
 	projection HistoricalArgumentProjection,
 ) error {
-	call, ok := message.Parts[part].(ToolCallPart)
+	call, ok := canonicalPartValue(message.Parts[part]).(ToolCallPart)
 	if !ok {
 		return ErrInvalidHistoricalArguments
 	}
@@ -143,7 +143,7 @@ func validateHistoricalArgumentPrompt(ctx context.Context, projection Historical
 		return ErrInvalidHistoricalArguments
 	}
 	expected := cloneMessageSlice(projection.Source)
-	call, ok := expected[index].Parts[part].(ToolCallPart)
+	call, ok := canonicalPartValue(expected[index].Parts[part]).(ToolCallPart)
 	if !ok {
 		return ErrInvalidHistoricalArguments
 	}
@@ -199,7 +199,7 @@ func applyHistoricalArguments(ctx context.Context, snapshot ConversationSnapshot
 			return ConversationSnapshot{}, err
 		}
 		before := history[index].Clone()
-		call, ok := history[index].Parts[part].(ToolCallPart)
+		call, ok := canonicalPartValue(history[index].Parts[part]).(ToolCallPart)
 		if !ok {
 			return ConversationSnapshot{}, ErrInvalidHistoricalArguments
 		}

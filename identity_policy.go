@@ -2,12 +2,18 @@ package contexty
 
 import (
 	"context"
-	"fmt"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 )
 
 // MessageIdentityContext describes where an ID is needed during normalization.
 type MessageIdentityContext struct {
+	// Pending identifies a new event in the current host turn, not persisted history.
+	Pending bool
+	// Ordinal is the event position within its turn, independent of history length.
+	Ordinal          int
 	Segment          SegmentName
 	Index            int
 	TurnID           string
@@ -29,37 +35,38 @@ func (f MessageIdentityFunc) ResolveMessageID(ctx MessageIdentityContext, msg Me
 	return f(ctx, msg)
 }
 
-// StableMessageIdentityPolicy returns deterministic IDs derived from message position and content.
+// StableMessageIdentityPolicy assigns logical event IDs to Pending/CurrentTurn.
+// Historical, static and transform-generated messages need explicit IDs or a host
+// identity policy; their current snapshot positions are not durable identities.
 type StableMessageIdentityPolicy struct {
 	Prefix string
 }
 
-// NewStableMessageIdentityPolicy builds a deterministic identity policy.
+// NewStableMessageIdentityPolicy builds an event identity policy.
 func NewStableMessageIdentityPolicy(prefix string) StableMessageIdentityPolicy {
 	return StableMessageIdentityPolicy{Prefix: prefix}
 }
 
-// ResolveMessageID implements MessageIdentityPolicy.
-func (p StableMessageIdentityPolicy) ResolveMessageID(ctx MessageIdentityContext, msg Message) (string, error) {
+// ResolveMessageID binds a new event to host TurnID, event kind and turn ordinal.
+// Content and prompt projections do not change logical identity.
+func (p StableMessageIdentityPolicy) ResolveMessageID(ctx MessageIdentityContext, _ Message) (string, error) {
+	if ctx.TurnID == "" || ctx.Ordinal < 0 || (!ctx.CurrentTurn && !ctx.Pending) {
+		return "", ErrMissingEventIdentity
+	}
+	kind := "pending_event"
+	if ctx.CurrentTurn {
+		kind = "current_turn"
+	}
 	prefix := strings.TrimSpace(p.Prefix)
 	if prefix == "" {
 		prefix = "msg"
 	}
-	segment := strings.TrimSpace(string(ctx.Segment))
-	if segment == "" {
-		segment = "message"
+	encoded, err := json.Marshal([]any{prefix, ctx.TurnID, kind, ctx.Ordinal})
+	if err != nil {
+		return "", err
 	}
-	scope := segment
-	if ctx.TargetName != "" {
-		scope = "target:" + strings.ReplaceAll(ctx.TargetName, " ", "_") + ":" + segment
-	}
-	if ctx.CurrentTurn {
-		scope = "current_turn"
-	}
-	if ctx.PromptProjection {
-		scope += ":projection"
-	}
-	return fmt.Sprintf("%s:%s:%d:%s", prefix, scope, ctx.Index, messageFingerprint(msg)), nil
+	digest := sha256.Sum256(encoded)
+	return "event:" + hex.EncodeToString(digest[:]), nil
 }
 
 type compileIdentityKey struct{}
@@ -125,11 +132,16 @@ func ensureMessageIDFromContext(
 ) (Message, error) {
 	settings, ok := compileIdentityFromContext(ctx)
 	if !ok {
-		return EnsureMessageID(msg), nil
+		owned, err := ownCompileMessage(msg)
+		if err != nil {
+			return Message{}, err
+		}
+		return EnsureMessageID(owned), nil
 	}
 	normalized, _, err := normalizeMessageForCompile(
 		msg,
 		MessageIdentityContext{
+			Pending: false, Ordinal: index,
 			Segment:          seg,
 			Index:            index,
 			TurnID:           settings.turnID,

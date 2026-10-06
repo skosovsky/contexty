@@ -1,0 +1,6 @@
+package main
+import("context";"fmt";c "github.com/skosovsky/contexty")
+type counter struct{}
+func(counter) Estimate(_ context.Context,m []c.Message)(int,error){if len(m)==0{return 0,nil};return 10+len(m),nil}
+func(counter) EstimatePerMessage(_ context.Context,m []c.Message)([]int,error){w:=make([]int,len(m));for i:=range w{w[i]=1};if len(w)>0{w[0]+=10};return w,nil}
+func main(){s:=c.TextMessage(c.RoleSystem,"system");s.ID="s";h:=c.TextMessage(c.RoleUser,"history");h.ID="h";est:=counter{};before,_:=est.Estimate(context.Background(),[]c.Message{s,h});d:=c.Descriptor{ID:"host/estimate",Revision:"1"}; reporter,reporterErr:=c.NewEstimateReporter(est,c.EstimateProfile{Model:d,Estimator:d,Method:d,Encoding:d,Capabilities:map[c.EstimateKind]c.EstimateQuality{c.EstimateText:c.EstimateCounted}},c.DefaultJSONSerializer()); if reporterErr!=nil{panic(reporterErr)}; p:=c.NewBudgetPipeline(c.BudgetConfig{Budget:c.EffectiveInputBudget(12)},reporter);engine:=c.NewEngine(c.WithBudgetPipeline(c.SegmentHistory,p));r,e:=engine.CompileSnapshot(context.Background(),c.CompileRequest{System:[]c.Message{s},History:[]c.Message{h}});fmt.Printf("full_input_cost=%d limit=12 err=%v kept_history=%d\n",before,e,len(r.Payload.History))}

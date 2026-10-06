@@ -9,22 +9,19 @@ const (
 	PolicyDeduplicateByLayer MergePolicy = "deduplicate_by_layer"
 )
 
-func applyMergePolicy(existing, incoming []Message, policy MergePolicy) []Message {
+func applyMergePolicy(existing, incoming []Message, policy MergePolicy) ([]Message, error) {
 	switch policy {
 	case PolicyAppend, "":
 		combined := make([]Message, len(existing)+len(incoming))
 		copy(combined, existing)
 		copy(combined[len(existing):], incoming)
-		return combined
+		return combined, nil
 	case PolicyReplaceByOrigin:
-		return mergeReplaceByOrigin(existing, incoming)
+		return mergeReplaceByOrigin(existing, incoming), nil
 	case PolicyDeduplicateByLayer:
-		return mergeDeduplicateByLayer(existing, incoming)
+		return mergeDeduplicateByLayer(existing, incoming), nil
 	default:
-		combined := make([]Message, len(existing)+len(incoming))
-		copy(combined, existing)
-		copy(combined[len(existing):], incoming)
-		return combined
+		return nil, ErrInvalidCompileConfiguration
 	}
 }
 
@@ -54,29 +51,16 @@ func mergeReplaceByOrigin(existing, incoming []Message) []Message {
 }
 
 func mergeDeduplicateByLayer(existing, incoming []Message) []Message {
-	incomingLayers := layerIDSet(incoming)
-	kept := make([]Message, 0, len(existing))
-	for _, m := range existing {
-		if m.Origin != nil && m.Origin.LayerID != "" && incomingLayers[m.Origin.LayerID] {
+	incomingLayers := layerKeySet(incoming)
+	combined := make([]Message, 0, len(existing)+len(incoming))
+	for _, message := range existing {
+		if message.Origin != nil && message.Origin.LayerID != "" &&
+			incomingLayers[layerKey{Template: message.Origin.TemplateID, Layer: message.Origin.LayerID}] {
 			continue
 		}
-		kept = append(kept, m)
+		combined = append(combined, message)
 	}
-	seenLayers := layerIDSet(kept)
-	filteredIncoming := make([]Message, 0, len(incoming))
-	for _, m := range incoming {
-		if m.Origin != nil && m.Origin.LayerID != "" {
-			if seenLayers[m.Origin.LayerID] {
-				continue
-			}
-			seenLayers[m.Origin.LayerID] = true
-		}
-		filteredIncoming = append(filteredIncoming, m)
-	}
-	combined := make([]Message, len(kept)+len(filteredIncoming))
-	copy(combined, kept)
-	copy(combined[len(kept):], filteredIncoming)
-	return combined
+	return append(combined, incoming...)
 }
 
 func incomingTemplateIDs(incoming []Message) map[string]bool {
@@ -89,12 +73,14 @@ func incomingTemplateIDs(incoming []Message) map[string]bool {
 	return out
 }
 
-func layerIDSet(msgs []Message) map[string]bool {
-	out := make(map[string]bool)
-	for _, m := range msgs {
-		if m.Origin != nil && m.Origin.LayerID != "" {
-			out[m.Origin.LayerID] = true
+type layerKey struct{ Template, Layer string }
+
+func layerKeySet(messages []Message) map[layerKey]bool {
+	keys := make(map[layerKey]bool)
+	for _, message := range messages {
+		if message.Origin != nil && message.Origin.LayerID != "" {
+			keys[layerKey{Template: message.Origin.TemplateID, Layer: message.Origin.LayerID}] = true
 		}
 	}
-	return out
+	return keys
 }

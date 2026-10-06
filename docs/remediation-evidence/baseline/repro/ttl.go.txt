@@ -1,0 +1,25 @@
+package redis
+import (
+ "context"
+ "testing"
+ "time"
+ goredis "github.com/redis/go-redis/v9"
+ "github.com/skosovsky/contexty"
+)
+type ttlReviewClient struct { goredis.UniversalClient; args []interface{} }
+func (c *ttlReviewClient) Eval(ctx context.Context, script string, keys []string, args ...interface{}) *goredis.Cmd {
+ cmd:=goredis.NewCmd(ctx)
+ if script==luaLoad {cmd.SetVal([]interface{}{ "0", "" })} else {c.args=args; cmd.SetVal(int64(1))}
+ return cmd
+}
+func TestReviewSubMillisecondTTL(t *testing.T) {
+ // Arrange: documented positive TTL; no network client required.
+ c:=&ttlReviewClient{}
+ s:=New(c, WithTTL(500*time.Microsecond))
+ // Act.
+ err:=s.CommitState(context.Background(), "ttl", 0, contexty.ConversationDelta{})
+ // Assert: proof of defect, luaMutate only PEXPIREs for ttl > 0.
+ if err!=nil {t.Fatal(err)}
+ if c.args[3] != int64(0) {t.Fatalf("unexpected TTL %v",c.args[3])}
+ t.Logf("positive TTL %s reached Lua as %v ms; PEXPIRE branch is skipped",s.ttl,c.args[3])
+}

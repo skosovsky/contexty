@@ -58,11 +58,14 @@ func (CharTokenEstimator) EstimatePerMessage(ctx context.Context, msgs []Message
 }
 
 func rejectUnknownMedia(message Message) error {
+	if err := validateContentParts(message.Parts); err != nil {
+		return err
+	}
 	if err := rejectOpaqueEstimateCost(message); err != nil {
 		return err
 	}
 	for _, part := range message.Parts {
-		if part != nil && part.partKind() == PartKindMedia {
+		if !nilInterfaceValue(part) && part.partKind() == PartKindMedia {
 			return ErrUnknownEstimateCost
 		}
 	}
@@ -81,7 +84,7 @@ func rejectOpaqueEstimateCost(message Message) error {
 func messageRuneWeight(m Message) int {
 	n := 0
 	for _, p := range m.Parts {
-		switch v := p.(type) {
+		switch v := canonicalPartValue(p).(type) {
 		case TextPart:
 			n += len([]rune(v.Text))
 		case ImagePart:

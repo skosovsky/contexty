@@ -63,7 +63,7 @@ func (c *CharFallbackEstimator) EstimatePerMessage(ctx context.Context, msgs []M
 		var runes int
 		var toolTokens int
 		for _, p := range m.Parts {
-			switch v := p.(type) {
+			switch v := canonicalPartValue(p).(type) {
 			case TextPart:
 				runes += utf8.RuneCountInString(v.Text)
 			case ImagePart:

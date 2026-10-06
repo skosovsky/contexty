@@ -298,7 +298,7 @@ func (r ResourceResolver) project(
 		Message:       message.Clone(),
 		Estimate:      report,
 		Lineage:       graph,
-	}, ResourceCodec{Messages: r.Reporter.codec, Labels: r.Labels.Registry})
+	}, ResourceCodec{Messages: r.Reporter.codec, Labels: r.Labels.Registry, Codecs: cloneCodecBindings(r.Codecs)})
 }
 
 func resourceLineage(

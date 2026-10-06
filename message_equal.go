@@ -59,7 +59,7 @@ func extensionsEqual(a, b []Extension) bool {
 }
 
 func contentPartsEqual(a, b ContentPart) bool {
-	return reflect.DeepEqual(a, b)
+	return reflect.DeepEqual(canonicalPartValue(a), canonicalPartValue(b))
 }
 
 func extensionEqual(a, b Extension) bool {
@@ -84,10 +84,10 @@ func extensionEqual(a, b Extension) bool {
 }
 
 func provenanceEqual(a, b Provenance) bool {
-	if a == nil && b == nil {
+	if nilInterfaceValue(a) && nilInterfaceValue(b) {
 		return true
 	}
-	if a == nil || b == nil {
+	if nilInterfaceValue(a) || nilInterfaceValue(b) {
 		return false
 	}
 	if a.ProvenanceType() != b.ProvenanceType() {

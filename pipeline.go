@@ -95,7 +95,6 @@ func (p *BudgetPipeline) summarize(
 	if err != nil {
 		return nil, 0, fmt.Errorf("contexty: budget summarize: %w", err)
 	}
-	summary = summary.Clone()
 	summary, err = ensureMessageIDFromContext(ctx, budgetIdentitySegmentFrom(ctx), 0, summary)
 	if err != nil {
 		return nil, 0, fmt.Errorf("contexty: budget summarize identity: %w", err)

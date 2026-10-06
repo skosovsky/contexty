@@ -460,7 +460,7 @@ func (r *EstimateReporter) partCoverage(kinds []EstimateKind) ([]EstimateCoverag
 }
 
 func estimatePartKinds(part ContentPart) ([]EstimateKind, error) {
-	switch value := part.(type) {
+	switch value := canonicalPartValue(part).(type) {
 	case TextPart:
 		return []EstimateKind{EstimateText}, nil
 	case ImagePart:

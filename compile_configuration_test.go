@@ -130,7 +130,7 @@ func TestDeferred_ConfigurationFailures(t *testing.T) {
 			// Act.
 			compiled, err := engine.Compile(context.Background(), contexty.CompileRequest{CompilationID: scenario})
 			// Assert: fail before callbacks, state load or partial output.
-			require.ErrorIs(t, err, contexty.ErrInvalidRecordingComponent)
+			require.ErrorIs(t, err, contexty.ErrInvalidCompileConfiguration)
 			require.Zero(t, compiled)
 			require.Zero(t, calls)
 			require.Zero(t, reads)

@@ -2,6 +2,7 @@ package contexty
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -17,6 +18,15 @@ type ViewConfiguration struct {
 // Prefer CompileRequest.Targets for projections that must share the compile pipeline.
 func WithNamedView(name string, cfg ViewConfiguration) EngineOption {
 	return func(e *Engine) {
+		_, reserved := builtinViewFormatter(name)
+		_, duplicate := e.views[name]
+		if name == "" || reserved || duplicate || (cfg.SourceSegment != "" && !isKnownSegment(cfg.SourceSegment)) {
+			e.configurationErr = errors.Join(
+				e.configurationErr,
+				fmt.Errorf("%w: invalid or duplicate view %q", ErrInvalidCompileConfiguration, name),
+			)
+			return
+		}
 		if e.views == nil {
 			e.views = make(map[string]ViewConfiguration)
 		}
@@ -44,6 +54,9 @@ func builtinViewFormatter(name string) (ViewFormatter, bool) {
 func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("contexty: render view: %w", err)
+	}
+	if e.configurationErr != nil {
+		return "", e.configurationErr
 	}
 	if f, ok := builtinViewFormatter(name); ok {
 		projected, err := e.applyRoleProjection(ctx, snap)

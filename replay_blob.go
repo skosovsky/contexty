@@ -108,7 +108,7 @@ func replayBlobs(result ReplayResult) []BlobDescriptor {
 func messageBlobs(message Message) []BlobDescriptor {
 	var blobs []BlobDescriptor
 	for _, part := range message.Parts {
-		switch call := part.(type) {
+		switch call := canonicalPartValue(part).(type) {
 		case ToolCallPart:
 			if call.ArgumentsBlob != nil {
 				blobs = append(blobs, call.ArgumentsBlob.Clone())

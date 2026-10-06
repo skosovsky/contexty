@@ -1,0 +1,7 @@
+package main
+import("context";"fmt"; c "github.com/skosovsky/contexty")
+type mutating struct{}
+func(mutating) Estimate(_ context.Context,m []c.Message)(int,error){return len(m)*5,nil}
+func(mutating) EstimatePerMessage(_ context.Context,m []c.Message)([]int,error){w:=make([]int,len(m)); for i:=range m {w[i]=5; m[i].Parts[0]=c.TextPart{Text:"mutated"}}; return w,nil}
+func main(){ctx:=context.Background(); msgs:=[]c.Message{c.TextMessage(c.RoleUser,"original-a"), c.TextMessage(c.RoleUser,"original-b")}; p:=c.NewBudgetPipeline(c.BudgetConfig{Budget:c.EffectiveInputBudget(5)},mutating{}); out,err:=p.Apply(ctx,msgs);fmt.Printf("mutation err=%v caller=%q output=%q\n",err,msgs[1].TextContent(),out.Messages[0].TextContent()); max:=int(^uint(0)>>1); f:=&c.FixedEstimator{TokensPerMessage:max,TokensPerContentPart:2}; many:=[]c.Message{c.TextMessage(c.RoleUser,"a"),c.TextMessage(c.RoleUser,"b")}; n,e:=f.Estimate(ctx,many);fmt.Printf("fixed total=%d err=%v\n",n,e); fp:=c.NewBudgetPipeline(c.BudgetConfig{Budget:c.EffectiveInputBudget(2)},f);r,e:=fp.Apply(ctx,many);fmt.Printf("fixed admitted=%d tokens=%d err=%v\n",len(r.Messages),r.Decision.AfterTokens,e); ch:=&c.CharFallbackEstimator{CharsPerToken:max};n,e=ch.Estimate(ctx,[]c.Message{c.TextMessage(c.RoleUser,"ab")});fmt.Printf("char 2-runes/max=%d err=%v\n",n,e)
+}

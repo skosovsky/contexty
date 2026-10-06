@@ -116,11 +116,11 @@ func (r CompileRequest) Freeze() CompileRequest {
 	return CompileRequest{ //nolint:exhaustruct_v5 // Options omitted from immutable source snapshot
 		DeferredResources:      cloneResourceSelections(r.DeferredResources),
 		TurnID:                 r.TurnID,
-		System:                 cloneMessageSlice(r.System),
-		History:                cloneMessageSlice(r.History),
-		Memory:                 cloneMessageSlice(r.Memory),
-		Tools:                  cloneMessageSlice(r.Tools),
-		Pending:                cloneMessageSlice(r.Pending),
+		System:                 cloneCompileInputMessages(r.System),
+		History:                cloneCompileInputMessages(r.History),
+		Memory:                 cloneCompileInputMessages(r.Memory),
+		Tools:                  cloneCompileInputMessages(r.Tools),
+		Pending:                cloneCompileInputMessages(r.Pending),
 		CurrentTurn:            cloneCurrentTurnPtr(r.CurrentTurn),
 		Artifacts:              mergeArtifacts(r.Artifacts),
 		IdentityPolicy:         r.IdentityPolicy,
@@ -161,26 +161,13 @@ func (r CompileRequest) Validate() error {
 func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentityWriteback, error) {
 	var writebacks []MessageIdentityWriteback
 	var err error
-	next := CompileRequest{
-		DeferredResources:      cloneResourceSelections(r.DeferredResources),
-		TurnID:                 r.TurnID,
-		System:                 nil,
-		History:                nil,
-		Memory:                 nil,
-		Tools:                  nil,
-		Pending:                nil,
-		CurrentTurn:            nil,
-		Artifacts:              mergeArtifacts(r.Artifacts),
-		Options:                r.Options,
-		IdentityPolicy:         r.IdentityPolicy,
-		RequireDurableIdentity: r.RequireDurableIdentity,
-		Targets:                cloneCompileTargets(r.Targets),
-		CompilationID:          r.CompilationID,
-		Lineage:                r.Lineage.Clone(),
-		Origins:                append([]ContentRef(nil), r.Origins...),
-		SourceRevision:         r.SourceRevision,
-		PreviousRecord:         cloneContentRef(r.PreviousRecord),
-	}
+	next := r
+	next.DeferredResources = cloneResourceSelections(r.DeferredResources)
+	next.Artifacts = mergeArtifacts(r.Artifacts)
+	next.Targets = cloneCompileTargets(r.Targets)
+	next.Lineage = r.Lineage.Clone()
+	next.Origins = append([]ContentRef(nil), r.Origins...)
+	next.PreviousRecord = cloneContentRef(r.PreviousRecord)
 	for i := range next.Targets {
 		next.Targets[i].Name = strings.TrimSpace(next.Targets[i].Name)
 	}
@@ -191,6 +178,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		r.TurnID,
 		r.IdentityPolicy,
 		r.RequireDurableIdentity,
+		false,
 		writebacks,
 	)
 	if err != nil {
@@ -203,6 +191,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		r.TurnID,
 		r.IdentityPolicy,
 		r.RequireDurableIdentity,
+		false,
 		writebacks,
 	)
 	if err != nil {
@@ -215,6 +204,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		r.TurnID,
 		r.IdentityPolicy,
 		r.RequireDurableIdentity,
+		false,
 		writebacks,
 	)
 	if err != nil {
@@ -227,6 +217,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		r.TurnID,
 		r.IdentityPolicy,
 		r.RequireDurableIdentity,
+		false,
 		writebacks,
 	)
 	if err != nil {
@@ -239,6 +230,7 @@ func normalizeCompileRequest(r CompileRequest) (CompileRequest, []MessageIdentit
 		r.TurnID,
 		r.IdentityPolicy,
 		r.RequireDurableIdentity,
+		true,
 		writebacks,
 	)
 	if err != nil {
@@ -265,9 +257,13 @@ func normalizeMessagesForCompile(
 	turnID string,
 	policy MessageIdentityPolicy,
 	requireDurable bool,
+	pending bool,
 	writebacks []MessageIdentityWriteback,
 ) ([]Message, []MessageIdentityWriteback, error) {
 	if len(msgs) == 0 {
+		if msgs != nil {
+			return []Message{}, writebacks, nil
+		}
 		return nil, writebacks, nil
 	}
 	out := make([]Message, len(msgs))
@@ -275,6 +271,7 @@ func normalizeMessagesForCompile(
 		normalized, wb, err := normalizeMessageForCompile(
 			msg,
 			MessageIdentityContext{
+				Pending: pending, Ordinal: i,
 				Segment:          seg,
 				Index:            indexOffset + i,
 				TurnID:           turnID,
@@ -302,13 +299,20 @@ func normalizeMessageForCompile(
 	policy MessageIdentityPolicy,
 	requireDurable bool,
 ) (Message, *MessageIdentityWriteback, error) {
+	owned, err := ownCompileMessage(msg)
+	if err != nil {
+		return Message{}, nil, err
+	}
 	if msg.ID != "" {
-		return msg.Clone(), nil, nil
+		return owned, nil, nil
+	}
+	if policy != nil && nilInterfaceValue(policy) {
+		return Message{}, nil, ErrMissingIdentityPolicy
 	}
 	if policy == nil && requireDurable {
 		return Message{}, nil, ErrMissingIdentityPolicy
 	}
-	normalized := msg.Clone()
+	normalized := owned
 	if policy == nil {
 		normalized = EnsureMessageID(normalized)
 	} else {
@@ -339,12 +343,19 @@ func normalizeCurrentTurnForCompile(
 	requireDurable bool,
 	writebacks []MessageIdentityWriteback,
 ) (*CurrentTurn, []MessageIdentityWriteback, error) {
-	if turn == nil || !turn.hasRaw() {
+	if turn == nil {
+		return nil, writebacks, nil
+	}
+	if err := turn.validate(); err != nil {
+		return nil, nil, err
+	}
+	if !turn.hasRaw() {
 		return nil, writebacks, nil
 	}
 	raw, wb, err := normalizeMessageForCompile(
 		turn.Raw,
 		MessageIdentityContext{
+			Pending: false, Ordinal: 0,
 			Segment:          SegmentHistory,
 			Index:            index,
 			TurnID:           turnID,
@@ -367,7 +378,16 @@ func normalizeCurrentTurnForCompile(
 		Persistence: turn.Persistence,
 	}
 	if turn.hasPromptSafe() {
+		if err := validateContentParts(turn.PromptSafe.Parts); err != nil {
+			return nil, nil, err
+		}
+		if turn.PromptSafe.Provenance != nil && nilInterfaceValue(turn.PromptSafe.Provenance) {
+			return nil, nil, ErrInvalidProvenance
+		}
 		prompt := turn.PromptSafe.Clone()
+		if err := validateProvenanceClone(turn.PromptSafe.Provenance, prompt.Provenance); err != nil {
+			return nil, nil, err
+		}
 		if prompt.ID != "" && raw.ID != "" && prompt.ID != raw.ID {
 			return nil, nil, ErrCurrentTurnIDMismatch
 		}
@@ -482,4 +502,26 @@ func (r CompileRequest) WritebackSnapshot() ConversationSnapshot {
 		}
 	}
 	return snap.WithArtifacts(persistentArtifacts(r.Artifacts))
+}
+
+func cloneCompileInputMessages(messages []Message) []Message {
+	if messages != nil && len(messages) == 0 {
+		return []Message{}
+	}
+	return cloneMessageSlice(messages)
+}
+
+// ownCompileMessage validates host metadata before cloning can replace it.
+func ownCompileMessage(msg Message) (Message, error) {
+	if err := validateContentParts(msg.Parts); err != nil {
+		return Message{}, err
+	}
+	if msg.Provenance != nil && nilInterfaceValue(msg.Provenance) {
+		return Message{}, ErrInvalidProvenance
+	}
+	owned := msg.Clone()
+	if err := validateProvenanceClone(msg.Provenance, owned.Provenance); err != nil {
+		return Message{}, err
+	}
+	return owned, nil
 }

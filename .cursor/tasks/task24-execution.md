@@ -60,3 +60,29 @@ P2 fixed and independently repro-tested. All14 fixtures PASS incl reviewSHA F01/
 independent12 current fixtures PASS; bash-n/py_compile/diff-check PASS.
 Evidence docs/remediation-evidence/stage2/. Commit fix: release isolation;
 SHA recorded at start of stage 3.
+
+## Stage 3 — identity/config/validation
+
+Stage 2 commit: ac578ec (fix: release isolation).
+Normative baseline docs/remediation-contracts.md precedes all implementation.
+Scope F03/F04/F05/F11/F12 + D04–08/16/39; budget implementation stays in stage 4.
+Checklist (12 equally weighted criteria):
+- [x] S3.1: F03 event IDs use explicit TurnID/kind/turn ordinal, retries independent of trimmed history, explicit IDs preserved; insufficient historical/derived identity errors rather than positional fallback.
+- [x] S3.2: D04 nil inheritance versus explicit empty clear preserved through store merge/Freeze/Normalize; Tools from request only.
+- [x] S3.3: D05 role projection covers Pending/CurrentTurn with trace/transformation evidence; hooks/segment formatters scope remains explicit, raw/persistence unchanged.
+- [x] S3.4: D06 whole incoming group replaces (TemplateID,LayerID), keeps ordering/all messages, missing layers append.
+- [x] S3.5: D07 zero/nil current turn absent, prompt-only/unknown-policy errors before source loss; no hidden fallback.
+- [x] S3.6: D08 incomplete stateful Compile errors before store/callback; CompileSnapshot stateless.
+- [x] S3.7: F04 both entrypoints/on-off recording/resource and message blocks validate known enum/defaults before side effects; unknown-policy fallback removed.
+- [x] S3.8: F05 pointer/value canonical ownership and validation, typed nil error/no panic, helpers consistent, Engine and ResourceResolver tested.
+- [x] S3.9: F11 reserved/duplicate named view registrations fail before render callbacks; unique registered view works, applicability documented.
+- [x] S3.10: F12 registration rejects invalid decoder/type; data decode errors on nil/typed-nil/discriminator mismatch; callback errors and built-in/common codec roundtrip preserved.
+- [x] S3.11: D16 current ResourceCodec custom bindings independent from saved configuration, snapshot-owned, mismatch rejected before decode; required consumers migrated.
+- [x] S3.12: preserved baseline behavioral probes prove F03/F04/F05/F11/F12 on review SHA; equivalent AAA regressions and root race/pinned lint pass; docs/migration/examples synchronized.
+
+Stage 3 acceptance: completeness 12/12=100%; correctness PASS. Two confirmed
+provenance clone-boundary P2 findings corrected and independently reproduced.
+Final root race41.947s PASS; affected final race1.934s PASS; pinned lint all3
+modules0 issues; baseline behavioral F03/F04/F05/F11/F12 PASS.
+Reports and logs: docs/remediation-evidence/stage3/.
+Commit fix: context validation; SHA recorded at start of stage4.

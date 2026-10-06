@@ -1,0 +1,3 @@
+package main
+import("context";"fmt";c "github.com/skosovsky/contexty")
+func main(){called:=false; e:=c.NewEngine(c.WithNamedView(string(c.ViewFlatClassifier),c.ViewConfiguration{SourceSegment:c.SegmentHistory,Formatter:func(_ context.Context,m []c.Message)([]c.Message,error){called=true;return []c.Message{{Role:c.RoleUser,Parts:[]c.ContentPart{c.TextPart{Text:"CUSTOM"}}}},nil}})); s:=c.EmptySnapshot().WithSegment(c.SegmentHistory,[]c.Message{{Role:c.RoleUser,Parts:[]c.ContentPart{c.TextPart{Text:"ORIGINAL"}}}});out,err:=e.RenderView(context.Background(),s,string(c.ViewFlatClassifier));fmt.Printf("custom_called=%v out=%q err=%v\n",called,out,err)}

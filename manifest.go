@@ -60,6 +60,9 @@ func WithCompileRecording(profile RecordProfile) EngineOption {
 }
 
 func (e *Engine) validateCompileConfiguration(request CompileRequest) error {
+	if err := e.validateBaseCompileConfiguration(request); err != nil {
+		return err
+	}
 	if err := e.validateOutputPolicies(request); err != nil {
 		return err
 	}
@@ -79,9 +82,6 @@ func (e *Engine) validateCompileConfiguration(request CompileRequest) error {
 		return err
 	}
 	if _, err := e.trace.configuration(request.RequireDurableIdentity); err != nil {
-		return err
-	}
-	if _, err := e.deferredConfiguration(); err != nil {
 		return err
 	}
 	if e.capture != nil {
@@ -1008,4 +1008,25 @@ func manifestHasOutput(outputs []ManifestOutput, kind ManifestOutputKind, name s
 		outputs,
 		func(output ManifestOutput) bool { return output.Kind == kind && output.Name == name },
 	)
+}
+
+func (e *Engine) validateBaseCompileConfiguration(request CompileRequest) error {
+	if e.configurationErr != nil {
+		return e.configurationErr
+	}
+	if request.CurrentTurn != nil {
+		if err := request.CurrentTurn.validate(); err != nil {
+			return err
+		}
+	}
+	if e.roleProjection != nil && nilInterfaceValue(e.roleProjection) {
+		return ErrInvalidCompileConfiguration
+	}
+	if _, err := e.deferredConfiguration(); err != nil {
+		return err
+	}
+	if request.IdentityPolicy != nil && nilInterfaceValue(request.IdentityPolicy) {
+		return ErrMissingIdentityPolicy
+	}
+	return nil
 }

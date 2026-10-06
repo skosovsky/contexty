@@ -112,7 +112,7 @@ func validateAppendArtifacts(existing, incoming ContextArtifact) error {
 			return err
 		}
 		for _, part := range parts {
-			if _, text := part.(TextPart); !text {
+			if _, text := canonicalPartValue(part).(TextPart); !text {
 				return ErrResourceUnsupported
 			}
 		}

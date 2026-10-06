@@ -48,7 +48,7 @@ func (t CurrentTurn) clone() CurrentTurn {
 }
 
 func cloneCurrentTurnPtr(in *CurrentTurn) *CurrentTurn {
-	if in == nil || !in.hasRaw() {
+	if in == nil {
 		return nil
 	}
 	cp := in.clone()
@@ -90,11 +90,14 @@ func (t CurrentTurn) persistedMessage() (Message, bool) {
 }
 
 func (t CurrentTurn) validate() error {
-	if !t.hasRaw() {
-		return nil
+	if !t.hasRaw() && t.hasPromptSafe() {
+		return ErrInvalidCurrentTurn
 	}
 	switch t.Persistence {
 	case "", CurrentTurnPersistRaw, CurrentTurnPersistPromptSafe, CurrentTurnPersistNone:
+		if !t.hasRaw() && t.Persistence != "" {
+			return ErrInvalidCurrentTurn
+		}
 		return nil
 	default:
 		return ErrInvalidCurrentTurnPersistencePolicy

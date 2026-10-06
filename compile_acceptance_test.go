@@ -600,7 +600,7 @@ func TestAcceptance_Merge_PolicyDeduplicateByLayer(t *testing.T) {
 					ID:     "mem-new",
 					Role:   contexty.RoleSystem,
 					Parts:  []contexty.ContentPart{contexty.TextPart{Text: "fresh layer"}},
-					Origin: &contexty.MessageOrigin{TemplateID: "t2", LayerID: "facts"},
+					Origin: &contexty.MessageOrigin{TemplateID: "t1", LayerID: "facts"},
 				}}}, nil
 			},
 		}),
@@ -705,7 +705,7 @@ func TestAcceptance_MergePolicyDeduplicateByLayer_PersistenceProjection(t *testi
 					ID:     "mem-new",
 					Role:   contexty.RoleSystem,
 					Parts:  []contexty.ContentPart{contexty.TextPart{Text: "fresh layer"}},
-					Origin: &contexty.MessageOrigin{TemplateID: "t2", LayerID: "facts"},
+					Origin: &contexty.MessageOrigin{TemplateID: "t1", LayerID: "facts"},
 				}}}, nil
 			},
 		}),
@@ -1203,6 +1203,7 @@ func TestAcceptance_CurrentTurn_CanPersistPromptSafeText(t *testing.T) {
 
 	// Act.
 	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+		TurnID:                 "turn-1",
 		CurrentTurn:            &turn,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1227,6 +1228,7 @@ func TestAcceptance_CurrentTurn_CanSkipPersistenceAndRejectInvalidPolicy(t *test
 
 	// Act.
 	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+		TurnID:                 "turn-1",
 		CurrentTurn:            &turn,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1239,6 +1241,7 @@ func TestAcceptance_CurrentTurn_CanSkipPersistenceAndRejectInvalidPolicy(t *test
 	invalid := contexty.NewCurrentTurn(contexty.TextMessage(contexty.RoleUser, "raw text")).
 		WithPersistence(contexty.CurrentTurnPersistencePolicy("persist_promt_safe"))
 	_, err = fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
+		TurnID:                 "turn-1",
 		CurrentTurn:            &invalid,
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1260,7 +1263,9 @@ func TestAcceptance_DurableIdentity_PolicyAndWritebackIntent(t *testing.T) {
 	// Assert.
 	require.ErrorIs(t, err, contexty.ErrMissingIdentityPolicy)
 
-	policy := contexty.NewStableMessageIdentityPolicy("stable")
+	policy := contexty.MessageIdentityFunc(func(contexty.MessageIdentityContext, contexty.Message) (string, error) {
+		return "host:archived-event", nil
+	})
 	first, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
 		History:                []contexty.Message{msg},
 		IdentityPolicy:         policy,
@@ -1295,9 +1300,11 @@ func TestAcceptance_Public_NormalizeFailsClosedAndReturnsWritebacks(t *testing.T
 	require.ErrorIs(t, err, contexty.ErrMissingIdentityPolicy)
 
 	normalized, writebacks, err := (contexty.CompileRequest{
-		TurnID:                 "turn-1",
-		History:                []contexty.Message{msg},
-		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
+		TurnID:  "turn-1",
+		History: []contexty.Message{msg},
+		IdentityPolicy: contexty.MessageIdentityFunc(func(contexty.MessageIdentityContext, contexty.Message) (string, error) {
+			return "host:archived-event", nil
+		}),
 		RequireDurableIdentity: true,
 	}).Normalize()
 	require.NoError(t, err)
@@ -1308,7 +1315,7 @@ func TestAcceptance_Public_NormalizeFailsClosedAndReturnsWritebacks(t *testing.T
 	assert.Equal(t, contexty.SegmentHistory, writebacks[0].Segment)
 }
 
-func TestAcceptance_DurableIdentity_UsesHistoryOffsetForPending(t *testing.T) {
+func TestAcceptance_DurableIdentity_PendingWritebackKeepsHistoryOffset(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	ctx := context.Background()
@@ -1316,7 +1323,8 @@ func TestAcceptance_DurableIdentity_UsesHistoryOffsetForPending(t *testing.T) {
 
 	// Act.
 	result, err := fixtureEngine().CompileSnapshot(ctx, contexty.CompileRequest{
-		History:                []contexty.Message{msg},
+		TurnID:                 "turn-1",
+		History:                []contexty.Message{{ID: "host:old-event", Role: contexty.RoleUser, Parts: msg.Parts}},
 		Pending:                []contexty.Message{msg},
 		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
 		RequireDurableIdentity: true,
@@ -1325,9 +1333,8 @@ func TestAcceptance_DurableIdentity_UsesHistoryOffsetForPending(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result.Payload.History, 2)
 	assert.NotEqual(t, result.Payload.History[0].ID, result.Payload.History[1].ID)
-	require.Len(t, result.Writeback.Messages, 2)
-	assert.Equal(t, 0, result.Writeback.Messages[0].Index)
-	assert.Equal(t, 1, result.Writeback.Messages[1].Index)
+	require.Len(t, result.Writeback.Messages, 1)
+	assert.Equal(t, 1, result.Writeback.Messages[0].Index)
 }
 
 func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
@@ -1363,7 +1370,9 @@ func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
 			Role:  contexty.RoleUser,
 			Parts: []contexty.ContentPart{contexty.TextPart{Text: "history"}},
 		}},
-		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
+		IdentityPolicy: contexty.MessageIdentityFunc(
+			func(contexty.MessageIdentityContext, contexty.Message) (string, error) { return "host:hook:h1:v1", nil },
+		),
 		RequireDurableIdentity: true,
 	})
 	require.NoError(t, err)
@@ -1373,7 +1382,9 @@ func TestAcceptance_Hook_IntroducedIDsRespectDurableIdentity(t *testing.T) {
 			Role:  contexty.RoleUser,
 			Parts: []contexty.ContentPart{contexty.TextPart{Text: "history"}},
 		}},
-		IdentityPolicy:         contexty.NewStableMessageIdentityPolicy("stable"),
+		IdentityPolicy: contexty.MessageIdentityFunc(
+			func(contexty.MessageIdentityContext, contexty.Message) (string, error) { return "host:hook:h1:v1", nil },
+		),
 		RequireDurableIdentity: true,
 	})
 	require.NoError(t, err)
@@ -1706,7 +1717,7 @@ func TestAcceptance_Target_TraceabilityAndIdentityPolicy(t *testing.T) {
 				Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Budget:   nil,
 				Formatter: func(_ context.Context, _ []contexty.Message) ([]contexty.Message, error) {
-					return []contexty.Message{contexty.TextMessage(contexty.RoleUser, "derived")}, nil
+					return []contexty.Message{fixtureRollingText("derived:drop:keep:v1", "derived")}, nil
 				},
 			},
 		},
@@ -1765,8 +1776,14 @@ func TestAcceptance_Target_BudgetSummaryTraceability(t *testing.T) {
 				Segments: []contexty.SegmentName{contexty.SegmentHistory},
 				Budget: contexty.NewBudgetPipeline(
 					contexty.BudgetConfig{
-						Budget:     contexty.EffectiveInputBudget(1),
-						Summarizer: fixtureSummarizer{summary: contexty.TextMessage(contexty.RoleAssistant, "summary")},
+						Budget: contexty.EffectiveInputBudget(1),
+						Summarizer: fixtureSummarizer{
+							summary: contexty.Message{
+								ID:    "summary:h1:h2:v1",
+								Role:  contexty.RoleAssistant,
+								Parts: []contexty.ContentPart{contexty.TextPart{Text: "summary"}},
+							},
+						},
 					},
 					&contexty.FixedEstimator{TokensPerMessage: 1},
 				),
