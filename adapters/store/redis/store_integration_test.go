@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +34,24 @@ func TestStoreIntegration(t *testing.T) {
 	client := goredis.NewClient(&goredis.Options{Addr: endpoint})
 	t.Cleanup(func() {
 		require.NoError(t, client.Close())
+	})
+	t.Run("positive submillisecond live PTTL", func(t *testing.T) {
+		for _, scenario := range []struct {
+			ttl  time.Duration
+			want int64
+		}{{0, -1}, {time.Nanosecond, 1}, {999999 * time.Nanosecond, 1}, {time.Millisecond, 1}, {1500 * time.Microsecond, 2}} {
+			// Arrange: only the mutation's return expression adds an atomic PTTL observation.
+			probe := &livePTTLClient{UniversalClient: client}
+			store := New(probe, WithTTL(scenario.ttl))
+			id := "live-pttl-" + scenario.ttl.String()
+			// Act: execute the actual Lua guards, MSET and PEXPIRE with real adapter arguments.
+			require.NoError(t, store.CommitState(ctx, id, 0, contexty.ConversationDelta{}))
+			// Assert: no network/scheduler delay can erase the observed positive expiry.
+			require.Equal(t, scenario.want, probe.milliseconds)
+			ttl, ttlErr := client.PTTL(ctx, store.verKey(id)).Result()
+			require.NoError(t, ttlErr)
+			require.Equal(t, -time.Nanosecond, ttl)
+		}
 	})
 	t.Run("exhausted revision", func(t *testing.T) {
 		// Arrange: a live namespace has consumed its final int64 token.
@@ -443,4 +462,21 @@ func assertExpandedSemanticRoundTrip(t *testing.T, ctx context.Context, store *S
 	tools := snap.Segment(contexty.SegmentTools)
 	require.Len(t, tools, 1)
 	require.Len(t, tools[0].ToolCallParts(), 1)
+}
+
+// livePTTLClient changes only the return expression; production mutation logic stays intact.
+type livePTTLClient struct {
+	goredis.UniversalClient
+
+	milliseconds int64
+}
+
+func (c *livePTTLClient) Eval(ctx context.Context, script string, keys []string, args ...any) *goredis.Cmd {
+	if script != luaMutate {
+		return c.UniversalClient.Eval(ctx, script, keys, args...)
+	}
+	observedScript := strings.TrimSuffix(script, "return 1\n") + "return redis.call('PTTL', KEYS[2])\n"
+	command := c.UniversalClient.Eval(ctx, observedScript, keys, args...)
+	c.milliseconds, _ = command.Int64() // Mutation errors are returned by the original command.
+	return command
 }

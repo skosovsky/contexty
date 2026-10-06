@@ -229,7 +229,7 @@ func (s *Store) mutate(
 		s.expiryMode(),
 		expectedVersion,
 		string(encoded),
-		s.ttl.Milliseconds(),
+		ttlMilliseconds(s.ttl),
 	); err != nil {
 		return err
 	}
@@ -278,3 +278,12 @@ func stateScriptError(op string, err error) error {
 }
 
 var _ contexty.ConversationStateStore = (*Store)(nil)
+
+// Duration's int64 nanosecond range leaves ample room for millisecond ceiling.
+func ttlMilliseconds(ttl time.Duration) int64 {
+	milliseconds := int64(ttl / time.Millisecond)
+	if ttl%time.Millisecond > 0 {
+		milliseconds++
+	}
+	return milliseconds
+}

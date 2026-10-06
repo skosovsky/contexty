@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +53,62 @@ func TestStoreIntegration(t *testing.T) {
 
 	createTable(ctx, t, pool, "contexty_conversations")
 	createTable(ctx, t, pool, "custom_contexty_conversations")
+	t.Run("clear ignores invalid old payload", func(t *testing.T) {
+		// Arrange: JSONB is valid but the checkpoint schema cannot decode.
+		id := "clear-undecodable"
+		_, insertErr := pool.Exec(
+			ctx,
+			`INSERT INTO contexty_conversations(thread_id,version,segments) VALUES($1,7,$2)`,
+			id,
+			[]byte(`{"schema":"retired-host-schema"}`),
+		)
+		require.NoError(t, insertErr)
+		store := New(pool)
+		_, loadErr := store.LoadState(ctx, id)
+		require.Error(t, loadErr)
+		// Act: stale clear conflicts; correct clear depends only on the locked OCC token.
+		require.ErrorIs(t, store.ClearState(ctx, id, 6), contexty.ErrConversationVersionConflict)
+		require.NoError(t, store.ClearState(ctx, id, 7))
+		// Assert: the tombstone is readable with the default codec and cannot be reused at7.
+		after, loadErr := store.LoadState(ctx, id)
+		require.NoError(t, loadErr)
+		require.Equal(t, int64(8), after.Version())
+		require.Empty(t, after.SegmentNames())
+		require.Empty(t, after.Artifacts())
+		require.ErrorIs(
+			t,
+			store.CommitState(ctx, id, 7, contexty.ConversationDelta{}),
+			contexty.ErrConversationVersionConflict,
+		)
+	})
+	t.Run("clear after host codec retirement", func(t *testing.T) {
+		// Arrange: replace a builtin wire discriminator with a now-unregistered host type.
+		message := contexty.TextMessage(contexty.RoleUser, "payload")
+		message.ID = "retired"
+		message.Provenance = contexty.UserProvenance{Channel: "fixture", UserID: "host"}
+		store := New(pool)
+		wire, encodeErr := store.codec.Encode(
+			contexty.EmptyState().WithSegment(contexty.SegmentHistory, []contexty.Message{message}),
+		)
+		require.NoError(t, encodeErr)
+		wire = []byte(strings.ReplaceAll(string(wire), `"type_id":"user"`, `"type_id":"retired-host-user"`))
+		_, insertErr := pool.Exec(
+			ctx,
+			`INSERT INTO contexty_conversations(thread_id,version,segments) VALUES($1,1,$2)`,
+			"clear-retired-codec",
+			wire,
+		)
+		require.NoError(t, insertErr)
+		_, loadErr := store.LoadState(ctx, "clear-retired-codec")
+		require.Error(t, loadErr)
+		// Act.
+		require.NoError(t, store.ClearState(ctx, "clear-retired-codec", 1))
+		// Assert: ordinary default codec can read the empty new checkpoint.
+		after, loadErr := store.LoadState(ctx, "clear-retired-codec")
+		require.NoError(t, loadErr)
+		require.Equal(t, int64(2), after.Version())
+		require.Empty(t, after.SegmentNames())
+	})
 	t.Run("exhausted revision", func(t *testing.T) {
 		// Arrange: a live row has consumed its final int64 OCC token.
 		store := New(pool)

@@ -1,0 +1,43 @@
+=== RUN   TestStoreIntegration
+2026/10/06 15:52:41 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.6.1
+  API Version: 1.55
+  Operating System: Docker Desktop
+  Total Memory: 32043 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/skosovsky/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 943c2023-f5e9-4b5d-8cb0-d82fc13844cf
+  Test ProcessID: a8346197-3729-464f-b4ff-4101de71aac3
+2026/10/06 15:52:41 🐳 Creating container for image postgres:16-alpine
+2026/10/06 15:52:41 🐳 Creating container for image testcontainers/ryuk:0.14.0
+2026/10/06 15:52:41 ✅ Container created: c0fdef759467
+2026/10/06 15:52:41 🐳 Starting container: c0fdef759467
+2026/10/06 15:52:42 ✅ Container started: c0fdef759467
+2026/10/06 15:52:42 ⏳ Waiting for container id c0fdef759467 image: testcontainers/ryuk:0.14.0. Waiting for: all of: [log message "Started", port 8080/tcp to be listening]
+2026/10/06 15:52:42 Shell not found in container
+2026/10/06 15:52:42 🔔 Container is ready: c0fdef759467
+2026/10/06 15:52:42 ✅ Container created: f1f956cda745
+2026/10/06 15:52:42 🐳 Starting container: f1f956cda745
+2026/10/06 15:52:42 ✅ Container started: f1f956cda745
+2026/10/06 15:52:42 ⏳ Waiting for container id f1f956cda745 image: postgres:16-alpine. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/10/06 15:52:43 🔔 Container is ready: f1f956cda745
+=== RUN   TestStoreIntegration/clear_ignores_invalid_old_payload
+=== RUN   TestStoreIntegration/clear_after_host_codec_retirement
+=== RUN   TestStoreIntegration/exhausted_revision
+=== RUN   TestStoreIntegration/clear_creates_empty_OCC_tombstone_on_missing_thread
+=== RUN   TestStoreIntegration/clear_stale_version_conflict
+2026/10/06 15:52:44 🐳 Stopping container: f1f956cda745
+2026/10/06 15:52:44 ✅ Container stopped: f1f956cda745
+2026/10/06 15:52:44 🐳 Terminating container: f1f956cda745
+2026/10/06 15:52:44 🚫 Container terminated: f1f956cda745
+--- PASS: TestStoreIntegration (2.68s)
+    --- PASS: TestStoreIntegration/clear_ignores_invalid_old_payload (0.02s)
+    --- PASS: TestStoreIntegration/clear_after_host_codec_retirement (0.00s)
+    --- PASS: TestStoreIntegration/exhausted_revision (0.00s)
+    --- PASS: TestStoreIntegration/clear_creates_empty_OCC_tombstone_on_missing_thread (0.04s)
+    --- PASS: TestStoreIntegration/clear_stale_version_conflict (0.05s)
+PASS
+ok  	github.com/skosovsky/contexty/adapters/store/postgres	3.416s

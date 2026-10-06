@@ -1,0 +1,101 @@
+=== RUN   TestClassifyPostgresErr
+=== PAUSE TestClassifyPostgresErr
+=== RUN   TestIsUniqueViolation
+=== PAUSE TestIsUniqueViolation
+=== RUN   TestStoreIntegration
+2026/10/06 15:49:28 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.6.1
+  API Version: 1.55
+  Operating System: Docker Desktop
+  Total Memory: 32043 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/skosovsky/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: d4a81f1a-e5ea-4336-9ad1-6aa04758d95a
+  Test ProcessID: 4362d6b7-0bf8-436f-bb73-c4a22db6862e
+2026/10/06 15:49:28 🐳 Creating container for image postgres:16-alpine
+2026/10/06 15:49:28 🐳 Creating container for image testcontainers/ryuk:0.14.0
+2026/10/06 15:49:28 ✅ Container created: ff981edbfbad
+2026/10/06 15:49:28 🐳 Starting container: ff981edbfbad
+2026/10/06 15:49:28 ✅ Container started: ff981edbfbad
+2026/10/06 15:49:28 ⏳ Waiting for container id ff981edbfbad image: testcontainers/ryuk:0.14.0. Waiting for: all of: [log message "Started", port 8080/tcp to be listening]
+2026/10/06 15:49:28 Shell not found in container
+2026/10/06 15:49:28 🔔 Container is ready: ff981edbfbad
+2026/10/06 15:49:28 ✅ Container created: 27ec97503c4f
+2026/10/06 15:49:28 🐳 Starting container: 27ec97503c4f
+2026/10/06 15:49:28 ✅ Container started: 27ec97503c4f
+2026/10/06 15:49:28 ⏳ Waiting for container id 27ec97503c4f image: postgres:16-alpine. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/10/06 15:49:30 🔔 Container is ready: 27ec97503c4f
+=== RUN   TestStoreIntegration/clear_ignores_invalid_old_payload
+=== RUN   TestStoreIntegration/clear_after_host_codec_retirement
+=== RUN   TestStoreIntegration/exhausted_revision
+=== RUN   TestStoreIntegration/fixture_OCC_conformance
+=== RUN   TestStoreIntegration/empty_load
+=== RUN   TestStoreIntegration/append_segment_and_OCC
+=== RUN   TestStoreIntegration/update_segment_overwrite
+=== RUN   TestStoreIntegration/apply_delta_state_and_OCC
+=== RUN   TestStoreIntegration/clear_creates_empty_OCC_tombstone_on_missing_thread
+=== RUN   TestStoreIntegration/clear_stale_version_conflict
+=== RUN   TestStoreIntegration/concurrent_first_write_maps_to_version_conflict
+=== RUN   TestStoreIntegration/clear_and_isolation
+=== RUN   TestStoreIntegration/stale_version_returns_conflict
+=== RUN   TestStoreIntegration/semantic_round_trip
+=== RUN   TestStoreIntegration/expanded_semantic_round_trip
+=== RUN   TestStoreIntegration/custom_table
+2026/10/06 15:49:30 🐳 Stopping container: 27ec97503c4f
+2026/10/06 15:49:30 ✅ Container stopped: 27ec97503c4f
+2026/10/06 15:49:30 🐳 Terminating container: 27ec97503c4f
+2026/10/06 15:49:30 🚫 Container terminated: 27ec97503c4f
+--- PASS: TestStoreIntegration (2.58s)
+    --- PASS: TestStoreIntegration/clear_ignores_invalid_old_payload (0.01s)
+    --- PASS: TestStoreIntegration/clear_after_host_codec_retirement (0.01s)
+    --- PASS: TestStoreIntegration/exhausted_revision (0.01s)
+    --- PASS: TestStoreIntegration/fixture_OCC_conformance (0.06s)
+    --- PASS: TestStoreIntegration/empty_load (0.00s)
+    --- PASS: TestStoreIntegration/append_segment_and_OCC (0.01s)
+    --- PASS: TestStoreIntegration/update_segment_overwrite (0.01s)
+    --- PASS: TestStoreIntegration/apply_delta_state_and_OCC (0.01s)
+    --- PASS: TestStoreIntegration/clear_creates_empty_OCC_tombstone_on_missing_thread (0.00s)
+    --- PASS: TestStoreIntegration/clear_stale_version_conflict (0.00s)
+    --- PASS: TestStoreIntegration/concurrent_first_write_maps_to_version_conflict (0.00s)
+    --- PASS: TestStoreIntegration/clear_and_isolation (0.01s)
+    --- PASS: TestStoreIntegration/stale_version_returns_conflict (0.01s)
+    --- PASS: TestStoreIntegration/semantic_round_trip (0.00s)
+    --- PASS: TestStoreIntegration/expanded_semantic_round_trip (0.01s)
+    --- PASS: TestStoreIntegration/custom_table (0.01s)
+=== CONT  TestClassifyPostgresErr
+=== RUN   TestClassifyPostgresErr/nil
+=== CONT  TestIsUniqueViolation
+--- PASS: TestIsUniqueViolation (0.00s)
+=== PAUSE TestClassifyPostgresErr/nil
+=== RUN   TestClassifyPostgresErr/history_conflict_unchanged
+=== PAUSE TestClassifyPostgresErr/history_conflict_unchanged
+=== RUN   TestClassifyPostgresErr/context_canceled_unchanged
+=== PAUSE TestClassifyPostgresErr/context_canceled_unchanged
+=== RUN   TestClassifyPostgresErr/deadline_exceeded_wraps_unavailable
+=== PAUSE TestClassifyPostgresErr/deadline_exceeded_wraps_unavailable
+=== RUN   TestClassifyPostgresErr/net_timeout_wraps_unavailable
+=== PAUSE TestClassifyPostgresErr/net_timeout_wraps_unavailable
+=== RUN   TestClassifyPostgresErr/net_op_error_without_timeout_wraps_unavailable
+=== PAUSE TestClassifyPostgresErr/net_op_error_without_timeout_wraps_unavailable
+=== RUN   TestClassifyPostgresErr/plain_error_not_unavailable
+=== PAUSE TestClassifyPostgresErr/plain_error_not_unavailable
+=== CONT  TestClassifyPostgresErr/nil
+=== CONT  TestClassifyPostgresErr/net_op_error_without_timeout_wraps_unavailable
+=== CONT  TestClassifyPostgresErr/plain_error_not_unavailable
+=== CONT  TestClassifyPostgresErr/deadline_exceeded_wraps_unavailable
+=== CONT  TestClassifyPostgresErr/net_timeout_wraps_unavailable
+=== CONT  TestClassifyPostgresErr/context_canceled_unchanged
+=== CONT  TestClassifyPostgresErr/history_conflict_unchanged
+--- PASS: TestClassifyPostgresErr (0.00s)
+    --- PASS: TestClassifyPostgresErr/nil (0.00s)
+    --- PASS: TestClassifyPostgresErr/net_op_error_without_timeout_wraps_unavailable (0.00s)
+    --- PASS: TestClassifyPostgresErr/plain_error_not_unavailable (0.00s)
+    --- PASS: TestClassifyPostgresErr/deadline_exceeded_wraps_unavailable (0.00s)
+    --- PASS: TestClassifyPostgresErr/net_timeout_wraps_unavailable (0.00s)
+    --- PASS: TestClassifyPostgresErr/context_canceled_unchanged (0.00s)
+    --- PASS: TestClassifyPostgresErr/history_conflict_unchanged (0.00s)
+PASS
+ok  	github.com/skosovsky/contexty/adapters/store/postgres	4.172s

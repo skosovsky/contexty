@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/skosovsky/contexty
+cpu: Apple M1 Max
+BenchmarkRemediation_MemoryStoreParallel/0-10  	   81901	     12402 ns/op	    6284 B/op	      76 allocs/op
+BenchmarkRemediation_MemoryStoreParallel/0-10  	  100347	     13677 ns/op	    6283 B/op	      76 allocs/op
+BenchmarkRemediation_MemoryStoreParallel/0-10  	   89376	     13860 ns/op	    6287 B/op	      76 allocs/op
+BenchmarkRemediation_MemoryStoreParallel/10000-10         	   63643	     22197 ns/op	    6285 B/op	      76 allocs/op
+BenchmarkRemediation_MemoryStoreParallel/10000-10         	   62674	     18938 ns/op	    6287 B/op	      76 allocs/op
+BenchmarkRemediation_MemoryStoreParallel/10000-10         	   64376	     18924 ns/op	    6290 B/op	      76 allocs/op
+PASS
+ok  	github.com/skosovsky/contexty	9.194s

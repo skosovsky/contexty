@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify preserved behavioral probes against immutable review SHA in temp files."""
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -20,7 +21,7 @@ ASSERTIONS = {
 
 def main():
     with tempfile.TemporaryDirectory(prefix="contexty-review-baseline-") as directory:
-        base = Path(directory)
+        base = Path(directory).resolve()
         checkout = base / "library"
         checkout.mkdir()
         probes = base / "probes"
@@ -39,7 +40,24 @@ def main():
             for marker in markers:
                 if marker not in result.stdout:
                     raise AssertionError(f"missing behavioral evidence {marker!r}")
-        print("Baseline F03/F04/F05/F06/F07/F08/F11/F12 behavioral assertions PASS", flush=True)
+
+        for name, module, test, marker in [
+            ("cancel", ".", "TestReviewClearCanceledWhileWaiting", "published version=1 after ctx cancellation"),
+            ("ttl", "adapters/store/redis", "TestReviewSubMillisecondTTL", "reached Lua as 0 ms; PEXPIRE branch is skipped"),
+        ]:
+            probe = probes / (name + "_test.go")
+            probe.write_bytes((ROOT / "docs/remediation-evidence/baseline/repro" / (name + ".go.txt")).read_bytes())
+            module_root = checkout / module
+            overlay = probes / (name + "_overlay.json")
+            overlay_target = module_root / "zz_review_probe_test.go"
+            overlay_target.write_text("// Temporary overlay discovery placeholder.\npackage " + ("contexty" if module == "." else "redis") + "\n")
+            overlay.write_text(json.dumps({"Replace": {str(overlay_target): str(probe)}}))
+            result = subprocess.run(["go", "test", "-race", "-v", "-count=10", "-overlay", str(overlay), "-run", "^" + test + "$", "."],
+                                    cwd=module_root, env=env, text=True, capture_output=True, check=True)
+            print(f"=== {name} overlay @ {SHA} ===\n{result.stdout}", flush=True)
+            if marker not in result.stdout:
+                raise AssertionError(f"missing behavioral evidence {marker!r}")
+        print("Baseline F03-F12 behavioral assertions PASS", flush=True)
 
 
 if __name__ == "__main__":
