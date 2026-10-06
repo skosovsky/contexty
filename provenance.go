@@ -8,10 +8,13 @@ import (
 	"sync"
 )
 
-// Provenance is typed origin metadata for a message.
+// Provenance is host-owned typed origin metadata for a message.
+// ProvenanceType is a stable wire discriminator. CloneProvenance must retain it
+// and own every mutable field; implementations must support concurrent reuse
+// when their messages are compiled concurrently.
 type Provenance interface {
-	provenanceType() string
-	cloneProvenance() Provenance
+	ProvenanceType() string
+	CloneProvenance() Provenance
 }
 
 // ProvenanceRegistry decodes provenance payloads by type_id without map[string]any.
@@ -86,7 +89,7 @@ func EncodeProvenance(p Provenance) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("contexty: provenance encode: %w", err)
 	}
-	return json.Marshal(provenanceWire{TypeID: p.provenanceType(), Payload: payload})
+	return json.Marshal(provenanceWire{TypeID: p.ProvenanceType(), Payload: payload})
 }
 
 type provenanceWire struct {
@@ -100,18 +103,18 @@ type UserProvenance struct {
 	UserID  string `json:"user_id,omitempty"`
 }
 
-func (UserProvenance) provenanceType() string { return "user" }
+func (UserProvenance) ProvenanceType() string { return "user" }
 
-func (p UserProvenance) cloneProvenance() Provenance { return p }
+func (p UserProvenance) CloneProvenance() Provenance { return p }
 
 // SystemProvenance marks system-generated messages.
 type SystemProvenance struct {
 	Component string `json:"component"`
 }
 
-func (SystemProvenance) provenanceType() string { return "system" }
+func (SystemProvenance) ProvenanceType() string { return "system" }
 
-func (p SystemProvenance) cloneProvenance() Provenance { return p }
+func (p SystemProvenance) CloneProvenance() Provenance { return p }
 
 // DefaultProvenanceRegistry registers built-in provenance types.
 func DefaultProvenanceRegistry() *ProvenanceRegistry {

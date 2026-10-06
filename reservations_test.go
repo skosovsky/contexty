@@ -31,7 +31,7 @@ func TestContract_Reservations(t *testing.T) {
 		// Act.
 		engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 			contexty.WithCompileRecording(fixtureRecordProfile("target")),
-			contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+			contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 				contexty.BudgetConfig{Budget: budget}, contexty.CharTokenEstimator{})))
 		result, err := engine.CompileSnapshot(context.Background(), request)
 		// Assert: main reserves system once; target has its own seven-token capacity.
@@ -84,7 +84,7 @@ func TestInvalid_Reservations(t *testing.T) {
 				calls++
 				return contexty.DeferredResult{Messages: nil}, nil
 			}})
-		engine := fixtureEngine(deferred, contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe))
+		engine := fixtureEngine(deferred, contexty.WithBudgetPipeline(pipe))
 		_, err = engine.CompileSnapshot(context.Background(), contexty.CompileRequest{})
 		require.ErrorIs(t, err, contexty.ErrInvalidBudgetRequest)
 		require.Zero(t, calls)

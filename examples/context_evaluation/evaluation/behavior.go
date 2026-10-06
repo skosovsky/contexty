@@ -66,16 +66,16 @@ func behaviorRound(ctx context.Context) ([]Check, error) {
 	request := contexty.CompileRequest{
 		History: []contexty.Message{call, result},
 	}
-	engine := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, behaviorBudget(2)))
+	engine := contexty.NewEngine(contexty.WithBudgetPipeline(behaviorBudget(2)))
 	compiled, err := engine.CompileSnapshot(ctx, request)
 	if err != nil {
 		return nil, err
 	}
-	_, tightErr := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, behaviorBudget(1))).
+	_, tightErr := contexty.NewEngine(contexty.WithBudgetPipeline(behaviorBudget(1))).
 		CompileSnapshot(ctx, request)
 	pending := contexty.TextMessage(contexty.RoleUser, "pending request")
 	pending.ID = "behavior-pending"
-	protected, pendingErr := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, behaviorBudget(1))).
+	protected, pendingErr := contexty.NewEngine(contexty.WithBudgetPipeline(behaviorBudget(1))).
 		CompileSnapshot(ctx,
 			contexty.CompileRequest{
 				History: []contexty.Message{contexty.TextMessage(contexty.RoleUser, "old")},
@@ -287,7 +287,7 @@ func behaviorConsumers(ctx context.Context, messages []contexty.Message) ([]Chec
 		},
 		{Name: "small", Segments: []contexty.SegmentName{contexty.SegmentHistory}, Budget: behaviorBudget(1)},
 	}}
-	compiled, err := contexty.NewEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, behaviorBudget(1))).
+	compiled, err := contexty.NewEngine(contexty.WithBudgetPipeline(behaviorBudget(1))).
 		CompileSnapshot(ctx, request)
 	if err != nil {
 		return nil, err

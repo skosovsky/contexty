@@ -70,7 +70,7 @@ func WithTransformHooks(hooks ...TransformHook) EngineOption {
 }
 
 // WithBudgetPipeline sets the unified budget pipeline (history segment is trimmed at compile).
-func WithBudgetPipeline(_ SegmentName, pipe *BudgetPipeline) EngineOption {
+func WithBudgetPipeline(pipe *BudgetPipeline) EngineOption {
 	return func(e *Engine) {
 		e.budget = pipe
 	}

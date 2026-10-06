@@ -41,8 +41,14 @@ func TestArtifact_CommonBudget(t *testing.T) {
 					return len(messages) * tc.cost, nil
 				},
 			}
-			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
+			engine := fixtureEngine(
+				contexty.WithBudgetPipeline(
+					contexty.NewBudgetPipeline(
+						contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
+						counter,
+					),
+				),
+			)
 			// Act.
 			result, err := engine.CompileSnapshot(
 				context.Background(),
@@ -82,8 +88,14 @@ func TestArtifact_EstimateFailure(t *testing.T) {
 				}
 				return 0, sentinel
 			}}
-			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
+			engine := fixtureEngine(
+				contexty.WithBudgetPipeline(
+					contexty.NewBudgetPipeline(
+						contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
+						counter,
+					),
+				),
+			)
 			artifact := contexty.NewMemoryBlock("a", contexty.TextPayload("body")).ContextArtifact.
 				WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 10})
 			// Act.
@@ -117,11 +129,10 @@ func TestArtifact_ExclusionEvidence(t *testing.T) {
 		WithBudget(contexty.ArtifactBudgetPolicy{TokenLimit: 2})
 	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter,
-				contexty.WithEstimatorDescriptor(contexty.Descriptor{ID: "host/artifact-estimate", Revision: "pinned"}),
-			)))
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter,
+			contexty.WithEstimatorDescriptor(contexty.Descriptor{ID: "host/artifact-estimate", Revision: "pinned"}),
+		)))
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		CompilationID: "artifact-budget", Artifacts: []contexty.ContextArtifact{artifact}})

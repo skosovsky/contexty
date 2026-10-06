@@ -24,9 +24,9 @@ func CheckCheckpointStore(t *testing.T, store contexty.ConversationStateStore, i
 		Messages: []contexty.Message{
 			contexty.TextMessage(contexty.RoleUser, "history"),
 		},
-		MessageIDs: nil,
-		Artifact:   nil,
-		ToolRound:  nil,
+		MessageIDs: nil, ArtifactIDs: nil,
+		Artifact:  nil,
+		ToolRound: nil,
 	}
 	memory := history
 	memory.Segment = contexty.SegmentMemory
@@ -36,7 +36,7 @@ func CheckCheckpointStore(t *testing.T, store contexty.ConversationStateStore, i
 		deltas = append(
 			deltas,
 			contexty.ConversationDelta{Operation: contexty.DeltaUpsertArtifact, Segment: "", Messages: nil,
-				MessageIDs: nil, Artifact: &artifacts[i], ToolRound: nil},
+				MessageIDs: nil, ArtifactIDs: nil, Artifact: &artifacts[i], ToolRound: nil},
 		)
 	}
 	// Arrange / Act: publish history, memory and the complete artifact policy matrix together.
@@ -80,7 +80,14 @@ func CheckCheckpointStore(t *testing.T, store contexty.ConversationStateStore, i
 		t.Fatal(err)
 	}
 	if err = store.CommitState(ctx, id, committed.Version(), contexty.ConversationDelta{
-		Operation: "", Segment: "", Messages: nil, MessageIDs: nil, Artifact: nil, ToolRound: nil}); err != nil {
+		Operation:   "",
+		Segment:     "",
+		Messages:    nil,
+		MessageIDs:  nil,
+		ArtifactIDs: nil,
+		Artifact:    nil,
+		ToolRound:   nil,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := store.LoadState(ctx, id)
@@ -120,8 +127,8 @@ func checkCheckpointRollback(t *testing.T, store contexty.ConversationStateStore
 	artifact := contexty.NewMemoryBlock("codec-failure", contexty.TextPayload("fact")).ContextArtifact
 	artifact.Extensions = []contexty.Extension{missingCheckpointExtension{Value: "cannot encode"}}
 	for _, failure := range []contexty.ConversationDelta{
-		{Operation: "invalid", Segment: "", Messages: nil, MessageIDs: nil, Artifact: nil, ToolRound: nil},
-		{Operation: contexty.DeltaUpsertArtifact, Segment: "", Messages: nil, MessageIDs: nil, Artifact: &artifact, ToolRound: nil},
+		{Operation: "invalid", Segment: "", Messages: nil, MessageIDs: nil, ArtifactIDs: nil, Artifact: nil, ToolRound: nil},
+		{Operation: contexty.DeltaUpsertArtifact, Segment: "", Messages: nil, MessageIDs: nil, ArtifactIDs: nil, Artifact: &artifact, ToolRound: nil},
 	} {
 		// Arrange / Act: validation or codec failure occurs after an otherwise-valid append.
 		err := store.CommitState(context.Background(), id, before.Version(), history, failure)

@@ -76,9 +76,12 @@ func TestTextReplacement_BudgetRemoval(t *testing.T) {
 		message.ID = id
 		history = append(history, message)
 	}
-	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
-		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(25)},
-			&contexty.FixedEstimator{TokensPerMessage: 10})))
+	engine := fixtureEngine(
+		contexty.WithBudgetPipeline(
+			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(25)},
+				&contexty.FixedEstimator{TokensPerMessage: 10}),
+		),
+	)
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
 		History: history, Options: []contexty.CompileOption{contexty.WithTextReplacement(contexty.TextReplacement{

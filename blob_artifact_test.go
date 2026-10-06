@@ -42,7 +42,7 @@ func TestBlob_ArtifactCompileAndResume(t *testing.T) {
 			contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent),
 		),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(2)}, contexty.CharTokenEstimator{})),
 	)
 	// Act: explicit host preparation precedes both artifact and final admission.

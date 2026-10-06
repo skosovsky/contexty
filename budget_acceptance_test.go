@@ -50,15 +50,13 @@ func TestAcceptance_Budget_PreflightReservesPendingAndSystem(t *testing.T) {
 	// Arrange.
 	ctx := context.Background()
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{
-					Budget:   contexty.EffectiveInputBudget(40),
-					DropHead: contexty.DropHeadConfig{MinMessages: 1},
-				},
-				&contexty.FixedEstimator{TokensPerMessage: 10},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{
+				Budget:   contexty.EffectiveInputBudget(40),
+				DropHead: contexty.DropHeadConfig{MinMessages: 1},
+			},
+			&contexty.FixedEstimator{TokensPerMessage: 10},
+		),
 		),
 	)
 	// reserved: system(10) + pending(10) = 20, available history = 20 -> at most 2 history msgs survive (+ pending merged after)
@@ -117,7 +115,7 @@ func TestAcceptance_BudgetSummary_IdentityIgnoresObserverState(t *testing.T) {
 	)
 	// Act.
 	withoutObserver, err := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeWithoutObserver),
+		contexty.WithBudgetPipeline(pipeWithoutObserver),
 	).CompileSnapshot(ctx, req)
 	// Assert.
 	require.NoError(t, err)
@@ -128,7 +126,7 @@ func TestAcceptance_BudgetSummary_IdentityIgnoresObserverState(t *testing.T) {
 		contexty.WithBudgetObserver(fixtureObserver{}),
 	)
 	withObserver, err := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeWithObserver),
+		contexty.WithBudgetPipeline(pipeWithObserver),
 	).CompileSnapshot(ctx, req)
 	require.NoError(t, err)
 

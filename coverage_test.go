@@ -21,7 +21,7 @@ func TestManifest_Coverage(t *testing.T) {
 	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile("history", "empty"),
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(6)}, contexty.CharTokenEstimator{})))
 	request := contexty.CompileRequest{
 		CompilationID: "coverage",
@@ -161,7 +161,7 @@ func TestCoverage_Summary(t *testing.T) {
 	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureBindings(fixtureRecordProfile("history", "empty"),
 			fixtureBinding(contexty.RecordingTargetFormatter, "empty", "", 0))),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(5), Summarizer: stubSummarizer(
 				func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 					summary := contexty.TextMessage(contexty.RoleAssistant, "sum")

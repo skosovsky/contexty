@@ -71,8 +71,12 @@ func TestObserver_EstimatorOwnership(t *testing.T) {
 	}}
 	_, request := fixtureFinalCancellationRequest(false, counter)
 	observer := &contexty.RecordingObserver{}
-	engine := fixtureEngine(contexty.WithObserver(observer), contexty.WithBudgetPipeline(contexty.SegmentHistory,
-		contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter)))
+	engine := fixtureEngine(
+		contexty.WithObserver(observer),
+		contexty.WithBudgetPipeline(
+			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, counter),
+		),
+	)
 	// Act.
 	result, err := engine.CompileSnapshot(context.Background(), request)
 	// Assert: a passive count cannot mutate the final payload after budget admission.

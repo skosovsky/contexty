@@ -163,7 +163,7 @@ func runComposition(
 	}
 	engine := contexty.NewEngine(
 		contexty.WithArtifactMaterialization(hostMaterialization()),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipeline),
+		contexty.WithBudgetPipeline(pipeline),
 	)
 	compiled, err := engine.Compile(
 		ctx,

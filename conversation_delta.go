@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 )
 
 // DeltaOperation describes one immutable conversation state transition.
@@ -24,16 +25,20 @@ const (
 
 // ConversationDelta is a deterministic transition over conversation state.
 type ConversationDelta struct {
-	Operation  DeltaOperation   `json:"operation"`
-	Segment    SegmentName      `json:"segment,omitempty"`
-	Messages   []Message        `json:"-"`
-	MessageIDs []string         `json:"message_ids,omitempty"`
-	Artifact   *ContextArtifact `json:"artifact,omitempty"`
-	ToolRound  *ToolRound       `json:"-"`
+	Operation   DeltaOperation   `json:"operation"`
+	Segment     SegmentName      `json:"segment,omitempty"`
+	Messages    []Message        `json:"-"`
+	ArtifactIDs []string         `json:"artifact_ids,omitempty"`
+	MessageIDs  []string         `json:"message_ids,omitempty"`
+	Artifact    *ContextArtifact `json:"artifact,omitempty"`
+	ToolRound   *ToolRound       `json:"-"`
 }
 
 // ApplyDelta applies a single transition without mutating state.
 func ApplyDelta(state ConversationState, delta ConversationDelta) (ConversationState, error) {
+	if err := validateArtifactRemovalIDs(delta.Operation, delta.MessageIDs, delta.ArtifactIDs); err != nil {
+		return ConversationState{}, err
+	}
 	switch delta.Operation {
 	case DeltaAppendMessages:
 		return applyAppendMessages(state, delta), nil
@@ -51,7 +56,7 @@ func ApplyDelta(state ConversationState, delta ConversationDelta) (ConversationS
 		}
 		return state.WithArtifact(*delta.Artifact), nil
 	case DeltaRemoveArtifact:
-		return applyRemoveArtifacts(state, delta.MessageIDs), nil
+		return applyRemoveArtifacts(state, delta.ArtifactIDs), nil
 	case DeltaAppendToolRound:
 		return applyAppendToolRound(state, delta.ToolRound)
 	case "":
@@ -135,12 +140,13 @@ type ConversationStateCodec struct {
 }
 
 type conversationDeltaWire struct {
-	Operation  DeltaOperation  `json:"operation"`
-	Segment    SegmentName     `json:"segment,omitempty"`
-	Messages   json.RawMessage `json:"messages,omitempty"`
-	MessageIDs []string        `json:"message_ids,omitempty"`
-	Artifact   json.RawMessage `json:"artifact,omitempty"`
-	ToolRound  json.RawMessage `json:"tool_round,omitempty"`
+	Operation   DeltaOperation  `json:"operation"`
+	Segment     SegmentName     `json:"segment,omitempty"`
+	Messages    json.RawMessage `json:"messages,omitempty"`
+	ArtifactIDs []string        `json:"artifact_ids,omitempty"`
+	MessageIDs  []string        `json:"message_ids,omitempty"`
+	Artifact    json.RawMessage `json:"artifact,omitempty"`
+	ToolRound   json.RawMessage `json:"tool_round,omitempty"`
 }
 
 // EncodeState serializes conversation state.
@@ -155,6 +161,9 @@ func (c ConversationStateCodec) DecodeState(data []byte) (ConversationState, err
 
 // EncodeDelta serializes a delta, including polymorphic message parts.
 func (c ConversationStateCodec) EncodeDelta(delta ConversationDelta) ([]byte, error) {
+	if err := validateArtifactRemovalIDs(delta.Operation, delta.MessageIDs, delta.ArtifactIDs); err != nil {
+		return nil, err
+	}
 	msgs, err := marshalMessagesWithRegistries(delta.Messages, c.Provenance, c.Extensions)
 	if err != nil {
 		return nil, err
@@ -171,12 +180,13 @@ func (c ConversationStateCodec) EncodeDelta(delta ConversationDelta) ([]byte, er
 		}
 	}
 	wire := conversationDeltaWire{
-		Operation:  delta.Operation,
-		Segment:    delta.Segment,
-		Messages:   msgs,
-		MessageIDs: slices.Clone(delta.MessageIDs),
-		Artifact:   artifact,
-		ToolRound:  toolRound,
+		Operation:   delta.Operation,
+		Segment:     delta.Segment,
+		Messages:    msgs,
+		MessageIDs:  slices.Clone(delta.MessageIDs),
+		ArtifactIDs: slices.Clone(delta.ArtifactIDs),
+		Artifact:    artifact,
+		ToolRound:   toolRound,
 	}
 	return json.Marshal(wire)
 }
@@ -185,6 +195,21 @@ func (c ConversationStateCodec) EncodeDelta(delta ConversationDelta) ([]byte, er
 func (c ConversationStateCodec) DecodeDelta(data []byte) (ConversationDelta, error) {
 	var wire conversationDeltaWire
 	if err := json.Unmarshal(data, &wire); err != nil {
+		return ConversationDelta{}, err
+	}
+	// Reject the legacy key by presence, including empty and null payloads.
+	// JSON null and an absent key both decode to nil slices otherwise.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err != nil {
+		return ConversationDelta{}, err
+	}
+	for key := range keys {
+		if wire.Operation == DeltaRemoveArtifact && strings.EqualFold(key, "message_ids") ||
+			wire.Operation != DeltaRemoveArtifact && strings.EqualFold(key, "artifact_ids") {
+			return ConversationDelta{}, ErrInvalidDeltaIDs
+		}
+	}
+	if err := validateArtifactRemovalIDs(wire.Operation, wire.MessageIDs, wire.ArtifactIDs); err != nil {
 		return ConversationDelta{}, err
 	}
 	var artifact *ContextArtifact
@@ -208,12 +233,13 @@ func (c ConversationStateCodec) DecodeDelta(data []byte) (ConversationDelta, err
 		toolRoundPtr = &toolRound
 	}
 	return ConversationDelta{
-		Operation:  wire.Operation,
-		Segment:    wire.Segment,
-		Messages:   msgs,
-		MessageIDs: slices.Clone(wire.MessageIDs),
-		Artifact:   artifact,
-		ToolRound:  toolRoundPtr,
+		Operation:   wire.Operation,
+		Segment:     wire.Segment,
+		Messages:    msgs,
+		MessageIDs:  slices.Clone(wire.MessageIDs),
+		ArtifactIDs: slices.Clone(wire.ArtifactIDs),
+		Artifact:    artifact,
+		ToolRound:   toolRoundPtr,
 	}, nil
 }
 
@@ -304,4 +330,17 @@ func artifactMapValues(in map[string]ContextArtifact) []ContextArtifact {
 		return 0
 	})
 	return out
+}
+
+// ErrInvalidDeltaIDs rejects ambiguous artifact-removal IDs and misplaced artifact IDs.
+var ErrInvalidDeltaIDs = errors.New("contexty: invalid delta IDs")
+
+func validateArtifactRemovalIDs(operation DeltaOperation, messageIDs, artifactIDs []string) error {
+	if operation == DeltaRemoveArtifact && messageIDs != nil {
+		return ErrInvalidDeltaIDs
+	}
+	if operation != DeltaRemoveArtifact && artifactIDs != nil {
+		return ErrInvalidDeltaIDs
+	}
+	return nil
 }

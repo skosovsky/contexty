@@ -21,7 +21,7 @@ func TestResourceAppend_FinalMainBudget(t *testing.T) {
 	)
 	engine := fixtureEngine(
 		contexty.WithDeferredBlocks(block),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
 	// Act.

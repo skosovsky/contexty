@@ -40,7 +40,7 @@ func TestAcceptance_SelectionPriorityAndChronology(t *testing.T) {
 	)
 	engine := fixtureEngine(
 		contexty.WithSelectionPolicy(policy),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 	)
 	// Act.
 	result, err := engine.CompileSnapshot(t.Context(), contexty.CompileRequest{History: messages})
@@ -164,7 +164,7 @@ func TestAcceptance_ArtifactAdmissionUsesEachOutputEstimator(t *testing.T) {
 		},
 	}
 	engine := fixtureEngine(
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, main),
+		contexty.WithBudgetPipeline(main),
 		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile("consumer")),
 		contexty.WithCompileContentCapture(

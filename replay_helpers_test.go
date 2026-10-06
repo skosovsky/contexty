@@ -150,13 +150,12 @@ func fixtureSimpleRecord(t *testing.T) (contexty.SavedCompileRecord, contexty.Re
 	t.Helper()
 	message := contexty.TextMessage(contexty.RoleUser, "safe")
 	message.ID = "m"
-	result, err := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
+	result, err := fixtureEngine(
+		contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(fixtureRecordProfile()),
 		contexty.WithCompileContentCapture(contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent)),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}, contexty.CharTokenEstimator{}),
-		),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(10)}, contexty.CharTokenEstimator{})),
 	).
 		CompileSnapshot(context.Background(), contexty.CompileRequest{CompilationID: "simple", History: []contexty.Message{message}})
 	require.NoError(t, err)

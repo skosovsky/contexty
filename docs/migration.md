@@ -371,3 +371,27 @@ needs `OpaqueStateIDs`, a matching `OpaqueProfile` and separately allowed depend
 messages. Default rendering and export omit opaque payloads. External opaque
 compaction items and local text summaries have separate lifecycles; see the
 [offline fixture recipe](../examples/opaque_state/main.go).
+
+## Task 24 contract break
+
+The [remediation contract baseline](remediation-contracts.md) fixes the selected
+semantics. Its execution journal separates implemented API changes from behavioral
+gates still being repaired; do not treat the baseline as a passing test report.
+
+- Replace `WithBudgetPipeline(SegmentHistory, pipe)` with `WithBudgetPipeline(pipe)`.
+  The removed argument never selected a segment. Compilation budgets the complete
+  request and evicts optional history.
+- Host provenance implements `ProvenanceType() string` and
+  `CloneProvenance() Provenance`; clone owns mutable fields and preserves type.
+  Register its decoder and pin custom codec identity in strict profiles. Built-in
+  user/system discriminators and payloads retain their wire format.
+- DeltaRemoveArtifact uses `ArtifactIDs` and wire `artifact_ids`. Convert old
+  artifact-removal `message_ids` explicitly before decoding; applying or decoding
+  them now returns `ErrInvalidDeltaIDs`. DeltaRemoveMessages retains MessageIDs.
+  State/message formats are not changed by this field migration.
+
+Subsequent behavioral gates require explicit estimators, distinguish nil inherited
+segments from nonnil empty overrides, reject incomplete stateful configuration,
+and use host event IDs rather than content fingerprints for durable messages.
+Current ResourceCodec custom revisions must be declared independently of saved
+configuration. The final migration examples are updated as those gates land.

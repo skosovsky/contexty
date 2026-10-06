@@ -493,7 +493,7 @@ func TestAcceptance_OpaqueRealSummaryInvalidatesRetainedState(t *testing.T) {
 		codec,
 		profile,
 		contexty.OpaqueFailClosed,
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+		contexty.WithBudgetPipeline(pipe),
 		contexty.WithTraceProfile(trace),
 	)
 	// Act.

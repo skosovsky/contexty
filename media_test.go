@@ -172,8 +172,14 @@ func TestMedia_ArtifactBudget(t *testing.T) {
 				WithBudget(
 					contexty.ArtifactBudgetPolicy{TokenLimit: 7},
 				)
-			engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)}, reporter)))
+			engine := fixtureEngine(
+				contexty.WithBudgetPipeline(
+					contexty.NewBudgetPipeline(
+						contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(20)},
+						reporter,
+					),
+				),
+			)
 			// Act.
 			compiled, err := engine.CompileSnapshot(
 				context.Background(),

@@ -99,7 +99,7 @@ func TestResourceAppend_EstimatorCancellation(t *testing.T) {
 			)
 			engine := fixtureEngine(
 				contexty.WithDeferredBlocks(block),
-				contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe),
+				contexty.WithBudgetPipeline(pipe),
 			)
 			old := contexty.NewMemoryBlock("projected", contexty.TextPayload("old")).ContextArtifact
 			// Act / Assert: no count failure is silently changed into a successful zero-cost merge.

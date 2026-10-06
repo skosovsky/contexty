@@ -23,12 +23,10 @@ func TestHistoricalArguments_MultipleCalls(t *testing.T) {
 		},
 		Extensions: []contexty.Extension{fixtureWireExtension{wire: `{"approval_digest":"active-original"}`}},
 	}
-	engine := fixtureEngine(contexty.WithBudgetPipeline(
-		contexty.SegmentHistory,
-		contexty.NewBudgetPipeline(
-			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
-			contexty.CharTokenEstimator{},
-		),
+	engine := fixtureEngine(contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
+		contexty.CharTokenEstimator{},
+	),
 	))
 	// Act: apply both without replacing other parts or retargeting the message.
 	result, err := engine.CompileSnapshot(context.Background(), contexty.CompileRequest{
@@ -79,7 +77,7 @@ func TestHistoricalArguments_CompilePersistenceReplay(t *testing.T) {
 			contexty.Descriptor{ID: "privacy", Revision: "pinned"},
 			fixtureContentPolicy(fixtureAllowContent),
 		),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
 			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)}, contexty.CharTokenEstimator{})),
 	)
 	var origins []contexty.ContentRef

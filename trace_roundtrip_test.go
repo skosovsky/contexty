@@ -43,7 +43,7 @@ func TestTrace_LabelPersistenceRoundTrip(t *testing.T) {
 		origins = append(origins, ref)
 	}
 	engine := fixtureEngine(contexty.WithTraceProfile(profile),
-		contexty.WithBudgetPipeline(contexty.SegmentHistory, contexty.NewBudgetPipeline(contexty.BudgetConfig{
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(contexty.BudgetConfig{
 			Budget: contexty.EffectiveInputBudget(10),
 			Summarizer: stubSummarizer(func(context.Context, contexty.SummaryRequest) (contexty.Message, error) {
 				msg := contexty.TextMessage(contexty.RoleAssistant, "sum")

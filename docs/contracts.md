@@ -876,3 +876,11 @@ Offload reduces prompt size while exact replay capture may retain original priva
 bytes. Capture authorization/deletion and durable archives, blobs, claims and
 checkpoints remain host responsibilities. Use [blob-retention.md](blob-retention.md)
 and [resource-content.md](resource-content.md) as the canonical protocols.
+
+## Task 24 remediation baseline
+
+The [review remediation contracts](remediation-contracts.md) select the final API,
+event identity, configuration, callback scopes, ownership/concurrency matrix and
+estimate invariants. Where legacy behavior differs, the execution journal tracks
+its ordered repair. The baseline is normative; completion requires regression and
+acceptance evidence for every gate, not this documentation alone.

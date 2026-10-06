@@ -42,6 +42,6 @@ func fixtureCancelTransformFixture(
 				cancel()
 				return contexty.Message{}, callbackError
 			})}, contexty.CharTokenEstimator{})
-		return fixtureEngine(contexty.WithBudgetPipeline(contexty.SegmentHistory, pipe)), request
+		return fixtureEngine(contexty.WithBudgetPipeline(pipe)), request
 	}
 }

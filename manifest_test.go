@@ -94,12 +94,10 @@ func TestManifest_RoundTrip(t *testing.T) {
 	)
 	engine := fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()),
 		contexty.WithCompileRecording(profile), contexty.WithStateStore(store), contexty.WithConversationID("thread"),
-		contexty.WithBudgetPipeline(
-			contexty.SegmentHistory,
-			contexty.NewBudgetPipeline(
-				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
-				contexty.CharTokenEstimator{},
-			),
+		contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+			contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(100)},
+			contexty.CharTokenEstimator{},
+		),
 		))
 	request := contexty.CompileRequest{CompilationID: "manifest", Targets: []contexty.CompileTarget{
 		{Name: "xml", View: string(contexty.ViewLLMXML)},
@@ -193,12 +191,10 @@ func TestManifest_IdentityAndPolicies(t *testing.T) {
 	profile := fixtureRecordProfile("main")
 	compile := func(record contexty.RecordProfile, limit int) (contexty.CompileResult, error) {
 		return fixtureEngine(contexty.WithTraceProfile(fixtureTraceProfile()), contexty.WithCompileRecording(record),
-			contexty.WithBudgetPipeline(
-				contexty.SegmentHistory,
-				contexty.NewBudgetPipeline(
-					contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(limit)},
-					contexty.CharTokenEstimator{},
-				),
+			contexty.WithBudgetPipeline(contexty.NewBudgetPipeline(
+				contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(limit)},
+				contexty.CharTokenEstimator{},
+			),
 			),
 		).
 			CompileSnapshot(context.Background(), request)
