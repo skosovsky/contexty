@@ -984,7 +984,7 @@ func roundSemanticRef(ctx context.Context, message Message) (ContentRef, error) 
 	projection.ID = message.ID
 	projection.Role = message.Role
 	for _, part := range message.Parts {
-		switch part.(type) {
+		switch canonicalPartValue(part).(type) {
 		case ToolCallPart, ToolResultPart:
 			projection.Parts = append(projection.Parts, part)
 		}

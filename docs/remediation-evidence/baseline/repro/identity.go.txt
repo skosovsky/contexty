@@ -1,0 +1,10 @@
+package main
+import("context";"fmt"; c "github.com/skosovsky/contexty")
+func main(){
+e:=c.NewEngine(); turn:=c.NewCurrentTurn(c.TextMessage(c.RoleUser,"yes")); p:=c.NewStableMessageIdentityPolicy("chat")
+r,err:=e.CompileSnapshot(context.Background(),c.CompileRequest{TurnID:"turn-1",CurrentTurn:&turn,IdentityPolicy:p,RequireDurableIdentity:true}); fmt.Println("first",err)
+if err!=nil{return}; s,err:=r.DerivePersistenceState(c.DefaultJSONSerializer(),c.Descriptor{});fmt.Println("persist",err);if err!=nil{return};fmt.Println("history",len(s.Segment(c.SegmentHistory)),s.Segment(c.SegmentHistory)[0].ID)
+r2,err:=e.CompileSnapshot(context.Background(),c.CompileRequest{TurnID:"turn-2",History:s.Segment(c.SegmentHistory),CurrentTurn:&turn,IdentityPolicy:p,RequireDurableIdentity:true});fmt.Println("second",err,"history",len(r2.Payload.History));for _,m:=range r2.Payload.History{fmt.Println(m.ID,m.TextContent())};s2,e2:=r2.DerivePersistenceState(c.DefaultJSONSerializer(),c.Descriptor{});fmt.Println("persist2",e2,len(s2.Segment(c.SegmentHistory)))
+_,e3:=e.CompileSnapshot(context.Background(),c.CompileRequest{TurnID:"turn-3",History:s2.Segment(c.SegmentHistory)[1:],CurrentTurn:&turn,IdentityPolicy:p,RequireDurableIdentity:true});fmt.Println("third after trimming oldest",e3)
+a:=c.Message{Role:c.RoleUser,Parts:[]c.ContentPart{c.ImagePart{URL:"https://example.org/a.png"}}};b:=c.Message{Role:c.RoleUser,Parts:[]c.ContentPart{c.ImagePart{URL:"https://example.org/b.png"}}};idA,_:=p.ResolveMessageID(c.MessageIdentityContext{Segment:c.SegmentHistory,Index:0},a);idB,_:=p.ResolveMessageID(c.MessageIdentityContext{Segment:c.SegmentHistory,Index:0},b);fmt.Println("different images same generated ID",idA==idB)
+}

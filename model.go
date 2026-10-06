@@ -48,10 +48,13 @@ func (m Message) Clone() Message {
 	if len(m.Parts) > 0 {
 		cloned.Parts = make([]ContentPart, len(m.Parts))
 		for i, p := range m.Parts {
-			cloned.Parts[i] = p.clonePart()
+			if value := canonicalPartValue(p); value != nil {
+				cloned.Parts[i] = value.clonePart()
+			}
 		}
 	}
-	if m.Provenance != nil {
+	cloned.Provenance = m.Provenance
+	if !nilInterfaceValue(m.Provenance) {
 		cloned.Provenance = m.Provenance.CloneProvenance()
 	}
 	return cloned
@@ -61,7 +64,7 @@ func (m Message) Clone() Message {
 func (m Message) TextContent() string {
 	var out strings.Builder
 	for _, p := range m.Parts {
-		if t, ok := p.(TextPart); ok {
+		if t, ok := canonicalPartValue(p).(TextPart); ok {
 			out.WriteString(t.Text)
 		}
 	}
@@ -71,7 +74,7 @@ func (m Message) TextContent() string {
 // HasToolCalls reports whether the message contains ToolCallPart nodes.
 func (m Message) HasToolCalls() bool {
 	for _, p := range m.Parts {
-		if _, ok := p.(ToolCallPart); ok {
+		if _, ok := canonicalPartValue(p).(ToolCallPart); ok {
 			return true
 		}
 	}
@@ -82,7 +85,7 @@ func (m Message) HasToolCalls() bool {
 func (m Message) ToolCallParts() []ToolCallPart {
 	var out []ToolCallPart
 	for _, p := range m.Parts {
-		if tc, ok := p.(ToolCallPart); ok {
+		if tc, ok := canonicalPartValue(p).(ToolCallPart); ok {
 			out = append(out, tc)
 		}
 	}
@@ -93,7 +96,7 @@ func (m Message) ToolCallParts() []ToolCallPart {
 func (m Message) ToolResultParts() []ToolResultPart {
 	var out []ToolResultPart
 	for _, p := range m.Parts {
-		if tr, ok := p.(ToolResultPart); ok {
+		if tr, ok := canonicalPartValue(p).(ToolResultPart); ok {
 			out = append(out, tr)
 		}
 	}

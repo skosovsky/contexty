@@ -1,0 +1,12 @@
+package main
+import("context"; "fmt"; c "github.com/skosovsky/contexty")
+func main(){
+for _, pointer:=range []bool{false,true}{
+call:=c.ToolCallPart{ID:"call",Name:"execute",Arguments:c.TextPayload("{}")}
+var part c.ContentPart=call
+if pointer {part=&call}
+e:=c.NewEngine(c.WithArtifactMaterialization(c.ArtifactMaterializationPolicy{Identity:c.Descriptor{ID:"host",Revision:"v1"},Materialize:func(context.Context,c.ContextArtifact)(c.ArtifactRepresentation,error){return c.ArtifactRepresentation{Role:c.RoleAssistant,Parts:[]c.ContentPart{part}},nil}}))
+r,err:=e.CompileSnapshot(context.Background(),c.CompileRequest{Artifacts:[]c.ContextArtifact{c.NewMemoryBlock("data",c.TextPayload("hello")).ContextArtifact}})
+fmt.Printf("pointer=%v err=%v payload=%+v\n",pointer,err,r.Payload)
+}
+}

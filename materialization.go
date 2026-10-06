@@ -117,26 +117,22 @@ func materializationMessage(artifact ContextArtifact, representation ArtifactRep
 	if !outputPolicyKnownRole(representation.Role) || len(representation.Parts) == 0 {
 		return Message{}, ErrInvalidArtifactMaterialization
 	}
-	for _, part := range representation.Parts {
-		if nilInterfaceValue(part) {
-			return Message{}, ErrInvalidArtifactMaterialization
-		}
+	parts, err := ownContentParts(representation.Parts)
+	if err != nil {
+		return Message{}, fmt.Errorf("%w: %w", ErrInvalidArtifactMaterialization, err)
+	}
+	for _, part := range parts {
 		if _, call := part.(ToolCallPart); call {
 			return Message{}, ErrInvalidArtifactMaterialization
 		}
 		if _, result := part.(ToolResultPart); result {
 			return Message{}, ErrInvalidArtifactMaterialization
 		}
-		if media, ok := part.(MediaPart); ok {
-			if err := media.Validate(); err != nil {
-				return Message{}, fmt.Errorf("%w: %w", ErrInvalidArtifactMaterialization, err)
-			}
-		}
 	}
 	message := Message{
 		ID:          "artifact:" + artifact.ID,
 		Role:        representation.Role,
-		Parts:       representation.Parts,
+		Parts:       parts,
 		Actor:       nil,
 		Annotations: Annotations{Timestamp: nil},
 		SourceRefs:  cloneSourceRefs(artifact.SourceRefs),

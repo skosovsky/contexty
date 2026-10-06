@@ -21,6 +21,7 @@ func TestResourceReplay_IndependentCodecs(t *testing.T) {
 	codecs := map[string]contexty.ResourceCodec{"resolve": resource}
 	option := contexty.WithReplayResourceCodecs(codecs)
 	delete(codecs, "resolve")
+	resource.Codecs[0].Descriptor.Revision = "caller-mutated-after-freeze"
 	resource.Labels.Register(
 		"late-registration",
 		func([]byte) (contexty.Extension, error) { return nil, contexty.ErrReplayCodec },

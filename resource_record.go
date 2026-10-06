@@ -9,6 +9,8 @@ import (
 
 // ResourceCodec restores typed metadata, not reader/projection executions.
 type ResourceCodec struct {
+	// Codecs declares current custom decoder identities independently of saved records.
+	Codecs   []CodecBinding
 	Messages JSONSerializer
 	Labels   *ExtensionRegistry
 }
@@ -25,7 +27,11 @@ func validatedResourceProjection(
 }
 
 func (c ResourceCodec) snapshot() ResourceCodec {
-	return ResourceCodec{Messages: snapshotJSONSerializer(c.Messages), Labels: c.Labels.snapshot()}
+	return ResourceCodec{
+		Messages: snapshotJSONSerializer(c.Messages),
+		Labels:   c.Labels.snapshot(),
+		Codecs:   cloneCodecBindings(c.Codecs),
+	}
 }
 
 // Every decoder boundary checks cancellation, including synchronous codec
@@ -65,18 +71,7 @@ func (c ResourceCodec) validateConfiguration(configuration ResourceConfiguration
 	profile.Codec = c.Messages
 	profile.Labels.Registry = c.Labels
 	profile.Labels.RequiredTypes = canonicalLabelTypes(configuration.Trace.RequiredLabelTypes)
-	topology, err := profile.codecTopology()
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrReplayCodec, err)
-	}
-	for _, binding := range configuration.Trace.Codecs {
-		key := CodecBinding{Kind: binding.Kind, Type: binding.Type, Descriptor: Descriptor{ID: "", Revision: ""}}
-		intrinsic := topology[key]
-		if intrinsic != nil && *intrinsic == binding.Descriptor {
-			continue
-		}
-		profile.Codecs = append(profile.Codecs, binding)
-	}
+	profile.Codecs = cloneCodecBindings(c.Codecs)
 	actual, err := profile.configuration(false)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrReplayCodec, err)

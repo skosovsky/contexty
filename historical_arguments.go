@@ -62,7 +62,7 @@ func (o BlobOffloader) ProjectHistoricalArguments(ctx context.Context,
 	if err != nil {
 		return HistoricalArgumentProjection{}, fmt.Errorf("%w: %w", ErrInvalidHistoricalArguments, err)
 	}
-	call, ok := history[index].Parts[part].(ToolCallPart)
+	call, ok := canonicalPartValue(history[index].Parts[part]).(ToolCallPart)
 	if !ok {
 		return HistoricalArgumentProjection{}, ErrInvalidHistoricalArguments
 	}
@@ -101,7 +101,7 @@ func historicalArgumentTarget(history []Message, messageID, callID string) (int,
 			return 0, 0, ErrInvalidHistoricalArguments
 		}
 		for index, part := range history[observation.Start].Parts {
-			call, ok := part.(ToolCallPart)
+			call, ok := canonicalPartValue(part).(ToolCallPart)
 			if ok && call.ID == callID {
 				if call.ArgumentsBlob != nil {
 					return 0, 0, ErrInvalidHistoricalArguments
@@ -121,7 +121,7 @@ func buildHistoricalArguments(ctx context.Context, request HistoricalArgumentReq
 	if selection.Disposition == BlobInline {
 		return projection, nil
 	}
-	call, ok := projection.Prompt[index].Parts[part].(ToolCallPart)
+	call, ok := canonicalPartValue(projection.Prompt[index].Parts[part]).(ToolCallPart)
 	if !ok {
 		return HistoricalArgumentProjection{}, ErrInvalidHistoricalArguments
 	}

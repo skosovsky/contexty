@@ -52,20 +52,26 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 		contexty.WithOutputPolicy(*hostEmailPolicy()),
 		contexty.WithDeferredBlocks(
 			contexty.DeferredBlock{
-				Resources:     nil,
-				ResourceCodec: contexty.ResourceCodec{Messages: contexty.DefaultJSONSerializer(), Labels: nil},
-				Name:          "session_hint",
-				Segment:       contexty.SegmentSystem,
-				MergePolicy:   contexty.PolicyReplaceByOrigin,
+				Resources: nil,
+				ResourceCodec: contexty.ResourceCodec{
+					Messages: contexty.DefaultJSONSerializer(),
+					Labels:   nil,
+					Codecs:   nil,
+				},
+				Name:        "session_hint",
+				Segment:     contexty.SegmentSystem,
+				MergePolicy: contexty.PolicyReplaceByOrigin,
 				Resolve: func(ctx context.Context) (contexty.DeferredResult, error) {
 					vars := contexty.CompileResolveVarFromContext(ctx)
 					locale := "en-US"
 					if vars != nil && vars["locale"] != "" {
 						locale = vars["locale"]
 					}
+					hint := contexty.TextMessage(contexty.RoleSystem, "Request locale: "+locale)
+					hint.ID = "session_hint"
 					return contexty.DeferredResult{Resources: nil, Messages: []contexty.Message{
 						withOrigin(
-							contexty.TextMessage(contexty.RoleSystem, "Request locale: "+locale),
+							hint,
 							"context/defaults", "session",
 						),
 					}}, nil

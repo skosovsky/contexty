@@ -49,6 +49,7 @@ type Engine struct {
 	trace                   *TraceProfile
 	recording               *RecordProfile
 	capture                 *recordCaptureOptions
+	configurationErr        error
 }
 
 // EngineOption configures the compile engine.
@@ -120,6 +121,7 @@ func NewEngine(opts ...EngineOption) *Engine {
 		trace:                   nil,
 		recording:               nil,
 		capture:                 nil,
+		configurationErr:        nil,
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -131,6 +133,9 @@ func NewEngine(opts ...EngineOption) *Engine {
 func (e *Engine) Compile(ctx context.Context, req CompileRequest) (CompileResult, error) {
 	if err := ctx.Err(); err != nil {
 		return CompileResult{}, fmt.Errorf("contexty: compile: %w", err)
+	}
+	if e.stateStore != nil && (nilInterfaceValue(e.stateStore) || e.conversationID == "") {
+		return CompileResult{}, ErrInvalidCompileConfiguration
 	}
 	if err := e.validateCompileConfiguration(req); err != nil {
 		return CompileResult{}, err
@@ -163,7 +168,7 @@ func (e *Engine) mergeWithStateStore(ctx context.Context, req CompileRequest) (C
 
 func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) CompileRequest {
 	pick := func(reqMsgs, storeMsgs []Message) []Message {
-		if len(reqMsgs) > 0 {
+		if reqMsgs != nil {
 			return reqMsgs
 		}
 		return storeMsgs
@@ -176,7 +181,7 @@ func mergeCompileRequest(storeSnap ConversationSnapshot, req CompileRequest) Com
 		Memory:                 pick(req.Memory, storeSnap.Segment(SegmentMemory)),
 		Tools:                  req.Tools,
 		Pending:                req.Pending,
-		CurrentTurn:            cloneCurrentTurnPtr(req.CurrentTurn),
+		CurrentTurn:            req.CurrentTurn, // Validate and own metadata during normalization, before any clone can erase it.
 		Artifacts:              append(storeSnap.Artifacts(), cloneArtifacts(req.Artifacts)...),
 		Options:                req.Options,
 		IdentityPolicy:         req.IdentityPolicy,
@@ -546,6 +551,19 @@ func (e *Engine) applyTransformsAndBudget(
 		return ConversationSnapshot{}, fmt.Errorf("contexty: compile formatters: %w", idErr)
 	}
 
+	if req.CurrentTurn != nil {
+		recordCurrentTurnProjectionCtx(ctx, *req.CurrentTurn)
+	}
+	if len(compilePending) != 0 && e.roleProjection != nil {
+		projectedPending, projectionErr := e.applyRoleProjection(
+			ctx,
+			EmptySnapshot().WithSegment(SegmentHistory, compilePending),
+		)
+		if projectionErr != nil {
+			return ConversationSnapshot{}, projectionErr
+		}
+		compilePending = projectedPending.Segment(SegmentHistory)
+	}
 	snap, err = e.applyBudgetHistory(ctx, snap, compilePending)
 	if err != nil {
 		return ConversationSnapshot{}, err
@@ -556,9 +574,6 @@ func (e *Engine) applyTransformsAndBudget(
 	}
 	if idErr := validateSnapshotUniqueIDs(snap); idErr != nil {
 		return ConversationSnapshot{}, fmt.Errorf("contexty: compile post-budget patches: %w", idErr)
-	}
-	if req.CurrentTurn != nil {
-		recordCurrentTurnProjectionCtx(ctx, *req.CurrentTurn)
 	}
 	recorder.markProtectedPending(messageIDs(compilePending))
 	return snap, nil
@@ -822,44 +837,61 @@ func (e *Engine) applyDeferredBlocks(ctx context.Context, snap ConversationSnaps
 		if block.Resolve == nil {
 			continue
 		}
-		stageCtx := withRecordingComponent(ctx, recordingKey(RecordingResolver, "", "", index), "deferred")
-		resolved, err := block.Resolve(stageCtx)
-		if canceled := ctx.Err(); canceled != nil {
-			return ConversationSnapshot{}, canceled
-		}
-		if err != nil {
-			return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q: %w", block.Name, err)
-		}
-		msgs, err := e.resolvedDeferredMessages(stageCtx, block, resolved)
+		var err error
+		snap, err = e.applyDeferredBlock(ctx, snap, index, block)
 		if err != nil {
 			return ConversationSnapshot{}, err
 		}
-		snap, err = removeReplacedResourceMessages(ctx, snap)
-		if err != nil {
-			return ConversationSnapshot{}, err
-		}
-		seg := block.Segment
-		if seg == "" {
-			seg = SegmentMemory
-		}
-		existing := snap.Segment(seg)
-		msgs, err = ensureMessageIDsFromContext(ctx, seg, len(existing), msgs)
-		if err != nil {
-			return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q identity: %w", block.Name, err)
-		}
-		msgs, err = traceStage(stageCtx, "deferred", msgs, msgs, false)
-		if err != nil {
-			return ConversationSnapshot{}, err
-		}
-		combined := applyMergePolicy(existing, msgs, block.MergePolicy)
-		inputs := append(cloneMessageSlice(existing), msgs...)
-		combined, err = traceStage(ctx, "merge", inputs, combined, false)
-		if err != nil {
-			return ConversationSnapshot{}, err
-		}
-		recordMergeRemovalsCtx(ctx, existing, combined)
-		snap = snap.WithSegment(seg, combined)
 	}
+	return snap, nil
+}
+
+func (e *Engine) applyDeferredBlock(
+	ctx context.Context,
+	snap ConversationSnapshot,
+	index int,
+	block DeferredBlock,
+) (ConversationSnapshot, error) {
+	stageCtx := withRecordingComponent(ctx, recordingKey(RecordingResolver, "", "", index), "deferred")
+	resolved, err := block.Resolve(stageCtx)
+	if canceled := ctx.Err(); canceled != nil {
+		return ConversationSnapshot{}, canceled
+	}
+	if err != nil {
+		return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q: %w", block.Name, err)
+	}
+	msgs, err := e.resolvedDeferredMessages(stageCtx, block, resolved)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	snap, err = removeReplacedResourceMessages(ctx, snap)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	seg := block.Segment
+	if seg == "" {
+		seg = SegmentMemory
+	}
+	existing := snap.Segment(seg)
+	msgs, err = ensureMessageIDsFromContext(ctx, seg, len(existing), msgs)
+	if err != nil {
+		return ConversationSnapshot{}, fmt.Errorf("contexty: deferred %q identity: %w", block.Name, err)
+	}
+	msgs, err = traceStage(stageCtx, "deferred", msgs, msgs, false)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	combined, mergeErr := applyMergePolicy(existing, msgs, block.MergePolicy)
+	if mergeErr != nil {
+		return ConversationSnapshot{}, mergeErr
+	}
+	inputs := append(cloneMessageSlice(existing), msgs...)
+	combined, err = traceStage(ctx, "merge", inputs, combined, false)
+	if err != nil {
+		return ConversationSnapshot{}, err
+	}
+	recordMergeRemovalsCtx(ctx, existing, combined)
+	snap = snap.WithSegment(seg, combined)
 	return snap, nil
 }
 

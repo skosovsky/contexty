@@ -1,0 +1,19 @@
+package main
+import (
+ "context"
+ "fmt"
+ c "github.com/skosovsky/contexty"
+)
+func main(){
+ pipe:=c.NewBudgetPipeline(c.BudgetConfig{Budget:c.EffectiveInputBudget(4),TruncateStrategy:c.NewDropStrategy()},c.CharTokenEstimator{})
+ req:=c.CompileRequest{History:[]c.Message{{ID:"h",Role:c.RoleUser,Parts:[]c.ContentPart{c.TextPart{Text:"history"}}}},Memory:[]c.Message{{ID:"m",Role:c.RoleUser,Parts:[]c.ContentPart{c.TextPart{Text:"m"}}}}}
+ for _,seg:=range []c.SegmentName{c.SegmentHistory,c.SegmentMemory,"typo"}{
+  out,err:=c.NewEngine(c.WithBudgetPipeline(seg,pipe)).CompileSnapshot(context.Background(),req)
+  fmt.Printf("budget(%q): history=%d memory=%d err=%v\n",seg,len(out.Payload.History),len(out.Payload.Memory),err)
+ }
+ reg:=c.NewProvenanceRegistry()
+ reg.Register("user",func([]byte)(c.Provenance,error){return c.SystemProvenance{Component:"service"},nil})
+ p,err:=reg.Decode([]byte(`{"type_id":"user","payload":{"channel":"chat"}}`))
+ data,e:=c.EncodeProvenance(p)
+ fmt.Printf("provenance: err=%v encoding_error=%v reencoded=%s\n",err,e,data)
+}

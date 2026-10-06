@@ -8,6 +8,9 @@ var ErrConversationVersionExhausted = errors.New("contexty: conversation version
 // Sentinel errors for typical contexty failure modes.
 // Use [errors.Is] to check for these in calling code.
 var (
+	ErrMissingEventIdentity        = errors.New("contexty: missing logical event identity")
+	ErrInvalidCompileConfiguration = errors.New("contexty: invalid compile configuration")
+	ErrInvalidCurrentTurn          = errors.New("contexty: prompt-safe current turn requires raw event")
 	// ErrBudgetExceeded is returned by StrictStrategy when a block does not fit
 	// within the remaining token budget.
 	ErrBudgetExceeded = errors.New("contexty: block exceeds remaining token budget")

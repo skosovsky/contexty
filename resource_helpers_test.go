@@ -120,6 +120,7 @@ func fixtureResolvedResource(t *testing.T, labeled bool) (contexty.ResolvedResou
 		codec.Messages = fixtureExtensionEstimateCodec()
 		codec.Labels = resolver.Labels.Registry
 	}
+	codec.Codecs = resolver.Codecs
 	result, err := resolver.Resolve(context.Background(), request)
 	require.NoError(t, err)
 	return result, codec
@@ -186,7 +187,11 @@ func fixtureIndependentResourceRecord(
 	)
 	configuration, err := resolver.Configuration()
 	require.NoError(t, err)
-	resourceCodec := contexty.ResourceCodec{Messages: messages, Labels: resolver.Labels.Registry}
+	resourceCodec := contexty.ResourceCodec{
+		Messages: messages,
+		Labels:   resolver.Labels.Registry,
+		Codecs:   resolver.Codecs,
+	}
 	block := contexty.DeferredBlock{
 		Name:          "selected",
 		ResourceCodec: resourceCodec,

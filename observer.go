@@ -110,7 +110,7 @@ func messageFingerprint(msg Message) string {
 	h := fnv.New64a()
 	_, _ = fmt.Fprintf(h, "%s|%s", msg.Role, msg.TextContent())
 	for _, p := range msg.Parts {
-		switch v := p.(type) {
+		switch v := canonicalPartValue(p).(type) {
 		case ToolCallPart:
 			_, _ = fmt.Fprintf(h, "|tc:%s:%s:%s", v.ID, v.Name, v.Arguments.PlainText())
 		case ToolResultPart:

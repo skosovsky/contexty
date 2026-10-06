@@ -72,15 +72,12 @@ func (e *Engine) prepareCompileOptions(
 func (e *Engine) deferredConfiguration() ([]DeferredConfiguration, error) {
 	var configs []DeferredConfiguration
 	for index, block := range e.deferred {
-		if block.Resolve == nil {
-			continue
-		}
 		segment := block.Segment
 		if segment == "" {
 			segment = SegmentMemory
 		}
 		if !isKnownSegment(segment) {
-			return nil, ErrInvalidRecordingComponent
+			return nil, ErrInvalidCompileConfiguration
 		}
 		policy := block.MergePolicy
 		if policy == "" {
@@ -89,7 +86,10 @@ func (e *Engine) deferredConfiguration() ([]DeferredConfiguration, error) {
 		switch policy {
 		case PolicyAppend, PolicyReplaceByOrigin, PolicyDeduplicateByLayer:
 		default:
-			return nil, ErrInvalidRecordingComponent
+			return nil, ErrInvalidCompileConfiguration
+		}
+		if block.Resolve == nil {
+			continue
 		}
 		configs = append(
 			configs,

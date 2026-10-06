@@ -311,8 +311,9 @@ type partWire struct {
 func MarshalParts(parts []ContentPart) ([]byte, error) {
 	wires := make([]partWire, len(parts))
 	for i, part := range parts {
+		part = canonicalPartValue(part)
 		if part == nil {
-			return nil, fmt.Errorf("contexty: marshal parts: nil part at index %d", i)
+			return nil, fmt.Errorf("%w: marshal index %d", ErrInvalidContentPart, i)
 		}
 		body, err := json.Marshal(part)
 		if err != nil {
@@ -377,4 +378,55 @@ func decodePart(wire partWire) (ContentPart, error) {
 	default:
 		return nil, fmt.Errorf("unknown content part kind %q", wire.Kind)
 	}
+}
+
+// ErrInvalidContentPart rejects nil and typed-nil AST parts at data boundaries.
+var ErrInvalidContentPart = errors.New("contexty: invalid content part")
+
+// canonicalPartValue returns a borrowed value representation. Ownership is taken
+// separately with clonePart; helpers may inspect pointers without changing input.
+func canonicalPartValue(part ContentPart) ContentPart {
+	if nilInterfaceValue(part) {
+		return nil
+	}
+	switch value := part.(type) {
+	case *TextPart:
+		return *value
+	case *ImagePart:
+		return *value
+	case *MediaPart:
+		return *value
+	case *ToolCallPart:
+		return *value
+	case *ToolResultPart:
+		return *value
+	default:
+		return part
+	}
+}
+
+func validateContentParts(parts []ContentPart) error {
+	for _, part := range parts {
+		value := canonicalPartValue(part)
+		if value == nil {
+			return ErrInvalidContentPart
+		}
+		if media, ok := value.(MediaPart); ok {
+			if err := media.Validate(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func ownContentParts(parts []ContentPart) ([]ContentPart, error) {
+	if err := validateContentParts(parts); err != nil {
+		return nil, err
+	}
+	owned := make([]ContentPart, len(parts))
+	for i, part := range parts {
+		owned[i] = canonicalPartValue(part).clonePart()
+	}
+	return owned, validateContentParts(owned)
 }

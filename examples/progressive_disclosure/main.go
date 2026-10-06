@@ -151,8 +151,12 @@ func resourceBlock(
 		return contexty.DeferredBlock{}, err
 	}
 	return contexty.DeferredBlock{ //nolint:exhaustruct_v5 // default memory segment/append placement
-		Name:          "selected-content",
-		ResourceCodec: contexty.ResourceCodec{Messages: hostCodec(), Labels: hostCodec().Extensions},
+		Name: "selected-content",
+		ResourceCodec: contexty.ResourceCodec{
+			Messages: hostCodec(),
+			Labels:   hostCodec().Extensions,
+			Codecs:   resolver.Codecs,
+		},
 		Resources: []contexty.ResourceSelection{{ID: request.ID, Resource: selected, Configuration: configuration,
 			Budget: request.Budget, MaxBytes: request.Read.MaxBytes}},
 		Resolve: func(ctx context.Context) (contexty.DeferredResult, error) {

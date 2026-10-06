@@ -390,8 +390,30 @@ gates still being repaired; do not treat the baseline as a passing test report.
   them now returns `ErrInvalidDeltaIDs`. DeltaRemoveMessages retains MessageIDs.
   State/message formats are not changed by this field migration.
 
-Subsequent behavioral gates require explicit estimators, distinguish nil inherited
-segments from nonnil empty overrides, reject incomplete stateful configuration,
-and use host event IDs rather than content fingerprints for durable messages.
-Current ResourceCodec custom revisions must be declared independently of saved
-configuration. The final migration examples are updated as those gates land.
+Identity/configuration remediation now requires these consumer updates:
+
+- Supply `TurnID` for missing-ID Pending/CurrentTurn events using
+  `NewStableMessageIdentityPolicy`. IDs use turn identity, event kind and ordinal
+  within the turn; retry keeps the same ID after history trimming. Historical,
+  static and generated messages need explicit IDs or a host identity policy.
+  Preserve logical IDs across content revisions; use MessageContentRef for content.
+- Use nil System/History/Memory to inherit stored data, and nonnil empty slices
+  to clear a segment for this compilation. Tools comes only from the request.
+- Provide a conversation ID with a configured StateStore for Compile;
+  CompileSnapshot remains stateless. PromptSafe without Raw and unknown
+  CurrentTurn persistence policies are errors. An entirely zero turn is absent.
+- Role projection covers Pending/CurrentTurn as well as source segments, while
+  hooks and segment formatters retain their source-segment scope. Raw writeback
+  preserves original roles. Layer deduplication replaces the entire incoming
+  (TemplateID, LayerID) group and keeps its order.
+- Declare current custom `ResourceCodec.Codecs` independently from saved
+  configuration, using the actual decoder bindings and revisions. Mismatches
+  fail before decoding. Update bindings whenever decoder behavior changes.
+- Fix invalid deferred enums and duplicate/reserved named views at configuration
+  time. Their errors are enforced even when recording is disabled. Built-in
+  CompileTarget views and registered RenderView names have different scopes.
+- Materialized pointer parts are canonicalized to owned values. Typed nil,
+  invalid media and tool call/result parts are rejected. Custom provenance
+  decoders must return a nonnil value with the registered discriminator.
+
+Explicit estimator and arithmetic budget gates remain assigned to stage 4.

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestApplyMergePolicy_AppendDefault(t *testing.T) {
@@ -11,19 +12,21 @@ func TestApplyMergePolicy_AppendDefault(t *testing.T) {
 	t.Parallel()
 	existing := []Message{{ID: "a"}, {ID: "b"}}
 	incoming := []Message{{ID: "c"}}
-	out := applyMergePolicy(existing, incoming, PolicyAppend)
+	out, err := applyMergePolicy(existing, incoming, PolicyAppend)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"a", "b", "c"}, mergePolicyMessageIDs(out))
 }
 
-func TestApplyMergePolicy_UnknownPolicyFallsBackToAppend(t *testing.T) {
+func TestApplyMergePolicy_UnknownPolicyRejected(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	existing := []Message{{ID: "a"}}
 	incoming := []Message{{ID: "b"}}
-	out := applyMergePolicy(existing, incoming, MergePolicy("unknown"))
-	// Act / Assert: exercise the contract and check its result.
-	assert.Equal(t, []string{"a", "b"}, mergePolicyMessageIDs(out))
+	out, err := applyMergePolicy(existing, incoming, MergePolicy("unknown"))
+	// Assert: unknown configuration never appends.
+	require.ErrorIs(t, err, ErrInvalidCompileConfiguration)
+	assert.Nil(t, out)
 }
 
 func TestApplyMergePolicy_ReplaceByOrigin_EmptyOriginIncoming(t *testing.T) {
@@ -34,7 +37,8 @@ func TestApplyMergePolicy_ReplaceByOrigin_EmptyOriginIncoming(t *testing.T) {
 		Origin: &MessageOrigin{TemplateID: "t1", LayerID: "l1"},
 	}}
 	incoming := []Message{{ID: "new"}}
-	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	out, err := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"old", "new"}, mergePolicyMessageIDs(out))
 }
@@ -50,7 +54,8 @@ func TestApplyMergePolicy_ReplaceByOrigin_ReplacesTemplate(t *testing.T) {
 		ID:     "new",
 		Origin: &MessageOrigin{TemplateID: "agents/sales", LayerID: "v2"},
 	}}
-	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	out, err := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"keep", "new"}, mergePolicyMessageIDs(out))
 }
@@ -67,7 +72,8 @@ func TestApplyMergePolicy_ReplaceByOrigin_DropsMultipleSameTemplate(t *testing.T
 		ID:     "new",
 		Origin: &MessageOrigin{TemplateID: "agents/sales", LayerID: "v3"},
 	}}
-	out := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	out, err := applyMergePolicy(existing, incoming, PolicyReplaceByOrigin)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"keep", "new"}, mergePolicyMessageIDs(out))
 }
@@ -83,17 +89,20 @@ func TestApplyMergePolicy_DeduplicateByLayer(t *testing.T) {
 		{ID: "new", Origin: &MessageOrigin{TemplateID: "t2", LayerID: "facts"}},
 		{ID: "extra", Origin: &MessageOrigin{TemplateID: "t3", LayerID: "other"}},
 	}
-	out := applyMergePolicy(existing, incoming, PolicyDeduplicateByLayer)
+	out, err := applyMergePolicy(existing, incoming, PolicyDeduplicateByLayer)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
-	assert.Equal(t, []string{"new", "extra"}, mergePolicyMessageIDs(out))
+	assert.Equal(t, []string{"old", "new", "extra"}, mergePolicyMessageIDs(out))
 }
 
 func TestApplyMergePolicy_MultipleDeferredBlocksSimulated(t *testing.T) {
 	// Arrange.
 	t.Parallel()
 	existing := []Message{{ID: "a"}, {ID: "b"}}
-	first := applyMergePolicy(existing, []Message{{ID: "c"}}, PolicyAppend)
-	second := applyMergePolicy(first, []Message{{ID: "d"}}, PolicyAppend)
+	first, err := applyMergePolicy(existing, []Message{{ID: "c"}}, PolicyAppend)
+	require.NoError(t, err)
+	second, err := applyMergePolicy(first, []Message{{ID: "d"}}, PolicyAppend)
+	require.NoError(t, err)
 	// Act / Assert: exercise the contract and check its result.
 	assert.Equal(t, []string{"a", "b", "c", "d"}, mergePolicyMessageIDs(second))
 }

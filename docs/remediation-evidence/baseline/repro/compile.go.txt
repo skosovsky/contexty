@@ -1,0 +1,15 @@
+package main
+import("context";"fmt"; c "github.com/skosovsky/contexty")
+func main(){
+ctx:=context.Background()
+for _,v:=range []struct{s c.SegmentName;p c.MergePolicy}{{"memroy",c.PolicyAppend},{c.SegmentMemory,"replcae"}} {
+n:=0
+eng:=c.NewEngine(c.WithDeferredBlocks(c.DeferredBlock{Name:"rules",Segment:v.s,MergePolicy:v.p,Resolve:func(context.Context)(c.DeferredResult,error){n++;return c.DeferredResult{Messages:[]c.Message{c.TextMessage(c.RoleSystem,"NEW RULE")}},nil}}))
+r,e:=eng.CompileSnapshot(ctx,c.CompileRequest{Memory:[]c.Message{c.TextMessage(c.RoleSystem,"OLD RULE")}})
+fmt.Printf("segment=%q policy=%q err=%v calls=%d payload=%v prepared_segments=%v\n",v.s,v.p,e,n,r.Payload.FlattenMessages(),r.PreparedSnapshot.SegmentNames())
+}
+turn:=c.NewCurrentTurn(c.TextMessage(c.RoleUser,"active"))
+n:=0
+r,e:=c.NewEngine(c.WithRoleProjectionPolicy(c.RoleProjectionFunc(func(m c.Message)(c.Role,error){n++;return c.RoleSystem,nil}))).CompileSnapshot(ctx,c.CompileRequest{History:[]c.Message{c.TextMessage(c.RoleUser,"history")},CurrentTurn:&turn})
+fmt.Printf("role projection err=%v called=%d roles=",e,n);for _,m:=range r.Payload.History{fmt.Printf("%s ",m.Role)};fmt.Println()
+}

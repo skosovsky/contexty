@@ -77,7 +77,14 @@ func (e *Engine) resolvedDeferredMessages(
 	if err := validateResourceMessageIdentities(result); err != nil {
 		return nil, err
 	}
-	messages := cloneMessageSlice(result.Messages)
+	messages := make([]Message, 0, len(result.Messages)+len(result.Resources))
+	for _, message := range result.Messages {
+		owned, err := ownCompileMessage(message)
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, owned)
+	}
 	for index, resource := range result.Resources {
 		frozen, err := validateDeferredResource(ctx, block.Resources[index], resource, block.ResourceCodec)
 		if err != nil {

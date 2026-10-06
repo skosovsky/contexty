@@ -84,7 +84,7 @@ func viewSegmentOrder() []SegmentName {
 func formatPartsPlain(parts []ContentPart) string {
 	var b strings.Builder
 	for _, p := range parts {
-		switch v := p.(type) {
+		switch v := canonicalPartValue(p).(type) {
 		case TextPart:
 			b.WriteString(v.Text)
 		case ImagePart:
@@ -109,8 +109,11 @@ func formatPartsPlain(parts []ContentPart) string {
 }
 
 func rejectMediaMessage(message Message) error {
+	if err := validateContentParts(message.Parts); err != nil {
+		return err
+	}
 	for _, part := range message.Parts {
-		if part != nil && part.partKind() == PartKindMedia {
+		if !nilInterfaceValue(part) && part.partKind() == PartKindMedia {
 			return ErrUnsupportedMediaRendering
 		}
 	}

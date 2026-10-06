@@ -1,0 +1,15 @@
+ok  	github.com/skosovsky/contexty	41.947s
+ok  	github.com/skosovsky/contexty/adapters/blob/memory	(cached)
+ok  	github.com/skosovsky/contexty/adapters/resource/memory	(cached)
+ok  	github.com/skosovsky/contexty/examples/archive_resume	1.583s
+?   	github.com/skosovsky/contexty/examples/context_budget	[no test files]
+ok  	github.com/skosovsky/contexty/examples/context_composition	1.898s
+?   	github.com/skosovsky/contexty/examples/context_evaluation	[no test files]
+ok  	github.com/skosovsky/contexty/examples/context_evaluation/evaluation	15.833s
+?   	github.com/skosovsky/contexty/examples/context_projections	[no test files]
+?   	github.com/skosovsky/contexty/examples/full_assembly	[no test files]
+ok  	github.com/skosovsky/contexty/examples/opaque_state	2.101s
+?   	github.com/skosovsky/contexty/examples/prefix_diagnostics	[no test files]
+ok  	github.com/skosovsky/contexty/examples/progressive_disclosure	1.982s
+ok  	github.com/skosovsky/contexty/examples/resilient_store	1.820s
+ok  	github.com/skosovsky/contexty/testutil	1.809s

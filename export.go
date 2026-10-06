@@ -193,7 +193,7 @@ func exportMessageMetadata(msg Message, policy ExportMetadata, registry *Extensi
 func exportMessageParts(parts []ContentPart) []ContentPart {
 	var exported []ContentPart
 	for _, part := range parts {
-		if call, ok := part.(ToolCallPart); ok {
+		if call, ok := canonicalPartValue(part).(ToolCallPart); ok {
 			call.ArgumentsBlob = nil
 			part = call
 		}

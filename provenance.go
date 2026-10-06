@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 	"sync"
 )
 
@@ -42,8 +43,11 @@ func (r *ProvenanceRegistry) snapshot() *ProvenanceRegistry {
 	return &ProvenanceRegistry{mu: sync.RWMutex{}, decoders: maps.Clone(r.decoders), intrinsic: maps.Clone(r.intrinsic)}
 }
 
-// Register adds a decoder for typeID. Panics on duplicate registration.
+// Register adds a decoder. Panics on empty/whitespace typeID, nil decoder or duplicate registration.
 func (r *ProvenanceRegistry) Register(typeID string, decode func([]byte) (Provenance, error)) {
+	if typeID == "" || typeID != strings.TrimSpace(typeID) || decode == nil {
+		panic("contexty: invalid provenance registration")
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, exists := r.decoders[typeID]; exists {
@@ -74,6 +78,9 @@ func (r *ProvenanceRegistry) Decode(data []byte) (Provenance, error) {
 	if err != nil {
 		return nil, fmt.Errorf("contexty: provenance decode %q: %w", wire.TypeID, err)
 	}
+	if nilInterfaceValue(p) || p.ProvenanceType() != wire.TypeID {
+		return nil, ErrInvalidProvenance
+	}
 	return p, nil
 }
 
@@ -84,6 +91,9 @@ var errProvenanceNil = errors.New("contexty: provenance nil")
 func EncodeProvenance(p Provenance) ([]byte, error) {
 	if p == nil {
 		return []byte(jsonNullLiteral), nil
+	}
+	if nilInterfaceValue(p) || p.ProvenanceType() == "" {
+		return nil, ErrInvalidProvenance
 	}
 	payload, err := json.Marshal(p)
 	if err != nil {
@@ -138,4 +148,18 @@ func DefaultProvenanceRegistry() *ProvenanceRegistry {
 		"system": {ID: "contexty/codec/system-provenance", Revision: "contract"},
 	}
 	return r
+}
+
+// ErrInvalidProvenance indicates a missing or mismatched host type identity.
+var ErrInvalidProvenance = errors.New("contexty: invalid provenance")
+
+func validateProvenanceClone(before, after Provenance) error {
+	if before == nil && after == nil {
+		return nil
+	}
+	if nilInterfaceValue(before) || nilInterfaceValue(after) || before.ProvenanceType() == "" ||
+		before.ProvenanceType() != after.ProvenanceType() {
+		return ErrInvalidProvenance
+	}
+	return nil
 }
