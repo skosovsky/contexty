@@ -25,6 +25,7 @@ func WithKeyPrefix(prefix string) Option {
 
 // WithTTL expires conversation payload after writes. OCC keys and empty
 // tombstones do not expire; expiry advances the revision before the next read/CAS.
+// Positive durations round upward to milliseconds; zero explicitly means persistent.
 func WithTTL(ttl time.Duration) Option {
 	if ttl < 0 {
 		panic("contexty/redis: WithTTL called with negative duration")

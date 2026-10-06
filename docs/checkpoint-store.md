@@ -7,7 +7,11 @@ projection and codec must succeed before publishing anything. One successful
 batch consumes one OCC revision, including an explicit no-op delta. An empty
 batch returns `ErrEmptyCheckpointCommit` without consuming a revision. Concurrent
 writers with the same token produce one success and one conflict. `ClearState`
-keeps its payload-free, monotonic tombstone contract.
+keeps its payload-free, monotonic tombstone contract. Postgres clear locks and
+checks only the stored version, then encodes a standard empty checkpoint. It does
+not decode old payload or invoke retired host codecs; undecodable content can be
+cleared with a known matching token. Stale/exhausted tokens still fail without
+publication. Load/commit continue to require valid current codecs.
 
 `ProjectCheckpoint` is the explicit pure persistence boundary. Artifact policy
 Store retains all supported lifecycles; Skip retains none; Default retains only
@@ -25,6 +29,24 @@ must not supply duplicate artifact IDs in wire data; decoding rejects them rathe
 than merging or overwriting revisions. Artifact merges belong to state transitions.
 Durable application callers
 must use `ProjectCheckpoint` explicitly when encoding checkpoints themselves.
+
+Memory operations recheck cancellation after acquiring the lock and before
+publication. Cancellation observed while waiting cannot clear or advance state.
+The reference store retains one mutex across codec callbacks, serializing even
+different conversation IDs. Codecs must not reenter this store. Shared host callback
+state needs its own synchronization when reused elsewhere. Deterministic tests and
+local parallel benchmarks document this tradeoff; no production throughput target
+justifies a new snapshot-compute-CAS design here. On this local M1 Max, three
+parallel benchmark samples with distinct conversation IDs took 12.4–13.9µs/op
+without synthetic decoder work and 18.9–22.2µs/op with 10,000 rotate/XOR
+iterations per decode (76 allocs/op in both). This measures callback cost under
+the shared lock, not production latency or a benefit from a different design.
+See `remediation-evidence/stage5/memory-bench.log` for the exact run.
+
+Redis positive TTL rounds upward to milliseconds:1ns/999999ns→1ms,1500us→2ms.
+Zero explicitly selects persistence; negative values panic at configuration.
+Duration ceiling cannot overflow because milliseconds are much smaller than the
+int64 nanosecond range. OCC revision/empty tombstones remain persistent.
 
 Redis uses a new checkpoint namespace. Namespace and conversation ID are encoded
 as hex; a nonempty conversation-specific hash tag binds revision/payload keys to

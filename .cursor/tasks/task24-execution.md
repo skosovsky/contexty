@@ -110,3 +110,26 @@ Root race50.281s PASS; affected final race1.510s PASS; pinned lint all3 zeroissu
 fuzz10s+10s PASS; benchguardrails before/afterPASS513→514truncateallocs/op.
 Preserved reviewSHA F06/F07/F08 behavioral baseline PASS. Reports/logs/measurements:
 docs/remediation-evidence/stage4/. Commit fix: budget accounting; SHA in stage5.
+
+## Stage 5 — stores
+
+Stage4 commit:2a543b7 (fix: budget accounting).
+Normative baseline docs/remediation-contracts.md precedes implementation.
+ScopeF09/F10/D22/D28; OCC tombstones and atomic batch commit preserved.
+Checklist (7 equally weighted criteria):
+- [x] S5.1: Redis positive TTL ceil to positive milliseconds, zero persistent, negative rejected; boundary/maxduration wire tests and live positive PTTL integration evidence.
+- [x] S5.2: F10 memory operations recheck cancellation after lock and before mutation; deterministic waiting-lock tests prove unchanged state/version on cancellation.
+- [x] S5.3: D28 Postgres clear independent of old payload codecs, version-only OCC, advances empty tombstone; stale/exhausted/concurrent/missing cases preserve parity.
+- [x] S5.4: atomic batches, ABA tombstones, expiry identity and recreate protections remain; shared conformance plus root/adapter regressions pass.
+- [x] S5.5: D22 codec-under-lock non-reentrancy documented and measured; keep simple mutex with explicit tradeoff, no speculative lock manager.
+- [x] S5.6: immutable reviewSHA behavioral F09/F10 overlay probes executed; equivalent AAA regressions cover fixes.
+- [x] S5.7: all3modules race/pinnedlint; Redis/Postgres isolated container tests run without skips; store contracts/migration reflect semantics, both independent acceptance100%/PASS.
+
+
+Stage 5 acceptance: completeness7/7=100%; correctnessPASS. No confirmed unresolved
+findings. Root race42.754s, Redis17.196s, Postgres4.172s PASS; isolated
+containers without skips, all3 pinnedlint0issues. Independent Memory/TTL ×3
+and addressed live Postgres3.416s PASS. Original F09/F10 baseline -race count10
+PASS. Mutex benchmark samples/repeat document callback cost and timing noise,
+without throughput claims. Evidence docs/remediation-evidence/stage5/.
+Commit fix: store boundaries; SHA recorded at start of stage6.

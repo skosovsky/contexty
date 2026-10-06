@@ -168,6 +168,8 @@ func cloneMessageSlice(msgs []Message) []Message {
 }
 
 // MemoryConversationStateStore is an in-memory reference ConversationStateStore.
+// One mutex serializes IDs, including codec callbacks. Callbacks must not reenter
+// this store and must synchronize their own shared state when reused elsewhere.
 type MemoryConversationStateStore struct {
 	mu            sync.RWMutex
 	conversations map[string]ConversationSnapshot
@@ -201,6 +203,9 @@ func (s *MemoryConversationStateStore) LoadState(
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if err := ctx.Err(); err != nil {
+		return ConversationState{}, err
+	}
 	st, ok := s.conversations[conversationID]
 	if !ok {
 		return EmptySnapshot(), nil
@@ -223,6 +228,9 @@ func (s *MemoryConversationStateStore) CommitState(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cur, ok := s.conversations[conversationID]
 	if !ok {
 		if expectedVersion != 0 {
@@ -276,6 +284,9 @@ func (s *MemoryConversationStateStore) ClearState(
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	cur, ok := s.conversations[conversationID]
 	if !ok {
 		if expectedVersion != 0 {
@@ -288,6 +299,9 @@ func (s *MemoryConversationStateStore) ClearState(
 	}
 	nextVersion, err := NextConversationVersion(cur.version)
 	if err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	s.conversations[conversationID] = EmptyState().WithVersion(nextVersion)

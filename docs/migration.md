@@ -424,3 +424,11 @@ request, including fixed sections and active input. Already fitting history surv
 once-per-request overhead accounting. Update decisions/soft-target assertions that
 previously used a separately reduced history limit. MinMessages remains an optional
 block-size threshold; use RetentionPolicy for protection.
+
+Store remediation changes Redis positive TTL precision to ceiling milliseconds;
+zero alone means persistent. Memory cancellation after lock wait returns the context
+error without changing the OCC token. Postgres ClearState can remove undecodable
+old payload with a known matching token; it writes a standard empty checkpoint
+without host codec callbacks. Load/commit retain their lossless codec requirement.
+The memory reference store keeps codec execution under its global mutex; callbacks
+must not reenter it. See checkpoint-store.md for ownership and concurrency limits.

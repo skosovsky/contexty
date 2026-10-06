@@ -84,12 +84,10 @@ func (s *Store) CommitState(
 	)
 }
 
-// ClearState removes payload and retains an advancing OCC tombstone.
+// ClearState checks only the locked OCC token, without decoding old payload or
+// invoking host codecs, then retains a standard empty advancing tombstone.
 func (s *Store) ClearState(ctx context.Context, conversationID string, expectedVersion int64) error {
-	return s.mutate(ctx, conversationID, expectedVersion,
-		func(contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error) {
-			return contexty.EmptySnapshot(), nil
-		})
+	return s.mutate(ctx, conversationID, expectedVersion, nil)
 }
 
 func (s *Store) mutate(
@@ -107,57 +105,17 @@ func (s *Store) mutate(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var cur contexty.ConversationSnapshot
-	var version int64
-	loadQ := fmt.Sprintf(
-		`SELECT version, segments FROM %s WHERE thread_id = @thread_id FOR UPDATE`,
-		s.tableName,
-	)
-	var payload []byte
-	loadErr := tx.QueryRow(ctx, loadQ, pgx.NamedArgs{threadIDParam: conversationID}).Scan(&version, &payload)
-	switch {
-	case loadErr == nil:
-		cur, err = s.codec.Decode(payload)
-		if err != nil {
-			return fmt.Errorf("contexty/postgres: decode: %w", err)
-		}
-		cur = cur.WithVersion(version)
-	case errors.Is(loadErr, pgx.ErrNoRows):
-		if expectedVersion != 0 {
-			return contexty.ErrConversationVersionConflict
-		}
-		cur = contexty.EmptySnapshot()
-	default:
-		return classifyPostgresErr("load for update", loadErr)
-	}
-	if version != expectedVersion {
-		return contexty.ErrConversationVersionConflict
-	}
-
-	next, err := update(cur)
+	cur, insert, err := s.loadLocked(ctx, tx, conversationID, expectedVersion, update == nil)
 	if err != nil {
 		return err
 	}
-	next, err = contexty.ProjectCheckpoint(
-		next,
-		contexty.JSONSerializer{Provenance: s.codec.Provenance, Extensions: s.codec.Extensions},
-		s.codec.OpaqueProfile,
-	)
+	nextVersion, encoded, err := s.prepareMutation(cur, update)
 	if err != nil {
 		return err
-	}
-	nextVersion, err := contexty.NextConversationVersion(version)
-	if err != nil {
-		return err
-	}
-	next = next.WithVersion(nextVersion)
-	encoded, err := s.codec.Encode(next)
-	if err != nil {
-		return fmt.Errorf("contexty/postgres: encode: %w", err)
 	}
 
 	if err := s.persistSnapshot(
-		ctx, tx, conversationID, expectedVersion, next.Version(), encoded, loadErr != nil,
+		ctx, tx, conversationID, expectedVersion, nextVersion, encoded, insert,
 	); err != nil {
 		return err
 	}
@@ -165,6 +123,78 @@ func (s *Store) mutate(
 		return classifyPostgresErr("commit", err)
 	}
 	return nil
+}
+
+func (s *Store) loadLocked(
+	ctx context.Context,
+	tx pgx.Tx,
+	conversationID string,
+	expectedVersion int64,
+	clearOnly bool,
+) (contexty.ConversationSnapshot, bool, error) {
+	query := fmt.Sprintf(`SELECT version, segments FROM %s WHERE thread_id = @thread_id FOR UPDATE`, s.tableName)
+	var version int64
+	var payload []byte
+	var err error
+	if clearOnly {
+		query = fmt.Sprintf(`SELECT version FROM %s WHERE thread_id = @thread_id FOR UPDATE`, s.tableName)
+		err = tx.QueryRow(ctx, query, pgx.NamedArgs{threadIDParam: conversationID}).Scan(&version)
+	} else {
+		err = tx.QueryRow(ctx, query, pgx.NamedArgs{threadIDParam: conversationID}).Scan(&version, &payload)
+	}
+	insert := errors.Is(err, pgx.ErrNoRows)
+	if err != nil && !insert {
+		return contexty.ConversationSnapshot{}, false, classifyPostgresErr("load for update", err)
+	}
+	if version != expectedVersion {
+		return contexty.ConversationSnapshot{}, false, contexty.ErrConversationVersionConflict
+	}
+	cur := contexty.EmptySnapshot().WithVersion(version)
+	if !clearOnly && !insert {
+		cur, err = s.codec.Decode(payload)
+		if err != nil {
+			return contexty.ConversationSnapshot{}, false, fmt.Errorf("contexty/postgres: decode: %w", err)
+		}
+		cur = cur.WithVersion(version)
+	}
+	return cur, insert, nil
+}
+
+func (s *Store) prepareMutation(
+	cur contexty.ConversationSnapshot,
+	update func(contexty.ConversationSnapshot) (contexty.ConversationSnapshot, error),
+) (int64, []byte, error) {
+	next := contexty.EmptySnapshot()
+	codec := contexty.ConversationCodec{
+		Provenance:    nil,
+		Extensions:    nil,
+		OpaqueProfile: contexty.Descriptor{ID: "", Revision: ""},
+	}
+	if update != nil {
+		var err error
+		next, err = update(cur)
+		if err != nil {
+			return 0, nil, err
+		}
+		next, err = contexty.ProjectCheckpoint(
+			next,
+			contexty.JSONSerializer{Provenance: s.codec.Provenance, Extensions: s.codec.Extensions},
+			s.codec.OpaqueProfile,
+		)
+		if err != nil {
+			return 0, nil, err
+		}
+		codec = s.codec
+	}
+	version, err := contexty.NextConversationVersion(cur.Version())
+	if err != nil {
+		return 0, nil, err
+	}
+	encoded, err := codec.Encode(next.WithVersion(version))
+	if err != nil {
+		return 0, nil, fmt.Errorf("contexty/postgres: encode: %w", err)
+	}
+	return version, encoded, nil
 }
 
 func (s *Store) persistSnapshot(
