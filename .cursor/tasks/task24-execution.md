@@ -41,3 +41,22 @@ agent stage1_correctness PASS, prior D24 empty/null/mixed-case finding resolved.
 Final root go test -race ./... PASS; golangci-lint 2.14.0 all modules 0 issues.
 Evidence: docs/remediation-evidence/stage1/. Commit: feat: remediation contracts;
 SHA recorded at start of stage 2.
+
+## Stage 2 — release
+
+Stage 1 commit: 8a01f87 (feat: remediation contracts).
+Scope F01/F02/D44; contract docs/release.md precedes implementation.
+Checklist (7 equally weighted criteria):
+- [x] S2.1: isolated release from committed HEAD, exact staging; source HEAD/branch/index/tracked/untracked/tags preserved.
+- [x] S2.2: exact root/submodule refs, atomic push, no unrelated tags or branch publication.
+- [x] S2.3: cleanup on success/preparation/tag/push failure touches only invocation resources; outcome reported; unknown outcome never deletes refs.
+- [x] S2.4: portable module rewriting and validated relative module list; no BSD sed dependency.
+- [x] S2.5: release gates aligned with validate and platform/recovery documentation linked.
+- [x] S2.6: AAA local fixtures cover clean/untracked/multiple modules/rejected push/preparation/tag failure/retry/cleanup, plus baseline reproduction on review SHA.
+- [x] S2.7: fixture suite and shell/Python checks pass; two independent reviewers accept final diff.
+
+Stage 2 acceptance: completeness 7/7=100%, correctness PASS; interruption outcome
+P2 fixed and independently repro-tested. All14 fixtures PASS incl reviewSHA F01/F02;
+independent12 current fixtures PASS; bash-n/py_compile/diff-check PASS.
+Evidence docs/remediation-evidence/stage2/. Commit fix: release isolation;
+SHA recorded at start of stage 3.

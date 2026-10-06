@@ -905,3 +905,5 @@ refs fail export. A payload ref grants disclosure of the original canonical type
 body, not the output-policy representation; select only messages when handing off
 the accepted prompt. Neither sanitization nor metadata allowlisting rewrites that
 canonical body.
+
+Release platform, validation gates and failure recovery: [release tooling](docs/release.md).
