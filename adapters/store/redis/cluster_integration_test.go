@@ -33,8 +33,13 @@ redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 --cluste
 until redis-cli -p 7000 cluster info | grep -q cluster_state:ok; do sleep 0.1; done
 echo cluster-ready
 tail -f /dev/null`},
-		WaitingFor: wait.ForLog("cluster-ready").WithStartupTimeout(time.Minute),
-		Started:    true,
+		WaitingFor: wait.ForAll(
+			wait.ForLog("cluster-ready"),
+			wait.ForMappedPort("7000/tcp"),
+			wait.ForMappedPort("7001/tcp"),
+			wait.ForMappedPort("7002/tcp"),
+		).WithDeadline(time.Minute),
+		Started: true,
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, testcontainers.TerminateContainer(container)) })
