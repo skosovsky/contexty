@@ -139,3 +139,10 @@ callbacks and helper paths. It does not add a public orchestrator or cache callb
 Durable event TurnID and identity prefix must be valid UTF-8. Invalid byte strings
 are rejected with ErrMissingEventIdentity, because JSON replacement of malformed
 UTF-8 would otherwise make distinct host strings share an ID.
+
+
+Segment formatter registration requires one of System/History/Tools/Memory and
+a nonnil callback. Unknown/empty segment or nil formatter is invalid compile
+configuration on both entry points, with/without recording, before store/resolver
+callbacks. Formatter options retain normal last-option-wins registration for the
+same known segment. No unknown segment is silently skipped.

@@ -12,7 +12,7 @@ observations, not production guarantees.
 | D02 | Accept BYOT | Exported provenance type/clone port, discriminators checked; closed ContentPart remains exhaustive. provenance.go, remediation validation tests, stage1/3. |
 | D03 | Accept change | Explicit estimator required; nil/typed nil fails before effects. pipeline.go, remediation budget tests, stage4. |
 | D04 | Accept change | Nil inherits, nonnil empty clears compile input only; Tools request-only. compile.go, normalize tests, stage3. |
-| D05 | Accept clarification/change | Role projection includes active/pending; historical hooks/formatters keep narrow scope, raw unaffected. current_turn/compile tests, stage3. |
+| D05 | Accept clarification/change | Role projection includes active/pending; historical hooks/formatters keep narrow scope, raw unaffected. current_turn/compile tests, stage3. Final audit also rejects unknown/empty formatter segment or nil callback before effects (remediation formatter preflight tests). |
 | D06 | Accept grouped replacement | Whole incoming group replaces (TemplateID, LayerID), missing layers append. merge_policy tests, stage3. |
 | D07 | Accept validation | Zero turn absent; prompt-only and unknown persistence rejected, no fallback. current_turn tests, stage3. |
 | D08 | Accept change | Stateful Compile rejects missing conversation ID/store; Snapshot explicitly stateless. compile tests, stage3. |
