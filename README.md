@@ -53,12 +53,19 @@ immutable view with defensive getters.
 ## Development
 
 ```sh
-make validate GOLANGCI_LINT=golangci-lint
+make check
+make check-plan  # JSON inventory before execution
+make test-fast   # reduced development cycle
+make check-linux # full Linux container profile
 ```
 
-Use pinned golangci-lint 2.14.0 and Docker for isolated Redis/Postgres integration
-tests. Validate runs lint, acceptance, benchmark guardrails, race suites in all
-three modules and local Git release fixtures. No production endpoint is needed.
+The versioned registry in `scripts/checks.json` defines Go 1.27.1, golangci-lint
+2.14.0, module inventories and exact consumer peers. `make test` runs all required
+test lanes; `make check` adds lint, generation and examples. `make validate` is an
+alias for `make check`. Docker is required for real Redis/Postgres integration.
+Missing prerequisites produce BLOCKED and a nonzero full-gate exit. Reports live
+in `.check-results/`. A macOS result does not establish Linux parity; use the
+Linux profile before release. See [check contract](docs/checks.md).
 
 ## Native chat mapping
 

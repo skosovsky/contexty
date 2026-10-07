@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """AAA release fixtures; every origin is a temporary local bare repository."""
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -12,7 +13,8 @@ import tempfile
 import unittest
 
 SOURCE = Path(__file__).resolve().parent
-ENV = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GOWORK="off", GOCACHE="/private/tmp/contexty-go-cache")
+ENV = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GOWORK="off", GOENV="off")
+ENV.setdefault("GOCACHE", str(Path(tempfile.gettempdir()) / "contexty-go-cache"))
 
 
 def command(args, cwd, **kwargs):
@@ -41,6 +43,20 @@ class Fixture:
         else:
             for name in ("release.sh", "release.py"):
                 shutil.copyfile(SOURCE / name, self.repo / "scripts" / name)
+        if not baseline:
+            (self.repo / "scripts/check.py").write_text("""import os, pathlib, sys
+profile = sys.argv[sys.argv.index('--profile') + 1]
+if profile == 'check' and os.environ.get('FIXTURE_SOURCE_MUTATION'):
+    path = pathlib.Path(os.environ['FIXTURE_SOURCE_MUTATION'])
+    path.write_text(path.read_text() + '// source mutation\\n')
+if os.environ.get('FIXTURE_GATE_FAILURE') == profile:
+    raise SystemExit(7)
+if os.environ.get('FIXTURE_GATE_MUTATION') == profile:
+    pathlib.Path('go.mod').write_text(pathlib.Path('go.mod').read_text() + '\\n// gate mutation\\n')
+""")
+        if not baseline:
+            (self.repo / "scripts/checks.json").write_text(json.dumps({"toolchain": {"go": "1.27.1", "module_zip": "v0.41.0"}, "modules": {"release": [".", "sub"] if modules else ["."]}}))
+            (self.repo / "scripts/check_linux.py").write_text("import os\nraise SystemExit(7 if os.environ.get('FIXTURE_LINUX_FAILURE') else 0)\n")
         if modules:
             (self.repo / "sub").mkdir()
             (self.repo / "sub/go.mod").write_text("module example.invalid/contexty/sub\n\ngo 1.23\n\nrequire example.invalid/contexty v0.0.0\nreplace example.invalid/contexty => ..\n")
@@ -105,6 +121,95 @@ class ReleaseTests(unittest.TestCase):
         mod = command(["git", "--git-dir", str(fixture.origin), "show", "v0.0.1:sub/go.mod"], fixture.repo).stdout
         self.assertIn("require example.invalid/contexty v0.0.1", mod)
         self.assertNotIn("replace", mod)
+        self.assert_preserved(fixture, before)
+
+    def test_required_gate_failure_prevents_publication(self):
+        # Arrange: shared required check exits with a failure.
+        fixture = self.fixture()
+        fixture.env = dict(ENV, FIXTURE_GATE_FAILURE="check")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        # Assert: neither root nor nested tag published; source is unchanged.
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("not published", result.stderr)
+        self.assertEqual({}, fixture.tags())
+        self.assert_preserved(fixture, before)
+
+    def test_source_mutation_invalidates_gate(self):
+        # Arrange: gate changes caller source after immutable candidate is checked.
+        fixture = self.fixture()
+        file = fixture.repo / "go.mod"
+        fixture.env = dict(ENV, FIXTURE_SOURCE_MUTATION=str(file))
+        head = fixture.git("rev-parse", "HEAD")
+        # Act.
+        result = fixture.execute()
+        # Assert: external edits preserved and candidate cannot be published.
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("validation invalidated", result.stderr)
+        self.assertEqual({}, fixture.tags())
+        self.assertEqual(head, fixture.git("rev-parse", "HEAD"))
+        self.assertIn("// source mutation", file.read_text())
+        self.assertEqual([], list(fixture.temp.iterdir()))
+
+    def test_linux_failure_prevents_publication(self):
+        # Arrange: required Linux gate fails even though host check succeeds.
+        fixture = self.fixture()
+        fixture.env = dict(ENV, FIXTURE_LINUX_FAILURE="1", FIXTURE_GATE_FAILURE="check" if os.uname().sysname == "Linux" else "")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        # Assert: mandatory platform proof cannot be deferred until after publishing.
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual({}, fixture.tags())
+        self.assert_preserved(fixture, before)
+
+    def test_module_path_tag_mismatch_blocks_publication(self):
+        # Arrange: module namespace is valid, but directory cannot produce its public tag.
+        fixture = self.fixture()
+        file = fixture.repo / "sub/go.mod"
+        file.write_text(file.read_text().replace("contexty/sub", "contexty/other"))
+        fixture.git("add", "sub/go.mod")
+        fixture.git("commit", "-m", "wrong module path")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        # Assert: incompatible module identity fails before any remote refs mutate.
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("module path/tag directory mismatch", result.stderr)
+        self.assertEqual({}, fixture.tags())
+        self.assert_preserved(fixture, before)
+
+    def test_candidate_mutation_invalidates_gate(self):
+        # Arrange: gate succeeds but changes candidate bytes after validation.
+        fixture = self.fixture()
+        fixture.env = dict(ENV, FIXTURE_GATE_MUTATION="check")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        # Assert: a successful gate cannot bless altered published bytes.
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("candidate mutated", result.stderr)
+        self.assertEqual({}, fixture.tags())
+        self.assert_preserved(fixture, before)
+
+    def test_postpublish_failure_is_recoverable_without_republication(self):
+        # Arrange: public verification fails after atomic publication.
+        fixture = self.fixture()
+        fixture.env = dict(ENV, FIXTURE_GATE_FAILURE="published")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        published = fixture.tags()
+        # Assert: report failure despite existing refs and retain recovery evidence.
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("published (atomic push completed)", result.stderr)
+        self.assertEqual(2, len(published))
+        self.assertTrue((fixture.repo / ".git/contexty-release-state.json").is_file())
+        recovered = subprocess.run(["bash", "scripts/release.sh", "recover", "v0.0.1"], cwd=fixture.repo,
+                                   env=ENV, text=True, capture_output=True)
+        self.assertEqual(0, recovered.returncode, recovered.stderr)
+        self.assertEqual(published, fixture.tags())
         self.assert_preserved(fixture, before)
 
     def test_rejected_push_cleanup_and_retry(self):
@@ -198,6 +303,19 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual({}, fixture.tags())
         self.assert_preserved(fixture, before)
 
+    def test_next_patch_skips_published_submodule_collision(self):
+        # Arrange: a partially historical submodule version occupies next patch.
+        fixture = self.fixture()
+        fixture.git("tag", "sub/v0.0.1")
+        fixture.git("push", "origin", "refs/tags/sub/v0.0.1")
+        before = fixture.snapshot()
+        # Act.
+        result = fixture.execute()
+        # Assert: choose free complete inventory, preserving existing tag bytes.
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual({"refs/tags/sub/v0.0.1", "refs/tags/v0.0.2", "refs/tags/sub/v0.0.2"}, set(fixture.tags()))
+        self.assert_preserved(fixture, before)
+
     def test_published_version_selection(self):
         # Arrange: published root tag and unrelated local version-like tag.
         fixture = self.fixture()
@@ -267,7 +385,7 @@ class ReleaseTests(unittest.TestCase):
         process.stdin.write("y\n")
         process.stdin.flush()
         try:
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + 120
             while not entered.exists() and time.monotonic() < deadline:
                 time.sleep(0.02)
             self.assertTrue(entered.exists(), "remote transaction did not enter hook")

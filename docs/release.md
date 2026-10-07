@@ -1,46 +1,60 @@
 # Release tooling contract
 
-Task 24 stage 2 fixes F01/F02 and adopts D44. Run release from repository root
-with Bash, Git, Go and Python 3.9+ on macOS or Linux. Python handles module rewriting
-through `go mod edit`; BSD-specific sed is not used.
+Run `make release-patch` / `make release-break` from repository root with Bash,
+Git, the registry-pinned Go toolchain and Python 3.9+. Both invoke the same release
+entrypoint; it enforces the full gate itself, including direct script invocations.
+No library runtime dependency on peer build tooling is introduced.
 
-`make release-patch` / `make release-break` run `make validate` first. Direct
-script execution is a low-level publication command and requires the caller to
-have completed those gates. The script asks confirmation of the computed version.
+The release inventory in `scripts/checks.json` is authoritative. The release uses
+committed HEAD in an isolated temporary clone. Tracked changes are rejected;
+untracked files are never copied. The original branch, HEAD, index, worktree and
+local tags remain unchanged. Source identity and tracked cleanliness are checked
+again after the gate and immediately before publication.
 
-Release uses committed HEAD in an isolated temporary clone. Tracked changes are
-rejected; untracked files are never copied into the release. The original branch,
-HEAD, index, worktree and local tags remain unchanged on success and failure.
-The temporary clone receives the source repository's effective user identity and
-commit/tag signing settings. Signing errors fail before publication.
-Only explicitly selected tracked go.mod files are staged after removing local
-sibling replacements and updating v0.0.0 sibling dependencies. Root and selected
-submodule tags point to the same release commit. No source branch is pushed.
+Preparation removes own-module sibling replacements and pins every own-module
+requirement to the candidate version. Only the tracked release go.mod files are
+staged; root and all public submodule tags target the same immutable candidate
+commit. Identity and commit/tag signing settings are copied from the caller;
+signing failure blocks publication. No source branch is pushed.
 
-Version selection uses published root vMAJOR.MINOR.PATCH tags from origin. A
-pre-existing local candidate tag in the isolated clone is an explicit preparation
-error. Root must be included in the module list; module directories are relative,
-tracked, unique and cannot contain whitespace or traverse outside the checkout.
-Module paths must share the root module namespace.
+The candidate proxy consists of deterministic module ZIP/go.mod artifacts built
+from tracked bytes, excluding nested modules, vendor content and symlinks. Go
+validates those artifacts and computes their module/checksum hashes. The shared
+`check` profile runs against that committed candidate with an isolated artifact
+cache and exact candidate version. Candidate artifacts bypass the public checksum
+service only for own module paths; public peers retain checksum verification.
+Candidate worktree/index/HEAD or proxy mutations invalidate the successful check.
+Reports are retained outside the temporary checkout under
+`.git/contexty-release-evidence/VERSION/`.
 
-Publication uses exact tag refspecs and `git push --atomic`. A remote without
-atomic support fails safely; there is no partial-push fallback. Cleanup removes
-only this invocation's temporary clone, including its temporary local tags. It
-never deletes remote refs or changes the original checkout.
+Versions derive from current published root vMAJOR.MINOR.PATCH tags. Local
+candidate tag conflicts fail preparation. Publication uses exact tag refspecs and
+`git push --atomic`; lack of atomic support never triggers a fallback. Cleanup
+removes only the temporary clone and never changes or deletes remote tags.
 
-On push failure, the tool queries exact remote refs. If all match the exact prepared local tag object IDs (including signed tags),
-it reports publication observed despite the push error; if none exist after a
-completed failed push it reports not published; after interruption absence remains
-unknown because a remote transaction may still be running; mixed/conflicting or unavailable observations are unknown.
-The exit status remains failure. For unknown outcomes inspect the reported refs
-before retrying. Do not blindly remove tags or assume the publication failed.
-Failure before push is reported as not published. A retry after a rejected push
-uses the same version because the source and origin were preserved.
+Before push, `.git/contexty-release-state.json` records source/candidate SHA,
+exact tag object IDs, version, candidate module hashes and evidence location.
+After publication the shared `published` profile verifies the exact public version
+with GOWORK=off, no local replacements, public checksum service, bounded proxy
+retries, module hashes matching the candidate and consumer smoke. Failed public
+verification returns failure even when all tags were published.
 
-Fixtures run only against temporary local bare origins and verify success,
-untracked/tag isolation, multiple modules, rejecting push, preparation/tag errors,
-retry, exact refs and cleanup. Running the fixtures never publishes this library.
+On push failure, exact remote refs are observed. All matching object IDs mean
+publication occurred despite client failure; none after a completed failed push
+means not published; interruption, mixed/conflicting or unavailable observations
+remain unknown. Unknown or published-but-unverified state blocks a new release.
+Never rewrite or remove published tags to recover.
 
-Run `make test-release` for current behavior. On macOS,
-`CONTEXTY_VERIFY_REVIEW_SHA=1 python3 scripts/test_release.py` additionally
-reproduces F01/F02 from review SHA (requires that commit in local history).
+Run `scripts/release.sh recover VERSION` to observe the saved exact refs and rerun
+public verification from their immutable released commit. Recovery never pushes
+or mutates tags. Missing/conflicting refs remain an explicit failure requiring
+remote inspection. A definitively rejected push can safely retry the normal
+make release target with the still-free version.
+
+`make test-release` exercises temporary local bare origins only: gate failures,
+source/candidate mutation, original-checkout preservation, preparation/signing
+boundaries, exact atomic refs, push rejection/interruption/lost response and
+postpublication recovery. Fixture gate doubles test release orchestration; they
+do not claim public checksum or real consumer coverage. The real shared gate
+provides those checks. Optional immutable old-SHA reproduction fixtures remain
+separate historical checks.

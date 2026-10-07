@@ -8,3 +8,6 @@ vendor/
 .cursor/
 .serena/
 .cache/
+
+.check-results/
+__pycache__/

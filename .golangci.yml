@@ -477,10 +477,13 @@ linters:
       - text: 'comment on exported \S+ \S+ should be of the form ".+"'
         source: '// ?(nolint|TODO)'
         linters: [ revive, staticcheck ]
-      # Examples and tests use fmt for // Output: and readable demos.
+      # Examples, the offline consumer recipe and tests use fmt for readable demo output.
       - path: '.*_test\.go$'
         linters: [ forbidigo ]
       - path: 'examples/'
+        linters: [ forbidigo ]
+      # Offline recipe prints its smoke result, using the same policy as examples.
+      - path: '^integration/chat/cmd/recipe/'
         linters: [ forbidigo ]
       - path: '_test\.go'
         linters:

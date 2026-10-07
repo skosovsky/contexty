@@ -4,21 +4,39 @@ This optional module owns mapping between semantic context and actual native cha
 messages. It has no provider SDK or network execution. Run from the repository root:
 
 ```sh
-python3 scripts/check_chat.py
+python3 scripts/check_chat.py --report /tmp/chat-source.json
 python3 scripts/check_chat.py --peer ../prompty
-python3 scripts/check_chat.py --published latest
+python3 scripts/check_chat.py --baseline
+GOPROXY=file:///path/to/candidate-proxy,https://proxy.golang.org python3 scripts/check_chat.py --candidate v0.13.1
+python3 scripts/check_chat.py --published v0.13.1 --report /tmp/chat-published.json
 ```
 
-The runner copies this module to a temporary directory. Local mode adds temporary
-core/peer replacements; published mode resolves core from its public tag with
-`GOWORK=off` and no replacements. The checked-in dependency is the preceding
-published baseline; the published runner explicitly selects the requested release.
-CI checks a supported peer tag, because the peer default branch can lag its
-published API. For coordinated development, `--peer` tests the actual local
-checkout explicitly; no peer revision is chosen by core.
-Before the new role contract is published, use
-`--published v0.12.0 --baseline` to verify only the older supported subset. That
-result is explicitly marked baseline and never counts as full acceptance.
+The version shown for candidate/published is an example: select the exact candidate
+or release version. `latest` is rejected. The runner copies this module to a
+temporary directory with an isolated module cache, `GOWORK=off`, `GOENV=off`,
+empty GOFLAGS and the exact registry Go toolchain. Host private-module settings
+are overridden so public verification always uses the checksum database.
+Source mode selects this checkout with one temporary core replacement. Its peer
+is the exact public prompty v0.15.0 at commit
+`f0db738d9ed9d1c8f739adbdfaeb7b5701f1d491`; the resolved download SHA and checksums
+are verified. `--peer` explicitly checks a local peer checkout and records its SHA;
+this development mode does not substitute for the required public-peer lane.
+
+Candidate mode requires a file artifact proxy prepared from immutable release
+bytes; only the candidate core namespace bypasses the public checksum database.
+Published mode forces the public Go proxy and checksum database. Candidate and
+published modes reject every replacement and unexpected selected core/peer
+version. All modes download modules, verify their checksums, record the resolved
+module graph when `--report` is supplied, then run fresh race tests, vet and the
+executable recipe. Any download, graph validation or semantic failure exits nonzero. Individual
+semantic test skips fail; command packages without test files remain valid.
+Published downloads retry transient proxy/network failures at most eight times
+with five-second intervals; checksum and semantic failures never retry.
+
+`--baseline` selects public v0.12.0 and checks only the older supported subset.
+Its result is explicitly marked baseline and never counts as full acceptance of
+a candidate's role contract. The full local/CI gate owns source, candidate and
+baseline lanes separately; release verification checks the exact new public tag.
 
 `Mapper.Import` accepts stable host records and returns semantic messages plus
 mandatory continuation IDs. Persist both in the host; after truncation the list

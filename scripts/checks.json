@@ -1,0 +1,602 @@
+{
+  "schema": 1,
+  "module_path": "github.com/skosovsky/contexty",
+  "modules": {
+    "test": [
+      ".",
+      "adapters/store/postgres",
+      "adapters/store/redis",
+      "integration/chat"
+    ],
+    "release": [
+      ".",
+      "adapters/store/postgres",
+      "adapters/store/redis"
+    ]
+  },
+  "toolchain": {
+    "go": "1.27.1",
+    "linter": "v2.14.0",
+    "linter_package": "github.com/golangci/golangci-lint/v2/cmd/golangci-lint",
+    "module_zip": "v0.41.0"
+  },
+  "peers": {
+    "github.com/skosovsky/prompty": "v0.15.0",
+    "baseline": "v0.12.0",
+    "github.com/skosovsky/prompty_sha": "f0db738d9ed9d1c8f739adbdfaeb7b5701f1d491"
+  },
+  "separate_jobs": {
+    "live_provider": "manual: requires host credentials and typed provider ports",
+    "performance": "manual: benchmarks without allocation guardrails",
+    "fuzz": "extended: bounded fuzz exploration"
+  },
+  "lanes": [
+    {
+      "id": "inventory",
+      "profiles": [
+        "fast",
+        "test",
+        "lint",
+        "check",
+        "published"
+      ],
+      "kind": "inventory"
+    },
+    {
+      "id": "source-identity",
+      "profiles": [
+        "fast",
+        "test",
+        "lint",
+        "check",
+        "published"
+      ],
+      "kind": "source-identity",
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "linter-baseline",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "baseline-config",
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "toolchain",
+      "profiles": [
+        "fast",
+        "test",
+        "lint",
+        "check",
+        "published"
+      ],
+      "kind": "toolchain",
+      "needs": [
+        "inventory",
+        "source-identity"
+      ]
+    },
+    {
+      "id": "docker",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "kind": "docker",
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "root-config",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "config",
+        "verify"
+      ],
+      "module": ".",
+      "isolated": false,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "root-format",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "fmt",
+        "--diff"
+      ],
+      "module": ".",
+      "isolated": false,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "root-lint",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "run",
+        "--allow-parallel-runners",
+        "--timeout=10m",
+        "./..."
+      ],
+      "module": ".",
+      "isolated": false,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": true
+    },
+    {
+      "id": "root-tests",
+      "profiles": [
+        "fast",
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=15m",
+        "./..."
+      ],
+      "module": ".",
+      "isolated": false,
+      "needs": [
+        "toolchain"
+      ],
+      "graph": true,
+      "forbid_test_skip": true
+    },
+    {
+      "id": "postgres-config",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "config",
+        "verify"
+      ],
+      "module": "adapters/store/postgres",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "postgres-format",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "fmt",
+        "--diff"
+      ],
+      "module": "adapters/store/postgres",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "postgres-lint",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "run",
+        "--allow-parallel-runners",
+        "--timeout=10m",
+        "./..."
+      ],
+      "module": "adapters/store/postgres",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": true
+    },
+    {
+      "id": "postgres-tests",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=15m",
+        "./..."
+      ],
+      "module": "adapters/store/postgres",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "docker"
+      ],
+      "graph": true,
+      "forbid_test_skip": true
+    },
+    {
+      "id": "redis-config",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "config",
+        "verify"
+      ],
+      "module": "adapters/store/redis",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "redis-format",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "fmt",
+        "--diff"
+      ],
+      "module": "adapters/store/redis",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "redis-lint",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "run",
+        "--allow-parallel-runners",
+        "--timeout=10m",
+        "./..."
+      ],
+      "module": "adapters/store/redis",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": true
+    },
+    {
+      "id": "redis-tests",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-json",
+        "-race",
+        "-count=1",
+        "-timeout=15m",
+        "./..."
+      ],
+      "module": "adapters/store/redis",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "docker"
+      ],
+      "graph": true,
+      "forbid_test_skip": true
+    },
+    {
+      "id": "acceptance",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-json",
+        "-race",
+        "-count=1",
+        "-run",
+        "^(TestAcceptance_|TestApplyMergePolicy_|TestDropHeadStrategy_AtomicityOptOut$|TestBudgetPipeline_RejectsStrategyOrphans$|TestObserver_|TestArchitecture_|TestStateless)",
+        "./..."
+      ],
+      "needs": [
+        "toolchain"
+      ],
+      "forbid_test_skip": true
+    },
+    {
+      "id": "chat-lint",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "run",
+        "--allow-parallel-runners",
+        "--timeout=10m",
+        "./..."
+      ],
+      "module": "integration/chat",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": true
+    },
+    {
+      "id": "chat-format",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "fmt",
+        "--diff"
+      ],
+      "module": "integration/chat",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "chat-config",
+      "profiles": [
+        "lint",
+        "check"
+      ],
+      "kind": "linter",
+      "command": [
+        "config",
+        "verify"
+      ],
+      "module": "integration/chat",
+      "isolated": true,
+      "needs": [
+        "toolchain",
+        "linter-baseline"
+      ],
+      "graph": false
+    },
+    {
+      "id": "bench-guardrails",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-count=1",
+        "-bench=.",
+        "-benchmem",
+        "-run=^TestBenchGuardrails_",
+        "."
+      ],
+      "needs": [
+        "toolchain"
+      ],
+      "require_test": true
+    },
+    {
+      "id": "generation",
+      "profiles": [
+        "check"
+      ],
+      "kind": "generation",
+      "needs": [
+        "toolchain"
+      ]
+    },
+    {
+      "id": "examples",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "go",
+        "test",
+        "-json",
+        "-race",
+        "-count=1",
+        "./examples/..."
+      ],
+      "needs": [
+        "toolchain"
+      ],
+      "forbid_test_skip": true
+    },
+    {
+      "id": "check-fixtures",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "python3",
+        "scripts/test_check.py"
+      ],
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "release-fixtures",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "python3",
+        "scripts/test_release.py"
+      ],
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "check_chat-fixtures",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "command": [
+        "python3",
+        "scripts/test_check_chat.py"
+      ],
+      "needs": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "candidate-artifacts",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "kind": "local-candidate",
+      "needs": [
+        "toolchain"
+      ]
+    },
+    {
+      "id": "chat-source",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "kind": "chat",
+      "mode": "source",
+      "needs": [
+        "toolchain"
+      ],
+      "candidate_only": false,
+      "source_only": true
+    },
+    {
+      "id": "chat-candidate",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "kind": "chat",
+      "mode": "candidate",
+      "needs": [
+        "toolchain",
+        "candidate-artifacts"
+      ],
+      "candidate_only": true,
+      "source_only": false
+    },
+    {
+      "id": "chat-baseline",
+      "profiles": [
+        "test",
+        "check"
+      ],
+      "kind": "chat",
+      "mode": "baseline",
+      "needs": [
+        "toolchain"
+      ],
+      "candidate_only": false,
+      "source_only": false
+    },
+    {
+      "id": "published-modules",
+      "profiles": [
+        "published"
+      ],
+      "kind": "published-modules",
+      "needs": [
+        "toolchain"
+      ]
+    },
+    {
+      "id": "chat-published",
+      "profiles": [
+        "published"
+      ],
+      "kind": "chat",
+      "mode": "published",
+      "needs": [
+        "toolchain",
+        "published-modules"
+      ],
+      "candidate_only": false,
+      "source_only": false
+    }
+  ],
+  "linter_baseline": {
+    "file": ".golangci.yml",
+    "sha256": "15cdb761bc8d5320c2811785308e7e789e372c87dffd217a0aa3520c70167125",
+    "upstream": "maratori/golangci-lint-config",
+    "runtime": "v2.14.0",
+    "repo_exclusions": "Intentional contexty partial literals; fmt in examples/tests/offline recipe; strict non-runtime test rules documented inline in .golangci.yml"
+  }
+}
