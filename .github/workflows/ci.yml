@@ -34,3 +34,5 @@ jobs:
         with:
           name: check-evidence
           path: .check-results/
+          include-hidden-files: true
+          if-no-files-found: error
