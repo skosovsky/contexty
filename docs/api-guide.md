@@ -850,3 +850,15 @@ the accepted prompt. Neither sanitization nor metadata allowlisting rewrites tha
 canonical body.
 
 Release platform, validation gates and failure recovery: [release tooling](release.md).
+
+### Closed roles and native mapping
+
+Use `RoleSystem`, `RoleDeveloper`, `RoleUser`, `RoleAssistant`, or `RoleTool`.
+`Role.Validate()` returns `ErrInvalidRole` for empty/unknown roles. Inputs and
+transformed outputs are checked even without OutputPolicy. Developer remains a
+separate role. Role does not grant trust or instruction priority; host-defined
+retention can include both instruction roles through `Retention.Roles`.
+
+See [SupportedMapping](supported-mapping.md) and the independent
+[offline consumer](../integration/chat/README.md) for exact JSON, native media,
+opaque state, final execution reports and terminal history CAS ownership.

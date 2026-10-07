@@ -99,7 +99,7 @@ func TestOutputPolicyRejectsStructuralChanges(t *testing.T) {
 			mutate: func(p *AbstractPayload) { p.Tools = append(p.Tools, p.Memory[0]); p.Memory = nil },
 		},
 		{name: "change identity", mutate: func(p *AbstractPayload) { p.Memory[0].ID = "foreign" }},
-		{name: "unknown role", mutate: func(p *AbstractPayload) { p.Memory[0].Role = "developer" }},
+		{name: "unknown role", mutate: func(p *AbstractPayload) { p.Memory[0].Role = "unknown" }},
 		{
 			name:   "remove call",
 			mutate: func(p *AbstractPayload) { p.History[0].Parts = []ContentPart{TextPart{Text: "hidden"}} },

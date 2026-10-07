@@ -247,7 +247,7 @@ func findStringHeuristicViolations(root string) ([]string, error) {
 
 func shouldSkipArchitectureDir(name string) bool {
 	switch name {
-	case "adapters", "examples", "docs":
+	case "adapters", "examples", "docs", "integration":
 		return true
 	default:
 		return strings.HasPrefix(name, ".")

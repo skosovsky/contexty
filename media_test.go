@@ -39,7 +39,9 @@ func TestMedia_Codec(t *testing.T) {
 		require.ErrorIs(t, json.Unmarshal([]byte(bad), &part), contexty.ErrInvalidMediaPart)
 		require.Zero(t, part)
 	}
-	_, err = codec.Marshal(contexty.Message{Parts: []contexty.ContentPart{contexty.MediaPart{Data: []byte{1}}}})
+	_, err = codec.Marshal(
+		contexty.Message{Role: contexty.RoleUser, Parts: []contexty.ContentPart{contexty.MediaPart{Data: []byte{1}}}},
+	)
 	require.ErrorIs(t, err, contexty.ErrInvalidMediaPart)
 }
 

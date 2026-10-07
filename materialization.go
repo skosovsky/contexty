@@ -114,7 +114,10 @@ func artifactMessage(ctx context.Context, artifact ContextArtifact) (Message, er
 }
 
 func materializationMessage(artifact ContextArtifact, representation ArtifactRepresentation) (Message, error) {
-	if !outputPolicyKnownRole(representation.Role) || len(representation.Parts) == 0 {
+	if err := representation.Role.Validate(); err != nil {
+		return Message{}, fmt.Errorf("%w: %w", ErrInvalidArtifactMaterialization, err)
+	}
+	if len(representation.Parts) == 0 {
 		return Message{}, ErrInvalidArtifactMaterialization
 	}
 	parts, err := ownContentParts(representation.Parts)
@@ -230,7 +233,10 @@ func artifactSourceMessage(artifact ContextArtifact) (Message, error) {
 }
 
 func validateMaterializedArtifactMessage(artifact ContextArtifact, message Message) error {
-	if message.ID != "artifact:"+artifact.ID || !outputPolicyKnownRole(message.Role) || len(message.Parts) == 0 ||
+	if err := message.Role.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidArtifactMaterialization, err)
+	}
+	if message.ID != "artifact:"+artifact.ID || len(message.Parts) == 0 ||
 		message.Actor != nil || message.Origin != nil || message.LLMCache != nil || message.Provenance != nil || message.Annotations.Timestamp != nil ||
 		!slices.Equal(
 			message.SourceRefs,

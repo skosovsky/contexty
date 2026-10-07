@@ -106,6 +106,9 @@ func validateOutputBeforePolicy(
 	policy *SelectionPolicy,
 ) error {
 	messages := semanticOutputMessages(ctx, payload)
+	if err := validateMessageRoles(messages); err != nil {
+		return err
+	}
 	if err := validateUniqueMessageIDs(messages); err != nil {
 		return err
 	}

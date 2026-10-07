@@ -14,6 +14,7 @@ type Role string
 
 const (
 	RoleSystem    Role = "system"
+	RoleDeveloper Role = "developer"
 	RoleUser      Role = "user"
 	RoleAssistant Role = "assistant"
 	RoleTool      Role = "tool"
@@ -139,6 +140,9 @@ func marshalMessageJSONWithRegistries(
 	_ *ProvenanceRegistry,
 	extRegistry *ExtensionRegistry,
 ) ([]byte, error) {
+	if err := m.Role.Validate(); err != nil {
+		return nil, err
+	}
 	if err := validateOpaqueMessageCodec(m, extRegistry); err != nil {
 		return nil, err
 	}
@@ -182,6 +186,9 @@ func unmarshalMessageJSONWithRegistries(
 	var wire messageWire
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return Message{}, fmt.Errorf("contexty: unmarshal message: %w", err)
+	}
+	if err := wire.Role.Validate(); err != nil {
+		return Message{}, err
 	}
 	parts, err := UnmarshalParts(wire.Parts)
 	if err != nil {

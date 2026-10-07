@@ -137,6 +137,9 @@ func (r CompileRequest) Freeze() CompileRequest {
 
 // Validate checks compile input invariants after Normalize.
 func (r CompileRequest) Validate() error {
+	if err := validateMessageRoles(r.AllMessages()); err != nil {
+		return err
+	}
 	if r.SourceRevision < 0 {
 		return ErrInvalidManifest
 	}
@@ -514,6 +517,9 @@ func cloneCompileInputMessages(messages []Message) []Message {
 
 // ownCompileMessage validates host metadata before cloning can replace it.
 func ownCompileMessage(msg Message) (Message, error) {
+	if err := msg.Role.Validate(); err != nil {
+		return Message{}, err
+	}
 	if err := validateContentParts(msg.Parts); err != nil {
 		return Message{}, err
 	}

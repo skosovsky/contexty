@@ -1,0 +1,27 @@
+package chat_test
+
+import (
+ "context"
+ "encoding/json"
+ "testing"
+
+ "github.com/skosovsky/contexty"
+ "github.com/skosovsky/prompty"
+)
+
+func TestPublishedBaseline(t *testing.T) {
+ // Arrange.
+ native:=prompty.NewExecution([]prompty.ChatMessage{{Role:prompty.RoleDeveloper,Content:[]prompty.ContentPart{prompty.ToolCallPart{ID:"call",Name:"number",Args:`{"n":9007199254740993}`}}}})
+ // Act.
+ wire,err:=prompty.MarshalExecution(native,prompty.WirePolicy{State:prompty.StatePreserve})
+ // Assert.
+ if err!=nil || wire.Messages[0].Role!=prompty.RoleDeveloper || wire.Messages[0].Content[0].Args!=`{"n":9007199254740993}` { t.Fatal("native baseline failed",err) }
+ // Arrange.
+ msg:=contexty.TextMessage(contexty.RoleUser,"baseline");msg.ID="message"
+ // Act.
+ compiled,err:=contexty.NewEngine().CompileSnapshot(context.Background(),contexty.CompileRequest{History:[]contexty.Message{msg}})
+ // Assert.
+ if err!=nil || len(compiled.Payload.History)!=1 { t.Fatal("context baseline failed",err) }
+ data,err:=json.Marshal(wire)
+ if err!=nil || len(data)==0 { t.Fatal(err) }
+}
