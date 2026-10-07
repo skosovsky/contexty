@@ -13,6 +13,9 @@ The runner copies this module to a temporary directory. Local mode adds temporar
 core/peer replacements; published mode resolves core from its public tag with
 `GOWORK=off` and no replacements. The checked-in dependency is the preceding
 published baseline; the published runner explicitly selects the requested release.
+CI checks a supported peer tag, because the peer default branch can lag its
+published API. For coordinated development, `--peer` tests the actual local
+checkout explicitly; no peer revision is chosen by core.
 Before the new role contract is published, use
 `--published v0.12.0 --baseline` to verify only the older supported subset. That
 result is explicitly marked baseline and never counts as full acceptance.
