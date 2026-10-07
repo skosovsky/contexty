@@ -32,7 +32,8 @@ once), tools, memory. This is a host choice, not provider instruction precedence
 | Nested multimodal tool result | Explicit unsupported; never flattened |
 | Reasoning | Explicit unsupported; never converted to ordinary text |
 | Part and message annotations, scoped metadata | Exact preservation in registered host extension/state codec |
-| Provider bytes/scope/expiry/Required | Exact preservation in OpaqueState host payload |
+| Provider bytes/scope/Required | Exact preservation in OpaqueState host payload |
+| Provider expiry | Timestamp instant and offset preserved by JSON; Go location names and monotonic clock readings are not persisted |
 | SourceRefs and native provenance/layer kind | Exact preservation in host records and codec; no inferred source authority |
 | Native JSON metadata/annotation values | Semantic JSON preservation, including large integers |
 | Core Actor/Origin/LLMCache/Provenance and unrecognized extensions | Unsupported in this profile |

@@ -29,7 +29,7 @@ func plainRecord(id string, role prompty.Role, text string) Record {
 	return Record{ID: id, SourceRefs: []contexty.SourceRef{{Namespace: "host", ID: id}}, Message: prompty.ChatMessage{Role: role, Content: []prompty.ContentPart{prompty.TextPart{Text: text}}}}
 }
 func stateRecords(mapper Mapper) []Record {
-	expiry := time.Unix(200, 0)
+	expiry := time.Unix(200, 0).UTC()
 	carrier := plainRecord("carrier", prompty.RoleAssistant, "visible")
 	carrier.Message.ProviderState = []prompty.PartState{{PartIndex: 0, Envelope: prompty.ProviderEnvelope{Format: prompty.ProviderStateFormat,
 		Scope: mapper.Destination, Codec: "fixture-bytes", Payload: []byte{0, 255, 7}, Required: true, ExpiresAt: &expiry}}}
@@ -147,6 +147,39 @@ func TestStatePersistenceAndGates(t *testing.T) {
 	dropped[2].Extensions = dropped[2].Extensions[:1]
 	if _, err = mapper.Export(dropped, mandatory, time.Unix(100, 0)); !errors.Is(err, prompty.ErrStateUnavailable) {
 		t.Fatal("required state silently dropped", err)
+	}
+}
+
+func TestStateExpiryPreservesInstantAcrossTimeZones(t *testing.T) {
+	// Arrange.
+	mapper := fixtureMapper()
+	records := stateRecords(mapper)
+	expiry := time.Unix(200, 0).In(time.FixedZone("host-zone", 7*60*60))
+	records[2].Message.ProviderState[0].Envelope.ExpiresAt = &expiry
+	messages, mandatory := mustImport(t, mapper, records)
+	codec := contexty.ConversationCodec{Extensions: mapper.Codec.Extensions, OpaqueProfile: mapper.Profile}
+	// Act.
+	wire, err := codec.Encode(contexty.EmptySnapshot().WithSegment(contexty.SegmentHistory, messages))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := codec.Decode(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := mapper.Export(restored.Segment(contexty.SegmentHistory), mandatory, time.Unix(100, 0))
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	actual := output[2].Message.ProviderState[0].Envelope.ExpiresAt
+	if actual == nil || !actual.Equal(expiry) {
+		t.Fatalf("expiry instant changed: got %v, want %v", actual, expiry)
+	}
+	// Location names are not part of the JSON timestamp contract.
+	records[2].Message.ProviderState[0].Envelope.ExpiresAt = actual
+	if !reflect.DeepEqual(records, output) {
+		t.Fatal("continuation fields changed")
 	}
 }
 
