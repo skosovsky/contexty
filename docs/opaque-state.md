@@ -57,3 +57,10 @@ or follows the configured unknown-cost contract; byte length is not a token cost
 See `examples/opaque_state` for two independent host payload types, a signature
 fixture and an external compaction item. These are local protocol fixtures;
 provider SDKs and remote compaction requests remain outside core.
+
+The [optional native consumer](../integration/chat/README.md) registers host codecs
+for exact provider bytes and scoped annotations, while preserving native JSON
+metadata semantically. It checks native destination/expiry after persistence and
+immediately before execution. Mandatory state IDs are host-owned accepted-source
+evidence: persist that list separately and never reconstruct it from a truncated
+projection. Core's drop mode alone does not satisfy a mandatory continuation.

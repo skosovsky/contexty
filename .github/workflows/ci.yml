@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main", "master" ]
 
@@ -15,7 +16,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - id: set-matrix
         run: |
-          MODULES=$(find . -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          MODULES=$(find . -path "./integration" -prune -o -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "modules=$MODULES" >> $GITHUB_OUTPUT
 
   lint:
@@ -99,3 +100,23 @@ jobs:
         env:
           CI: "true"
         run: go test -race -timeout 10m ./adapters/store/postgres/... ./adapters/store/redis/...
+
+  chat-consumer:
+    name: Native chat semantic contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: skosovsky/prompty
+          path: .peer/prompty
+      - name: Current local revisions
+        run: python3 scripts/check_chat.py --peer .peer/prompty
+      - name: Published baseline (does not prove the new contract)
+        run: python3 scripts/check_chat.py --published v0.12.0 --baseline
+      - name: Published full contract after release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python3 scripts/check_chat.py --published ${GITHUB_REF_NAME}

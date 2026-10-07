@@ -55,6 +55,9 @@ func (e *Engine) RenderView(ctx context.Context, snap ConversationSnapshot, name
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("contexty: render view: %w", err)
 	}
+	if err := validateSnapshotRoles(snap); err != nil {
+		return "", err
+	}
 	if e.configurationErr != nil {
 		return "", e.configurationErr
 	}
@@ -84,7 +87,7 @@ func (e *Engine) renderNamedView(
 	msgs := snap.Segment(seg)
 	working := cloneMessageSlice(msgs)
 	var required []ContentRef
-	if err := e.projectViewRoles(ctx, working); err != nil {
+	if err := e.projectMessageRoles(ctx, working); err != nil {
 		return "", err
 	}
 	if cfg.Budget != nil {
@@ -96,15 +99,9 @@ func (e *Engine) renderNamedView(
 		required = trimmed.Decision.Required
 	}
 	if cfg.Formatter != nil {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		formatted, err := cfg.Formatter(ctx, cloneMessageSlice(working))
-		if canceled := ctx.Err(); canceled != nil {
-			return "", canceled
-		}
+		formatted, err := formatViewMessages(ctx, working, cfg.Formatter)
 		if err != nil {
-			return "", fmt.Errorf("contexty: render view formatter: %w", err)
+			return "", err
 		}
 		working = formatted
 	}
@@ -126,7 +123,7 @@ func (e *Engine) renderNamedView(
 	return b.String(), nil
 }
 
-func (e *Engine) projectViewRoles(ctx context.Context, messages []Message) error {
+func (e *Engine) projectMessageRoles(ctx context.Context, messages []Message) error {
 	if e.roleProjection == nil {
 		return nil
 	}
@@ -139,7 +136,10 @@ func (e *Engine) projectViewRoles(ctx context.Context, messages []Message) error
 			return canceled
 		}
 		if err != nil {
-			return fmt.Errorf("contexty: render view role projection: %w", err)
+			return fmt.Errorf("contexty: role projection: %w", err)
+		}
+		if err := role.Validate(); err != nil {
+			return err
 		}
 		messages[i].Role = role
 	}
@@ -153,4 +153,18 @@ func (e *Engine) resolveView(name string) (ViewConfiguration, bool) {
 		}
 	}
 	return ViewConfiguration{}, false
+}
+
+func formatViewMessages(ctx context.Context, messages []Message, formatter SegmentFormatter) ([]Message, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	formatted, err := formatter(ctx, cloneMessageSlice(messages))
+	if canceled := ctx.Err(); canceled != nil {
+		return nil, canceled
+	}
+	if err != nil {
+		return nil, fmt.Errorf("contexty: render view formatter: %w", err)
+	}
+	return ownCompileMessages(formatted)
 }

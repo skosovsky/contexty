@@ -487,13 +487,13 @@ func TestRemediation_CurrentResourceCodecRevisions(t *testing.T) {
 func TestRemediation_LayerReplacementRetainsEntireGroup(t *testing.T) {
 	// Arrange: same layer name in different templates and a two-message incoming group.
 	existing := []contexty.Message{
-		{ID: "old-a", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
-		{ID: "keep-b", Origin: &contexty.MessageOrigin{TemplateID: "b", LayerID: "persona"}},
+		{Role: contexty.RoleUser, ID: "old-a", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
+		{Role: contexty.RoleUser, ID: "keep-b", Origin: &contexty.MessageOrigin{TemplateID: "b", LayerID: "persona"}},
 	}
 	incoming := []contexty.Message{
-		{ID: "new-a1", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
-		{ID: "unscoped"},
-		{ID: "new-a2", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
+		{Role: contexty.RoleUser, ID: "new-a1", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
+		{Role: contexty.RoleUser, ID: "unscoped"},
+		{Role: contexty.RoleUser, ID: "new-a2", Origin: &contexty.MessageOrigin{TemplateID: "a", LayerID: "persona"}},
 	}
 	engine := contexty.NewEngine(contexty.WithDeferredBlocks(contexty.DeferredBlock{
 		Segment: contexty.SegmentMemory, MergePolicy: contexty.PolicyDeduplicateByLayer,

@@ -114,6 +114,9 @@ type exportedMessages struct {
 }
 
 func exportMessages(messages []Message, selection ExportSelection, codec JSONSerializer) (exportedMessages, error) {
+	if err := validateMessageRoles(messages); err != nil {
+		return exportedMessages{}, err
+	}
 	if err := validateExportIDs(selection.MessageIDs); err != nil {
 		return exportedMessages{}, err
 	}

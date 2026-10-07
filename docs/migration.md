@@ -445,3 +445,34 @@ Segment formatter options now reject unknown/empty SegmentName and nil callback
 at compile preflight with ErrInvalidCompileConfiguration, before store/resolver
 effects, in both recording modes and both entry points. To omit a formatter, omit
 the option; this API does not define nil as a removal command.
+
+## Developer and unknown roles
+
+Before, unvalidated `Role("developer")` could compile without an output policy but
+fail with an identity policy. Replace it with `RoleDeveloper`; remove implicit
+mapping to system. Empty/custom role strings now fail with `ErrInvalidRole` in
+compile, codecs, projections, materialization, export and history commits. Validate
+host role mapping before passing messages; handle this error with `errors.Is`.
+
+```go
+// Before: an accidental role rewrite to bypass policy rejection.
+message.Role = contexty.RoleSystem
+// After: preserve the instruction role and handle validation explicitly.
+message.Role = contexty.RoleDeveloper
+if err := message.Role.Validate(); err != nil { return err }
+```
+
+For instruction retention in history use an explicit host policy:
+`RetentionPolicy{Roles: []Role{RoleSystem, RoleDeveloper}}`. Required overflow is an
+error. Roles still do not confer trust, permission or instruction priority.
+
+Replace lossy `TextContent()` conversions with a declared
+[SupportedMapping](supported-mapping.md). Unsupported reasoning, image detail or
+nested media must return an error, not disappear. Register defensive host metadata
+and opaque codecs, persist mandatory state IDs alongside snapshots, and validate
+state scope/expiry/bindings after restore and just before execution. Link the
+final budget report to the actual native request/profile; deduct reservations
+once. Append current turn once and commit only terminal complete history through
+CAS. See the [offline consumer](../integration/chat/README.md) for runnable code.
+
+This semantic contract change requires `make release-break`.

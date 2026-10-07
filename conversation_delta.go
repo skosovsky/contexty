@@ -36,6 +36,12 @@ type ConversationDelta struct {
 
 // ApplyDelta applies a single transition without mutating state.
 func ApplyDelta(state ConversationState, delta ConversationDelta) (ConversationState, error) {
+	if err := validateSnapshotRoles(state); err != nil {
+		return ConversationState{}, err
+	}
+	if err := validateMessageRoles(delta.Messages); err != nil {
+		return ConversationState{}, err
+	}
 	if err := validateArtifactRemovalIDs(delta.Operation, delta.MessageIDs, delta.ArtifactIDs); err != nil {
 		return ConversationState{}, err
 	}

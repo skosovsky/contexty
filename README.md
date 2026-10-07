@@ -59,3 +59,13 @@ make validate GOLANGCI_LINT=golangci-lint
 Use pinned golangci-lint 2.14.0 and Docker for isolated Redis/Postgres integration
 tests. Validate runs lint, acceptance, benchmark guardrails, race suites in all
 three modules and local Git release fixtures. No production endpoint is needed.
+
+## Native chat mapping
+
+The closed role contract supports system, developer, user, assistant and tool.
+Unknown or empty roles return `ErrInvalidRole` at compile, projection and storage
+boundaries. Use `RoleDeveloper`; instruction retention and trust remain explicit
+host policy. The [SupportedMapping](docs/supported-mapping.md) and
+[optional offline consumer](integration/chat/README.md) demonstrate native mapping,
+opaque state, final request evidence and terminal history CAS without dependencies
+in core.

@@ -696,18 +696,8 @@ func (e *Engine) applyRoleProjection(ctx context.Context, snap ConversationSnaps
 			continue
 		}
 		projected := cloneMessageSlice(msgs)
-		for i := range projected {
-			if err := ctx.Err(); err != nil {
-				return ConversationSnapshot{}, err
-			}
-			role, err := e.roleProjection.ProjectRole(projected[i].Clone())
-			if canceled := ctx.Err(); canceled != nil {
-				return ConversationSnapshot{}, canceled
-			}
-			if err != nil {
-				return ConversationSnapshot{}, fmt.Errorf("contexty: role projection: %w", err)
-			}
-			projected[i].Role = role
+		if err := e.projectMessageRoles(ctx, projected); err != nil {
+			return ConversationSnapshot{}, err
 		}
 		projected, err := traceStage(ctx, "role", msgs, projected, false)
 		if err != nil {

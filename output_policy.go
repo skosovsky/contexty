@@ -85,8 +85,8 @@ func validateOutputPolicyPayload(ctx context.Context, payload AbstractPayload) e
 	codec := selectionCodec(ctx)
 	for _, segment := range outputPolicySegments(payload) {
 		for _, message := range segment {
-			if !outputPolicyKnownRole(message.Role) {
-				return ErrInvalidOutputPolicy
+			if err := message.Role.Validate(); err != nil {
+				return fmt.Errorf("%w: %w", ErrInvalidOutputPolicy, err)
 			}
 			for _, part := range message.Parts {
 				if nilInterfaceValue(part) {
@@ -136,15 +136,6 @@ func validateOutputPolicyMessageCodec(ctx context.Context, message Message, code
 		return ErrInvalidOutputPolicy
 	}
 	return nil
-}
-
-func outputPolicyKnownRole(role Role) bool {
-	switch role {
-	case RoleSystem, RoleUser, RoleAssistant, RoleTool:
-		return true
-	default:
-		return false
-	}
 }
 
 func validateOutputPolicySegment(before, after []Message) error {

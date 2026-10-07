@@ -35,8 +35,10 @@ func (p RetentionPolicy) validate() error {
 			return ErrInvalidRetention
 		}
 	}
-	if slices.Contains(p.Roles, "") {
-		return ErrInvalidRetention
+	for _, role := range p.Roles {
+		if err := role.Validate(); err != nil {
+			return errors.Join(ErrInvalidRetention, err)
+		}
 	}
 	return nil
 }
