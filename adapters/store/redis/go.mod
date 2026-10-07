@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/skosovsky/contexty v0.0.0
+	github.com/skosovsky/contexty v0.13.1
 	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/redis v0.44.0
@@ -64,5 +64,3 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	pgregory.net/rapid v1.3.0 // indirect
 )
-
-replace github.com/skosovsky/contexty => ../../../
