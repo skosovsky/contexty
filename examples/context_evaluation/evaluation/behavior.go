@@ -37,7 +37,6 @@ func behaviorChecks(ctx context.Context, fixture Fixture, budget int) ([]Check, 
 	}
 }
 
-//nolint:exhaustruct_v5 // Mechanical fixture enables message capacity only.
 func behaviorBudget(limit int) *contexty.BudgetPipeline {
 	return contexty.NewBudgetPipeline(
 		contexty.BudgetConfig{Budget: contexty.EffectiveInputBudget(limit)},
@@ -47,7 +46,6 @@ func behaviorBudget(limit int) *contexty.BudgetPipeline {
 	)
 }
 
-//nolint:exhaustruct_v5 // Partial protocol fixture deliberately omits unrelated compile options.
 func behaviorRound(ctx context.Context) ([]Check, error) {
 	call := contexty.Message{ID: "behavior-call", Role: contexty.RoleAssistant, Parts: []contexty.ContentPart{
 		contexty.ToolCallPart{
@@ -113,7 +111,6 @@ func (behaviorProjection) ProjectResource(
 	return body.Artifact.Clone(), nil
 }
 
-//nolint:exhaustruct_v5 // Fixed local fixture byte limits and minimal resolver configuration.
 func behaviorResource(ctx context.Context, budget int) ([]Check, error) {
 	artifact := contexty.NewRetrievalDocument(
 		"behavior-resource",
@@ -202,7 +199,7 @@ func (d behaviorBlobDecoder) DecodeBlob(_ context.Context, c contexty.BlobConten
 	return []contexty.Message{m}, nil
 }
 
-//nolint:exhaustruct_v5,mnd // Fixed local fixture byte limits and source-free ephemeral blob.
+//nolint:mnd // Fixed local fixture byte limits and source-free ephemeral blob.
 func behaviorBlob(ctx context.Context, budget int) ([]Check, error) {
 	store, err := blobmemory.New(
 		blobmemory.Config{
@@ -274,7 +271,6 @@ func behaviorBlob(ctx context.Context, budget int) ([]Check, error) {
 	}, nil
 }
 
-//nolint:exhaustruct_v5 // History-only consumer configuration.
 func behaviorConsumers(ctx context.Context, messages []contexty.Message) ([]Check, error) {
 	if len(messages) < 2 {
 		return nil, errors.New("consumer fixture requires at least two messages")
@@ -317,7 +313,6 @@ func (p behaviorOpaquePayload) CloneExtension() contexty.Extension {
 	return behaviorOpaquePayload{Bytes: slices.Clone(p.Bytes)}
 }
 
-//nolint:exhaustruct_v5 // Fixed fixture state bytes and minimal traced compilation.
 func behaviorOpaque(ctx context.Context) ([]Check, error) {
 	registry := contexty.NewExtensionRegistry()
 	codecID := identity("behavior-opaque-codec")

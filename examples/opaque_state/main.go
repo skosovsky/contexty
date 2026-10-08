@@ -54,7 +54,7 @@ func fixtureEngine(codec contexty.JSONSerializer, mode contexty.OpaqueInvalidati
 	for _, name := range []string{"source", "project", "opaque-state"} {
 		stages[name] = contexty.Descriptor{ID: "fixture/" + name, Revision: "1"}
 	}
-	//nolint:exhaustruct_v5 // The recipe enables tracing and opaque policy only.
+
 	trace := contexty.TraceProfile{
 		Encoding: contexty.Descriptor{ID: "host.fixture/semantic-json", Revision: "1"},
 		Codec:    codec, Stages: stages, Codecs: fixtureCodecBindings(),
@@ -86,7 +86,6 @@ func compileFixture(
 	engine *contexty.Engine,
 	messages []contexty.Message,
 ) (contexty.CompileResult, error) {
-	//nolint:exhaustruct_v5 // No artifact, budget, resource or current-turn features are enabled.
 	return engine.CompileSnapshot(ctx, contexty.CompileRequest{CompilationID: "opaque-fixture", History: messages})
 }
 
@@ -97,7 +96,7 @@ func checkpointRoundTrip(
 ) ([]contexty.Message, error) {
 	store := contexty.NewMemoryConversationStateStore(contexty.WithMemoryStateCodec(contexty.ConversationCodec{
 		Provenance: codec.Provenance, Extensions: codec.Extensions, OpaqueProfile: hostProfile()}))
-	//nolint:exhaustruct_v5 // One complete segment replacement is the host checkpoint decision.
+
 	if err := store.CommitState(ctx, "fixture", 0, contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentHistory, Messages: messages,
 	}); err != nil {

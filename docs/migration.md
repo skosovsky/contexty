@@ -252,7 +252,7 @@ See [the prefix contract](prefix-diagnostics.md) and
 - Store only host-approved bytes; accept complete records separately from proposals.
 - Wire fresh resource/blob authorization and retention/cleanup protocols.
 - Test overflow, denial, cancellation, missing/stale dependencies and private export.
-- Run `make validate` and actual adapter integration checks before release approval.
+- Run `make lint`, `make test`, `make test-integration` and `make test-e2e` before release approval.
 
 ## Retention and compaction budget
 

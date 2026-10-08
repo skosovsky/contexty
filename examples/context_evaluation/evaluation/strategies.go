@@ -20,7 +20,7 @@ func (fixturePreview) PreviewBlob(_ context.Context, _ contexty.BlobContent) (co
 }
 
 func prepareOffload(ctx context.Context, fixture Fixture, callbacks *Callbacks) (contexty.CompileRequest, error) {
-	request := contexty.CompileRequest{} //nolint:exhaustruct_v5 // Host constructs only chosen semantic inputs.
+	request := contexty.CompileRequest{}
 	storage, err := blobmemory.New(blobmemory.Config{Namespace: "evaluation", MaxObjectBytes: maxFixtureBody,
 		Authorize: func(_ context.Context, access blobmemory.Access) error {
 			if access.ScopeRef != "evaluation-write" {
@@ -92,7 +92,7 @@ func (retrievalProjection) ProjectResource(
 
 func prepareRetrieval(ctx context.Context, fixture Fixture, reporter *contexty.EstimateReporter, budget int,
 	callbacks *Callbacks) (contexty.CompileRequest, error) {
-	request := contexty.CompileRequest{} //nolint:exhaustruct_v5 // Inputs are explicitly host-selected.
+	request := contexty.CompileRequest{}
 	// The source archive exists independently of the working window. Selection
 	// uses only pinned source IDs, never an inferred provider capability.
 	inputs, err := retrievalInputs(fixture)
@@ -113,7 +113,7 @@ func prepareRetrieval(ctx context.Context, fixture Fixture, reporter *contexty.E
 		return request, err
 	}
 	policy := materialization()
-	resolver := contexty.ResourceResolver{ //nolint:exhaustruct_v5 // No labels or custom codecs in this fixture.
+	resolver := contexty.ResourceResolver{
 		Materialization: &policy, Reader: reader, ReaderIdentity: identity("fixture-archive-reader"),
 		Projection: retrievalProjection{}, ProjectionIdentity: identity("fixture-source-chunk"), Reporter: reporter}
 	for _, body := range bodies {
@@ -179,7 +179,7 @@ func offloadRound(
 		artifact.Lifecycle = contexty.ArtifactLifecycleEphemeral
 		outcome, projectErr := offloader.ProjectArtifact(
 			ctx,
-			contexty.BlobArtifactRequest{ //nolint:exhaustruct_v5 // No host extensions.
+			contexty.BlobArtifactRequest{
 				ID:                       "offload-" + result.ID,
 				Artifact:                 artifact,
 				ScopeRef:                 "evaluation-write",
@@ -204,7 +204,7 @@ type retrievalInput struct {
 }
 
 func retrievalInputs(fixture Fixture) (retrievalInput, error) {
-	inputs := retrievalInput{} //nolint:exhaustruct_v5 // Accumulated explicit inputs.
+	inputs := retrievalInput{}
 	selected := make(map[string]bool)
 	for _, sourceID := range fixture.QuerySourceIDs {
 		selected[sourceID] = true

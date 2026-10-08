@@ -184,10 +184,11 @@ func (s *dropHeadStrategy) Apply(
 		return out, nil
 	}
 	out, err := s.applySelectivePath(ctx, dropHeadState{
-		msgs:    slices.Clone(msgs),
-		weights: slices.Clone(weights),
-		deleted: make([]bool, len(msgs)),
-		total:   originalTokens,
+		searchStart: 0,
+		msgs:        slices.Clone(msgs),
+		weights:     slices.Clone(weights),
+		deleted:     make([]bool, len(msgs)),
+		total:       originalTokens,
 	}, limit, counter)
 	if err != nil {
 		return nil, err

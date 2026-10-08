@@ -11,14 +11,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/skosovsky/contexty"
 	"github.com/skosovsky/prompty"
+
+	"github.com/skosovsky/contexty"
 )
 
 var ErrUnsupported = errors.New("chat consumer: unsupported mapping")
 
 const metadataType = "host.chat_metadata"
 const stateType = "host.chat_state"
+const profileRevision = "fixed"
+const mediaImage = "image"
 
 // Record keeps host identity separate from the native API's message type.
 type Record struct {
@@ -65,7 +68,7 @@ func NewMapper(destination prompty.ProfileIdentity) Mapper {
 		err := json.Unmarshal(data, &value)
 		return value, err
 	})
-	identity := contexty.Descriptor{ID: "host/chat-state", Revision: "fixed"}
+	identity := contexty.Descriptor{ID: "host/chat-state", Revision: profileRevision}
 	registry.RegisterOpaquePayload(stateType, identity, func(data []byte) (contexty.Extension, error) {
 		var value StatePayload
 		err := json.Unmarshal(data, &value)
@@ -75,8 +78,8 @@ func NewMapper(destination prompty.ProfileIdentity) Mapper {
 		return value, err
 	})
 	profileBytes, _ := json.Marshal(destination) // Plain-data identity has no fallible fields.
-	return Mapper{Codec: contexty.JSONSerializer{Extensions: registry},
-		Profile: contexty.Descriptor{ID: string(profileBytes), Revision: "fixed"}, Destination: destination}
+	return Mapper{Codec: contexty.JSONSerializer{Extensions: registry, Provenance: nil},
+		Profile: contexty.Descriptor{ID: string(profileBytes), Revision: profileRevision}, Destination: destination}
 }
 
 // Import maps records in the caller's order and returns mandatory state IDs.
@@ -112,7 +115,10 @@ func (m Mapper) importRecord(record Record, prefix []contexty.Message, now time.
 	if err := prompty.ValidateContinuation([]prompty.ChatMessage{record.Message}, m.Destination, now); err != nil {
 		return contexty.Message{}, false, err
 	}
-	wire, err := prompty.MarshalExecution(prompty.NewExecution([]prompty.ChatMessage{record.Message}), prompty.WirePolicy{State: prompty.StatePreserve})
+	wire, err := prompty.MarshalExecution(
+		prompty.NewExecution([]prompty.ChatMessage{record.Message}),
+		prompty.WirePolicy{State: prompty.StatePreserve},
+	)
 	if err != nil {
 		return contexty.Message{}, false, err
 	}
@@ -128,7 +134,7 @@ func (m Mapper) importRecord(record Record, prefix []contexty.Message, now time.
 		}
 		parts = append(parts, semantic)
 	}
-	block := continuation{States: native.ProviderState}
+	block := continuation{States: native.ProviderState, Annotations: nil}
 	native.ProviderState = nil
 	required := false
 	for _, state := range block.States {
@@ -148,26 +154,41 @@ func (m Mapper) importRecord(record Record, prefix []contexty.Message, now time.
 	message := contexty.Message{ID: record.ID, Role: role, Parts: parts,
 		SourceRefs: slices.Clone(record.SourceRefs), Extensions: []contexty.Extension{Metadata{Wire: metadata}}}
 	if len(block.States)+len(block.Annotations) > 0 {
-		stateWire, marshalErr := json.Marshal(block)
-		if marshalErr != nil {
-			return contexty.Message{}, false, marshalErr
+		envelope, stateErr := m.importState(record.ID, block, prefix)
+		if stateErr != nil {
+			return contexty.Message{}, false, stateErr
 		}
-		binding := contexty.OpaqueBinding{Profile: m.Profile}
-		for _, previous := range prefix {
-			ref, refErr := contexty.MessageContentRef(previous, m.Codec)
-			if refErr != nil {
-				return contexty.Message{}, false, refErr
-			}
-			binding.Prefix = append(binding.Prefix, ref)
-		}
-		if len(prefix) > 0 {
-			binding.Boundary = prefix[len(prefix)-1].ID
-		}
-		message.Extensions = append(message.Extensions, contexty.OpaqueState{ID: "state:" + record.ID,
-			Codec: contexty.Descriptor{ID: "host/chat-state", Revision: "fixed"}, Payload: StatePayload{Wire: stateWire, Digest: digest(stateWire)},
-			Placement: contexty.OpaquePlacement{AfterPart: -1}, Binding: binding})
+		message.Extensions = append(message.Extensions, envelope)
 	}
 	return message, required, nil
+}
+
+func (m Mapper) importState(id string, block continuation, prefix []contexty.Message) (contexty.OpaqueState, error) {
+	stateWire, marshalErr := json.Marshal(block)
+	if marshalErr != nil {
+		return contexty.OpaqueState{}, marshalErr
+	}
+	binding := contexty.OpaqueBinding{Profile: m.Profile, Required: nil, Prefix: nil, Boundary: ""}
+	for _, previous := range prefix {
+		ref, refErr := contexty.MessageContentRef(previous, m.Codec)
+		if refErr != nil {
+			return contexty.OpaqueState{}, refErr
+		}
+		binding.Prefix = append(binding.Prefix, ref)
+	}
+	if len(prefix) > 0 {
+		binding.Boundary = prefix[len(prefix)-1].ID
+	}
+	return contexty.OpaqueState{
+		ID: "state:" + id,
+		Codec: contexty.Descriptor{
+			ID:       "host/chat-state",
+			Revision: profileRevision,
+		},
+		Payload:   StatePayload{Wire: stateWire, Digest: digest(stateWire)},
+		Placement: contexty.OpaquePlacement{AfterPart: -1},
+		Binding:   binding,
+	}, nil
 }
 
 func importPart(part prompty.ContentPartWire) (contexty.ContentPart, error) {
@@ -178,14 +199,15 @@ func importPart(part prompty.ContentPartWire) (contexty.ContentPart, error) {
 	case prompty.ContentPartWireText:
 		return contexty.TextPart{Text: part.Text}, nil
 	case prompty.ContentPartWireMedia:
-		if part.MediaType != "image" && part.MediaType != "audio" && part.MediaType != "video" && part.MediaType != "document" {
+		if part.MediaType != mediaImage && part.MediaType != "audio" && part.MediaType != "video" &&
+			part.MediaType != "document" {
 			return nil, ErrUnsupported
 		}
 		if part.URL != "" {
-			if part.MediaType != "image" || len(part.Data) != 0 {
+			if part.MediaType != mediaImage || len(part.Data) != 0 {
 				return nil, ErrUnsupported
 			}
-			return contexty.ImagePart{URL: part.URL}, nil
+			return contexty.ImagePart{URL: part.URL, Detail: ""}, nil
 		}
 		media := contexty.MediaPart{MIMEType: part.MIMEType, Data: bytes.Clone(part.Data)}
 		if err := media.Validate(); err != nil {
@@ -196,9 +218,15 @@ func importPart(part prompty.ContentPartWire) (contexty.ContentPart, error) {
 		if part.ArgsChunk != "" || !json.Valid([]byte(part.Args)) {
 			return nil, ErrUnsupported
 		}
-		return contexty.ToolCallPart{ID: part.ToolCallID, Name: part.Name, Arguments: contexty.JSONPayload(part.Args)}, nil
+		return contexty.ToolCallPart{
+			ID:            part.ToolCallID,
+			Name:          part.Name,
+			Arguments:     contexty.JSONPayload(part.Args),
+			ArgumentsBlob: nil,
+		}, nil
 	case prompty.ContentPartWireToolResult:
-		if len(part.Content) != 1 || part.Content[0].Type != prompty.ContentPartWireText || part.Content[0].CachePolicy != nil {
+		if len(part.Content) != 1 || part.Content[0].Type != prompty.ContentPartWireText ||
+			part.Content[0].CachePolicy != nil {
 			return nil, fmt.Errorf("%w: composite tool result", ErrUnsupported)
 		}
 		return contexty.ToolResultPart{ToolCallID: part.ToolCallID, Name: part.Name,
@@ -251,76 +279,114 @@ func (m Mapper) exportMessage(message contexty.Message) (Record, []string, error
 	if err := message.Role.Validate(); err != nil {
 		return Record{}, nil, err
 	}
-	if message.Actor != nil || message.Origin != nil || message.LLMCache != nil || message.Provenance != nil || message.Annotations.Timestamp != nil {
+	if message.Actor != nil || message.Origin != nil || message.LLMCache != nil || message.Provenance != nil ||
+		message.Annotations.Timestamp != nil {
 		return Record{}, nil, ErrUnsupported
 	}
-	native := prompty.MessageWire{Role: prompty.Role(message.Role)}
-	var states []string
-	originalRole := message.Role
-	var hints []prompty.ContentPartWire
-	metadataSeen := false
-	for index, extension := range message.Extensions {
-		switch value := extension.(type) {
-		case Metadata:
-			if metadataSeen || index != 0 {
-				return Record{}, nil, ErrUnsupported
-			}
-			metadataSeen = true
-			if err := json.Unmarshal(value.Wire, &native); err != nil {
-				return Record{}, nil, err
-			}
-			if native.ProviderState != nil || prompty.HasScopedMessageAnnotations(native.MessageAnnotations) || native.CachePolicy != nil || native.ContinuationUnavailable {
-				return Record{}, nil, ErrUnsupported
-			}
-			hints = native.Content
-			originalRole = contexty.Role(native.Role)
-		case contexty.OpaqueState:
-			payload, ok := value.Payload.(StatePayload)
-			if !ok || value.Placement.AfterPart != -1 || payload.Digest != digest(payload.Wire) {
-				return Record{}, nil, ErrUnsupported
-			}
-			var block continuation
-			if err := json.Unmarshal(payload.Wire, &block); err != nil {
-				return Record{}, nil, err
-			}
-			if len(block.States)+len(block.Annotations) == 0 {
-				return Record{}, nil, contexty.ErrInvalidOpaqueState
-			}
-			native.ProviderState = append(native.ProviderState, block.States...)
-			native.MessageAnnotations = append(native.MessageAnnotations, block.Annotations...)
-			states = append(states, value.ID)
-		default:
-			return Record{}, nil, ErrUnsupported
-		}
+	native := prompty.MessageWire{Role: prompty.Role(message.Role), ProviderState: nil, Annotations: nil,
+		MessageAnnotations: nil, ContinuationUnavailable: false, Content: nil, CachePolicy: nil,
+		Provenance: nil, Metadata: nil, LayerKind: ""}
+	decoded, err := decodeExtensions(message, native)
+	if err != nil {
+		return Record{}, nil, err
 	}
+	native = decoded.native
+	states, hints := decoded.states, decoded.hints
+	originalRole, metadataSeen := decoded.originalRole, decoded.metadataSeen
+
 	native.Role = prompty.Role(message.Role)
 	native.Content = nil
 	if metadataSeen && len(hints) != len(message.Parts) {
 		return Record{}, nil, ErrUnsupported
 	}
 	for i, part := range message.Parts {
-		hint := prompty.ContentPartWire{}
+		var hint prompty.ContentPartWire
 		if metadataSeen {
 			hint = hints[i]
 		}
-		projected, err := exportPart(part, hint)
-		if err != nil {
-			return Record{}, nil, err
+		projected, partErr := exportPart(part, hint)
+		if partErr != nil {
+			return Record{}, nil, partErr
 		}
 		native.Content = append(native.Content, projected)
 	}
 	if len(states) > 0 && (originalRole != message.Role || !reflect.DeepEqual(hints, native.Content)) {
 		return Record{}, nil, contexty.ErrOpaqueStateInvalidated
 	}
-	execution, err := prompty.UnmarshalExecution(prompty.PromptExecutionWire{Format: prompty.ExecutionWireFormat, Messages: []prompty.MessageWire{native}})
+	// Only the message wire is populated in this host mapping profile.
+	var executionWire prompty.PromptExecutionWire
+	executionWire.Format, executionWire.Messages = prompty.ExecutionWireFormat, []prompty.MessageWire{native}
+	execution, err := prompty.UnmarshalExecution(executionWire)
 	if err != nil {
 		return Record{}, nil, err
 	}
-	return Record{ID: message.ID, SourceRefs: slices.Clone(message.SourceRefs), Message: execution.Messages[0]}, states, nil
+	return Record{
+		ID:         message.ID,
+		SourceRefs: slices.Clone(message.SourceRefs),
+		Message:    execution.Messages[0],
+	}, states, nil
+}
+
+type decodedMessage struct {
+	native       prompty.MessageWire
+	states       []string
+	hints        []prompty.ContentPartWire
+	originalRole contexty.Role
+	metadataSeen bool
+}
+
+func decodeExtensions(message contexty.Message, native prompty.MessageWire) (decodedMessage, error) {
+	decoded := decodedMessage{native: native, states: nil, hints: nil, originalRole: message.Role, metadataSeen: false}
+	for index, extension := range message.Extensions {
+		switch value := extension.(type) {
+		case Metadata:
+			if decoded.metadataSeen || index != 0 {
+				return decodedMessage{}, ErrUnsupported
+			}
+			decoded.metadataSeen = true
+			if err := json.Unmarshal(value.Wire, &decoded.native); err != nil {
+				return decodedMessage{}, err
+			}
+			if decoded.native.ProviderState != nil ||
+				prompty.HasScopedMessageAnnotations(decoded.native.MessageAnnotations) ||
+				decoded.native.CachePolicy != nil ||
+				decoded.native.ContinuationUnavailable {
+				return decodedMessage{}, ErrUnsupported
+			}
+			decoded.hints = decoded.native.Content
+			decoded.originalRole = contexty.Role(decoded.native.Role)
+		case contexty.OpaqueState:
+			block, stateErr := decodeState(value)
+			if stateErr != nil {
+				return decodedMessage{}, stateErr
+			}
+			decoded.native.ProviderState = append(decoded.native.ProviderState, block.States...)
+			decoded.native.MessageAnnotations = append(decoded.native.MessageAnnotations, block.Annotations...)
+			decoded.states = append(decoded.states, value.ID)
+		default:
+			return decodedMessage{}, ErrUnsupported
+		}
+	}
+	return decoded, nil
+}
+
+func decodeState(value contexty.OpaqueState) (continuation, error) {
+	payload, ok := value.Payload.(StatePayload)
+	if !ok || value.Placement.AfterPart != -1 || payload.Digest != digest(payload.Wire) {
+		return continuation{}, ErrUnsupported
+	}
+	var block continuation
+	if err := json.Unmarshal(payload.Wire, &block); err != nil {
+		return continuation{}, err
+	}
+	if len(block.States)+len(block.Annotations) == 0 {
+		return continuation{}, contexty.ErrInvalidOpaqueState
+	}
+	return block, nil
 }
 
 func exportPart(part contexty.ContentPart, hint prompty.ContentPartWire) (prompty.ContentPartWire, error) {
-	result := prompty.ContentPartWire{}
+	var result prompty.ContentPartWire
 	if hint.CachePolicy != nil {
 		return result, ErrUnsupported
 	}
@@ -328,17 +394,19 @@ func exportPart(part contexty.ContentPart, hint prompty.ContentPartWire) (prompt
 	case contexty.TextPart:
 		result.Type, result.Text = prompty.ContentPartWireText, value.Text
 	case contexty.ImagePart:
-		if value.Detail != "" || hint.MediaType != "image" {
+		if value.Detail != "" || hint.MediaType != mediaImage {
 			return result, ErrUnsupported
 		}
-		result.Type, result.MediaType, result.MIMEType, result.URL = prompty.ContentPartWireMedia, "image", hint.MIMEType, value.URL
+		result.Type, result.MediaType, result.MIMEType, result.URL = prompty.ContentPartWireMedia, mediaImage, hint.MIMEType, value.URL
 	case contexty.MediaPart:
 		if hint.MediaType == "" || value.Validate() != nil {
 			return result, ErrUnsupported
 		}
-		result.Type, result.MediaType, result.MIMEType, result.Data = prompty.ContentPartWireMedia, hint.MediaType, value.MIMEType, bytes.Clone(value.Data)
+		result.Type, result.MediaType, result.MIMEType, result.Data = prompty.ContentPartWireMedia, hint.MediaType, value.MIMEType, bytes.Clone(
+			value.Data,
+		)
 	case contexty.ToolCallPart:
-		if value.Arguments.Text != "" || len(value.Arguments.Binary) != 0 || value.Arguments.Error != nil || value.Arguments.Progress != nil || value.Arguments.Control != nil || value.Arguments.MIMEType != "" || !json.Valid(value.Arguments.Data) {
+		if unsupportedArguments(value.Arguments) {
 			return result, ErrUnsupported
 		}
 		args := string(value.Arguments.Data)
@@ -351,11 +419,13 @@ func exportPart(part contexty.ContentPart, hint prompty.ContentPartWire) (prompt
 		result.Type, result.ToolCallID, result.Name, result.Args = prompty.ContentPartWireToolCall, value.ID, value.Name, args
 	case contexty.ToolResultPart:
 		payload := value.Payload
-		if len(payload.Data)+len(payload.Binary) != 0 || payload.MIMEType != "" || payload.Error != nil || payload.Progress != nil || payload.Control != nil {
+		if unsupportedToolResult(payload) {
 			return result, ErrUnsupported
 		}
 		result.Type, result.ToolCallID, result.Name, result.IsError = prompty.ContentPartWireToolResult, value.ToolCallID, value.Name, value.IsError
-		result.Content = []prompty.ContentPartWire{{Type: prompty.ContentPartWireText, Text: payload.Text}}
+		var text prompty.ContentPartWire
+		text.Type, text.Text = prompty.ContentPartWireText, payload.Text
+		result.Content = []prompty.ContentPartWire{text}
 	default:
 		return result, ErrUnsupported
 	}
@@ -374,12 +444,25 @@ func jsonEqual(a, b []byte) bool {
 }
 
 func (m Mapper) validateIdentity() error {
-	if strings.TrimSpace(m.Destination.Provider) == "" || strings.TrimSpace(m.Destination.Model) == "" || prompty.ValidateEndpointIdentity(m.Destination.Endpoint) != nil {
+	if strings.TrimSpace(m.Destination.Provider) == "" || strings.TrimSpace(m.Destination.Model) == "" ||
+		prompty.ValidateEndpointIdentity(m.Destination.Endpoint) != nil {
 		return ErrUnsupported
 	}
 	identity, _ := json.Marshal(m.Destination)
-	if m.Profile != (contexty.Descriptor{ID: string(identity), Revision: "fixed"}) {
+	if m.Profile != (contexty.Descriptor{ID: string(identity), Revision: profileRevision}) {
 		return ErrStaleExecution
 	}
 	return nil
+}
+
+func unsupportedArguments(payload contexty.ToolPayload) bool {
+	return payload.Text != "" || len(payload.Binary) != 0 || payload.Error != nil || payload.Progress != nil ||
+		payload.Control != nil ||
+		payload.MIMEType != "" ||
+		!json.Valid(payload.Data)
+}
+func unsupportedToolResult(payload contexty.ToolPayload) bool {
+	return len(payload.Data)+len(payload.Binary) != 0 || payload.MIMEType != "" || payload.Error != nil ||
+		payload.Progress != nil ||
+		payload.Control != nil
 }

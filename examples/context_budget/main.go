@@ -57,7 +57,7 @@ func main() {
 	current := contexty.TextMessage(contexty.RoleUser, "Continue from the last result.")
 	current.ID = "current"
 	messages = append(messages, current)
-	//nolint:exhaustruct_v5 // Only the explicit budget and retention features are configured.
+
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget:     contexty.EffectiveInputBudget(hardLimit),
 		Retention:  contexty.RetentionPolicy{MessageIDs: []string{"rule"}},

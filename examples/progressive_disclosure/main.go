@@ -114,7 +114,7 @@ func compileChunk(
 	)
 	return engine.CompileSnapshot(
 		ctx,
-		contexty.CompileRequest{ //nolint:exhaustruct_v5 // only selected resources are issued
+		contexty.CompileRequest{
 			CompilationID: "jit/" + selected.Reference.ID,
 			Targets: []contexty.CompileTarget{
 				{
@@ -150,7 +150,7 @@ func resourceBlock(
 	if err != nil {
 		return contexty.DeferredBlock{}, err
 	}
-	return contexty.DeferredBlock{ //nolint:exhaustruct_v5 // default memory segment/append placement
+	return contexty.DeferredBlock{
 		Name: "selected-content",
 		ResourceCodec: contexty.ResourceCodec{
 			Messages: hostCodec(),
@@ -167,7 +167,7 @@ func resourceBlock(
 }
 
 func estimateProfile() contexty.EstimateProfile {
-	return contexty.EstimateProfile{ //nolint:exhaustruct_v5 // no permissive fallback or host extensions
+	return contexty.EstimateProfile{
 		Model:     contexty.Descriptor{ID: "host-model", Revision: pinnedIdentity},
 		Estimator: contexty.Descriptor{ID: "character-count", Revision: pinnedIdentity},
 		Method:    contexty.Descriptor{ID: "approximate-characters", Revision: pinnedIdentity},

@@ -140,7 +140,7 @@ func runComposition(
 	memoryFact.SourceRefs = fact.Sources
 	summary := &fixtureSummary{calls: 0}
 	pipeline := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{ //nolint:exhaustruct_v5 // Rolling summary uses no explicit truncation/retention config.
+		contexty.BudgetConfig{
 			Budget:     contexty.EffectiveInputBudget(promptLimit),
 			Summarizer: summary,
 		},
@@ -167,7 +167,7 @@ func runComposition(
 	)
 	compiled, err := engine.Compile(
 		ctx,
-		contexty.CompileRequest{ //nolint:exhaustruct_v5 // Direct fixture input, no store/deferred state.
+		contexty.CompileRequest{
 			History:   history,
 			Artifacts: []contexty.ContextArtifact{*offloaded.Artifact, memoryFact},
 		},

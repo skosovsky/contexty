@@ -117,7 +117,7 @@ func OfflineConfig() Config {
 
 // OfflineProfile honestly labels the fixture character estimator as estimated.
 func OfflineProfile() contexty.EstimateProfile {
-	return contexty.EstimateProfile{ //nolint:exhaustruct_v5 // No fallback or extension costs are implied.
+	return contexty.EstimateProfile{
 		Model: identity(
 			"offline-no-model",
 		),

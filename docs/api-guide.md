@@ -766,7 +766,7 @@ Messages and segments serialize as JSON with explicit discriminators:
 
 ## Architecture guardrails
 
-AST tests in `architecture_test.go` (run via `make test-acceptance`):
+AST tests in `architecture_test.go` (run via `make test`):
 
 - `TestArchitecture_NoStringHeuristicsForSemantics` — no string-prefix heuristics in semantic core
 - `TestArchitecture_NoForbiddenExternalImports` — stdlib + `github.com/skosovsky/contexty/*` only in core
@@ -779,14 +779,15 @@ AST tests in `architecture_test.go` (run via `make test-acceptance`):
 ## Development
 
 ```bash
-make test              # all modules, race
-make test-acceptance   # contract + atomicity acceptance subset
 make lint
-make bench-guardrails  # allocation guardrails (CI gate)
-make validate          # lint + test-acceptance + bench-guardrails + full test
+make test              # unit, contract and allocation guardrails; all modules, fresh race
+make test-integration  # Docker stores and published baseline
+make test-e2e          # offline consumer scenarios
+make bench             # separate performance measurements
 ```
 
-Hot-path benchmarks live in `bench_test.go`. Full acceptance gate: `make validate` plus adapter integration tests when Docker is available.
+Hot-path benchmarks live in `bench_test.go`. See [verification](verification.md)
+for the standard profiles; the release source gate runs all four checks sequentially.
 
 ## Policy
 

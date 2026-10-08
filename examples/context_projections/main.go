@@ -15,7 +15,6 @@ func message(id, text string) contexty.Message {
 }
 
 func budget(limit int) *contexty.BudgetPipeline {
-	//nolint:exhaustruct_v5 // This example configures only an effective input limit.
 	return contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget: contexty.EffectiveInputBudget(limit),
 	}, &contexty.FixedEstimator{TokensPerMessage: 1, TokensPerContentPart: 0, TokensPerToolCall: 0})
@@ -48,7 +47,7 @@ func main() {
 		contexty.WithArtifactMaterialization(*hostMaterialization()),
 		contexty.WithBudgetPipeline(budget(mainLimit)),
 	)
-	//nolint:exhaustruct_v5 // Explicit composition; unrelated compile features remain disabled.
+
 	result, err := engine.CompileSnapshot(ctx, contexty.CompileRequest{
 		TurnID: "turn-1",
 		History: []contexty.Message{message("old", "First question."), message("middle", "Earlier evidence."),
@@ -99,7 +98,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	//nolint:exhaustruct_v5 // One explicit history replacement suffices for this checkpoint example.
+
 	err = store.CommitState(ctx, "example", loaded.Version(), contexty.ConversationDelta{
 		Operation: contexty.DeltaReplaceSegment, Segment: contexty.SegmentHistory,
 		Messages: checkpoint.Segment(contexty.SegmentHistory),

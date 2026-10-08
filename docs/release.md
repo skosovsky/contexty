@@ -1,46 +1,86 @@
-# Release tooling contract
+# Shell release
 
-Task 24 stage 2 fixes F01/F02 and adopts D44. Run release from repository root
-with Bash, Git, Go and Python 3.9+ on macOS or Linux. Python handles module rewriting
-through `go mod edit`; BSD-specific sed is not used.
+The common release implementation uses Bash, Git, Make and the standard Go CLI.
+There is no Python release runner or additional Go executable.
 
-`make release-patch` / `make release-break` run `make validate` first. Direct
-script execution is a low-level publication command and requires the caller to
-have completed those gates. The script asks confirmation of the computed version.
+```sh
+make lint
+make test
+make test-integration
+make test-e2e
+make release-patch
+make release-break
+# Optional older source on main:
+make release-patch RELEASE_SOURCE=<full-commit-sha>
+make release-inspect
+make release-resume
+make release-finish
+```
 
-Release uses committed HEAD in an isolated temporary clone. Tracked changes are
-rejected; untracked files are never copied into the release. The original branch,
-HEAD, index, worktree and local tags remain unchanged on success and failure.
-The temporary clone receives the source repository's effective user identity and
-commit/tag signing settings. Signing errors fail before publication.
-Only explicitly selected tracked go.mod files are staged after removing local
-sibling replacements and updating v0.0.0 sibling dependencies. Root and selected
-submodule tags point to the same release commit. No source branch is pushed.
+The caller must be on local `main` with a clean tracked/index state. Untracked
+files are preserved and excluded. Source defaults to HEAD; an explicit full SHA
+must be an ancestor of local main. Origin must have exactly one push destination
+and an existing main that can fast-forward to the selected source. An older
+source cannot rewind remote main. The caller's branch, HEAD, files and tags remain
+unchanged throughout the transaction.
 
-Version selection uses published root vMAJOR.MINOR.PATCH tags from origin. A
-pre-existing local candidate tag in the isolated clone is an explicit preparation
-error. Root must be included in the module list; module directories are relative,
-tracked, unique and cannot contain whitespace or traverse outside the checkout.
-Module paths must share the root module namespace.
+Versions come from remote root tags. Patch increments patch; break increments
+minor before v1. A breaking transition from v1 to v2 is blocked until an import-path
+migration is implemented. The selected source's `make modules` discovers
+all modules without a separate publication inventory. Root tags
+use `vX.Y.Z`; nested module tags use their directory prefix.
 
-Publication uses exact tag refspecs and `git push --atomic`. A remote without
-atomic support fails safely; there is no partial-push fallback. Cleanup removes
-only this invocation's temporary clone, including its temporary local tags. It
-never deletes remote refs or changes the original checkout.
+The release runs the selected source's lint, fresh unit tests,
+integration tests and e2e tests sequentially in an independent checkout.
+It updates internal requirements to the new version and removes internal development
+replacements only there. Only go.mod/go.sum files may change in the release commit.
+A failed prerequisite, source gate, preparation or candidate identity check prevents push.
 
-On push failure, the tool queries exact remote refs. If all match the exact prepared local tag object IDs (including signed tags),
-it reports publication observed despite the push error; if none exist after a
-completed failed push it reports not published; after interruption absence remains
-unknown because a remote transaction may still be running; mixed/conflicting or unavailable observations are unknown.
-The exit status remains failure. For unknown outcomes inspect the reported refs
-before retrying. Do not blindly remove tags or assume the publication failed.
-Failure before push is reported as not published. A retry after a rejected push
-uses the same version because the source and origin were preserved.
+After displaying the source, candidate, destination and exact refs for confirmation,
+one atomic push publishes:
 
-Fixtures run only against temporary local bare origins and verify success,
-untracked/tag isolation, multiple modules, rejecting push, preparation/tag errors,
-retry, exact refs and cleanup. Running the fixtures never publishes this library.
+- source SHA to `refs/heads/main`, keeping its development replacements;
+- candidate SHA to the exact root/module release tags, with prepared manifests.
 
-Run `make test-release` for current behavior. On macOS,
-`CONTEXTY_VERIFY_REVIEW_SHA=1 python3 scripts/test_release.py` additionally
-reproduces F01/F02 from review SHA (requires that commit in local history).
+There is no force, broad `--tags`, or non-atomic fallback. Remote main is rechecked
+before push; a concurrent incompatible update rejects publication. Remote tags must
+match exact candidate identities. Remote main must equal source or contain it in
+its history. Publication completes after these remote-ref checks; no consumer
+installation or proxy polling runs after push. Artifact and consumer checks remain
+ordinary Go integration/e2e tests in the source gate.
+
+## Recovery
+
+Format-3 plain-text records live under `library-releases/active` in the Git common
+directory. They retain destination, branch, observed remote main, source, candidate,
+version, phase and publication status. Records are never evaluated as shell code.
+A local lock prevents concurrent releases; after process termination, verify the
+process is gone before manually removing a stale lock.
+
+`inspect` refreshes remote observations. `resume` reuses the same version and
+candidate; unknown results require inspection first. A lost response after push is
+resolved by reading refs. Later forward movement of remote main is acceptable if
+source ancestry is verified; a different tag is always a collision. Recovery never
+rewinds main or overwrites/deletes a tag. `finish` archives only a verified release.
+
+Historical records remain untouched. An active record under an older release state
+directory, or an unsupported record format, blocks new publication: finish/recover
+it using its original tooling revision before using the new script.
+
+## Verification
+
+Go tooling package tests exercise the common protocol against disposable bare repositories,
+including libraries with nested modules outside `adapters/`. Real module artifacts,
+installability and consumer composition are checked by Go integration tests.
+These checks never publish to the production remote. CI runs the same lint/unit/integration/e2e commands.
+
+## Contexty module layout
+
+The nested paths are adapters/store/postgres, adapters/store/redis and
+integration/chat, all under github.com/skosovsky/contexty. Every discovered module
+receives a directory-prefixed tag; integration/chat is included. Development source
+keeps local core replacements; candidate manifests remove them and update internal
+requirements to the selected release version.
+
+A source history rewritten relative to origin/main fails the fast-forward prerequisite.
+Resolve that history separately before a production release; release never forces main.

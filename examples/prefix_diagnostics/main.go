@@ -25,7 +25,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	request := contexty.CompileRequest{ //nolint:exhaustruct_v5 // stateless local messages only
+	request := contexty.CompileRequest{
 		System: []contexty.Message{
 			message("policy", "Static host policy."),
 			message("reference", "Current approved reference."),

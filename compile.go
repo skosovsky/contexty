@@ -108,6 +108,7 @@ func WithRoleProjectionPolicy(policy RoleProjectionPolicy) EngineOption {
 // NewEngine creates a compile engine.
 func NewEngine(opts ...EngineOption) *Engine {
 	e := &Engine{
+		opaqueStatePolicy:       nil,
 		selection:               nil,
 		artifactMaterialization: nil,
 		outputPolicy:            nil,

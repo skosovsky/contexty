@@ -223,7 +223,7 @@ func archiveResume(ctx context.Context, directory string) (scenarioReport, error
 	archive := &journal{directory: directory, reads: 0}
 	summary := &archiveSummary{calls: 0}
 	const hardLimit, triggerPercent, targetPercent = archiveBudget, 80, 70
-	//nolint:exhaustruct_v5 // Optional policies omitted; explicit fixture compaction only.
+
 	pipe := contexty.NewBudgetPipeline(contexty.BudgetConfig{
 		Budget:     contexty.EffectiveInputBudget(hardLimit),
 		Summarizer: summary,
@@ -249,7 +249,7 @@ func archiveResume(ctx context.Context, directory string) (scenarioReport, error
 		return scenarioReport{}, err
 	}
 	store := contexty.NewMemoryConversationStateStore()
-	//nolint:exhaustruct_v5 // Replace only the working history, never archive originals.
+
 	if err = store.CommitState(
 		ctx,
 		"session",
@@ -323,7 +323,6 @@ func resolveOriginal(
 	archive *journal,
 	selected contexty.ResourceDescriptor,
 ) (contexty.ResolvedResource, error) {
-	//nolint:exhaustruct_v5 // Text-only fixture: remaining kinds intentionally unsupported.
 	profile := contexty.EstimateProfile{
 		Model: contexty.Descriptor{ID: "offline", Revision: archiveRevision},
 		Estimator: contexty.Descriptor{
@@ -352,7 +351,7 @@ func resolveOriginal(
 	if err != nil {
 		return contexty.ResolvedResource{}, err
 	}
-	//nolint:exhaustruct_v5 // No labels or custom codecs in the text-only fixture.
+
 	resolver := contexty.ResourceResolver{
 		Reader:             archive,
 		ReaderIdentity:     contexty.Descriptor{ID: "host-file-journal", Revision: archiveRevision},

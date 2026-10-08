@@ -1,3 +1,5 @@
+//go:build integration
+
 package postgres
 
 import (
@@ -27,9 +29,9 @@ CREATE TABLE %s (
 );
 `
 
-func TestStoreIntegration(t *testing.T) {
-	// Arrange.
+func TestIntegrationStore(t *testing.T) {
 	requireDocker(t)
+	// Arrange.
 
 	ctx := context.Background()
 	container, err := tcpostgres.Run(ctx,

@@ -10,8 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/skosovsky/contexty"
 	"github.com/skosovsky/prompty"
+
+	"github.com/skosovsky/contexty"
 )
 
 var (
@@ -51,14 +52,20 @@ func requestWire(execution *prompty.PromptExecution) ([]byte, error) {
 func digest(wire []byte) string { sum := sha256.Sum256(wire); return hex.EncodeToString(sum[:]) }
 
 func budgetLimit(budget ByteBudget) (int, error) {
-	if budget.Window <= 0 || budget.Output < 0 || budget.Overhead < 0 || budget.Output >= budget.Window || budget.Overhead >= budget.Window-budget.Output {
+	if budget.Window <= 0 || budget.Output < 0 || budget.Overhead < 0 || budget.Output >= budget.Window ||
+		budget.Overhead >= budget.Window-budget.Output {
 		return 0, ErrBudget
 	}
 	return budget.Window - budget.Output - budget.Overhead, nil
 }
 
 // Prepare projects without a second truncation and reports on the final execution.
-func (m Mapper) Prepare(messages []contexty.Message, mandatory []string, budget ByteBudget, now time.Time) (Prepared, error) {
+func (m Mapper) Prepare(
+	messages []contexty.Message,
+	mandatory []string,
+	budget ByteBudget,
+	now time.Time,
+) (Prepared, error) {
 	records, err := m.Export(messages, mandatory, now)
 	if err != nil {
 		return Prepared{}, err
@@ -74,7 +81,14 @@ func (m Mapper) Prepare(messages []contexty.Message, mandatory []string, budget 
 		refs = append(refs, ref)
 	}
 	execution := prompty.NewExecution(native)
-	execution.ModelOptions = &prompty.ModelOptions{Model: m.Destination.Model}
+	execution.ModelOptions = &prompty.ModelOptions{
+		Model:            m.Destination.Model,
+		Temperature:      nil,
+		MaxTokens:        nil,
+		TopP:             nil,
+		Stop:             nil,
+		ProviderSettings: nil,
+	}
 	wire, err := requestWire(execution)
 	if err != nil {
 		return Prepared{}, err
@@ -83,8 +97,18 @@ func (m Mapper) Prepare(messages []contexty.Message, mandatory []string, budget 
 	if err != nil || len(wire) > limit {
 		return Prepared{}, ErrBudget
 	}
-	return Prepared{Execution: execution, Source: refs, Mandatory: slices.Clone(mandatory),
-		Report: Report{Digest: digest(wire), Profile: m.Profile, Bytes: len(wire), EffectiveLimit: limit, Budget: budget}}, nil
+	return Prepared{
+		Execution: execution,
+		Source:    refs,
+		Mandatory: slices.Clone(mandatory),
+		Report: Report{
+			Digest:         digest(wire),
+			Profile:        m.Profile,
+			Bytes:          len(wire),
+			EffectiveLimit: limit,
+			Budget:         budget,
+		},
+	}, nil
 }
 
 // ValidatePrepared runs immediately before execution, also after a restore.
@@ -107,7 +131,11 @@ func (m Mapper) ValidatePrepared(prepared Prepared, messages []contexty.Message,
 }
 
 // CompileTurn compiles exactly one current turn from a host snapshot.
-func (m Mapper) CompileTurn(ctx context.Context, state contexty.ConversationState, turn contexty.Message) (contexty.CompileResult, error) {
+func (m Mapper) CompileTurn(
+	ctx context.Context,
+	state contexty.ConversationState,
+	turn contexty.Message,
+) (contexty.CompileResult, error) {
 	if turn.ID == "" || turn.Role != contexty.RoleUser {
 		return contexty.CompileResult{}, ErrUnsupported
 	}
@@ -119,19 +147,63 @@ func (m Mapper) CompileTurn(ctx context.Context, state contexty.ConversationStat
 	current := contexty.NewCurrentTurn(turn)
 	stages := make(map[string]contexty.Descriptor)
 	for _, stage := range []string{"source", "project", "opaque-state", "prompt-template", "prompt", "patch", "merge", "format", "role", "hook", "budget"} {
-		stages[stage] = contexty.Descriptor{ID: "host/" + stage, Revision: "fixed"}
+		stages[stage] = contexty.Descriptor{ID: "host/" + stage, Revision: profileRevision}
 	}
 	engine := contexty.NewEngine(
-		contexty.WithTraceProfile(contexty.TraceProfile{Encoding: contexty.Descriptor{ID: "host/json", Revision: "fixed"}, Codec: m.Codec, Stages: stages, Labels: contexty.LabelProjection{Registry: m.Codec.Extensions, Policy: preserveLabels{}}}),
-		contexty.WithOpaqueStatePolicy(contexty.OpaqueStatePolicy{Identity: contexty.Descriptor{ID: "host-state-policy", Revision: "fixed"}, Profile: m.Profile, Invalidated: contexty.OpaqueFailClosed}),
-		contexty.WithOutputPolicy(contexty.OutputPolicy{Identity: contexty.Descriptor{ID: "host-output-policy", Revision: "fixed"},
-			Project: func(_ context.Context, input contexty.OutputPolicyInput) (contexty.AbstractPayload, error) {
-				return input.Payload, nil
-			}}),
+		contexty.WithTraceProfile(
+			contexty.TraceProfile{
+				Encoding: contexty.Descriptor{ID: "host/json", Revision: profileRevision},
+				Codec:    m.Codec,
+				Stages:   stages,
+				Labels: contexty.LabelProjection{
+					Registry:      m.Codec.Extensions,
+					Policy:        preserveLabels{},
+					RequiredTypes: nil,
+				},
+				Mapping:        nil,
+				RequireOrigins: false,
+				Codecs:         nil,
+			},
+		),
+		contexty.WithOpaqueStatePolicy(
+			contexty.OpaqueStatePolicy{
+				Identity:    contexty.Descriptor{ID: "host-state-policy", Revision: profileRevision},
+				Profile:     m.Profile,
+				Invalidated: contexty.OpaqueFailClosed,
+			},
+		),
+		contexty.WithOutputPolicy(
+			contexty.OutputPolicy{Identity: contexty.Descriptor{ID: "host-output-policy", Revision: profileRevision},
+				Project: func(_ context.Context, input contexty.OutputPolicyInput) (contexty.AbstractPayload, error) {
+					return input.Payload, nil
+				}},
+		),
 	)
-	return engine.CompileSnapshot(ctx, contexty.CompileRequest{System: state.Segment(contexty.SegmentSystem),
-		History: state.Segment(contexty.SegmentHistory), Tools: state.Segment(contexty.SegmentTools), Memory: state.Segment(contexty.SegmentMemory),
-		CompilationID: "turn:" + turn.ID, CurrentTurn: &current, SourceRevision: state.Version()})
+	return engine.CompileSnapshot(
+		ctx,
+		contexty.CompileRequest{
+			DeferredResources:      nil,
+			TurnID:                 "",
+			Pending:                nil,
+			Artifacts:              nil,
+			Options:                nil,
+			IdentityPolicy:         nil,
+			RequireDurableIdentity: false,
+			Targets:                nil,
+			Lineage:                contexty.Lineage{Records: nil, Unresolved: nil},
+			Origins:                nil,
+			PreviousRecord:         nil,
+			System:                 state.Segment(contexty.SegmentSystem),
+			History: state.Segment(
+				contexty.SegmentHistory,
+			),
+			Tools:          state.Segment(contexty.SegmentTools),
+			Memory:         state.Segment(contexty.SegmentMemory),
+			CompilationID:  "turn:" + turn.ID,
+			CurrentTurn:    &current,
+			SourceRevision: state.Version(),
+		},
+	)
 }
 
 // CommitTerminal accepts a complete response only. Outcome is a host-declared
@@ -147,9 +219,18 @@ func (m Mapper) CommitTerminal(ctx context.Context, store contexty.ConversationS
 	if !terminal || response == nil || response.Outcome != prompty.OutcomeCompleted {
 		return ErrIncomplete
 	}
-	result, _, err := m.Import([]Record{{ID: turn.ID + ":result", Message: prompty.ChatMessage{Role: prompty.RoleAssistant,
-		Content: response.Content, ProviderState: response.ProviderState, Annotations: response.Annotations,
-		MessageAnnotations: response.MessageAnnotations, ContinuationUnavailable: response.ContinuationUnavailable}}}, now)
+	result, _, err := m.Import(
+		[]Record{{ID: turn.ID + ":result", SourceRefs: nil, Message: prompty.ChatMessage{
+			CachePolicy: nil, Provenance: nil, Metadata: nil, LayerKind: "",
+			Role:                    prompty.RoleAssistant,
+			Content:                 response.Content,
+			ProviderState:           response.ProviderState,
+			Annotations:             response.Annotations,
+			MessageAnnotations:      response.MessageAnnotations,
+			ContinuationUnavailable: response.ContinuationUnavailable,
+		}}},
+		now,
+	)
 	if err != nil {
 		return err
 	}
@@ -170,9 +251,46 @@ func (m Mapper) CommitTerminal(ctx context.Context, store contexty.ConversationS
 			savedResult = &history[i]
 		}
 	}
+	if err := m.bindTerminalState(&result[0], state, history, turn, savedTurn != nil); err != nil {
+		return err
+	}
+
+	if savedTurn != nil || savedResult != nil {
+		if savedTurn != nil && savedResult != nil && contexty.MessageEqual(*savedTurn, turn) &&
+			contexty.MessageEqual(*savedResult, result[0]) {
+			return nil
+		}
+		return ErrStaleExecution
+	}
+	if state.Version() != expected {
+		return contexty.ErrConversationVersionConflict
+	}
+	return store.CommitState(
+		ctx,
+		conversationID,
+		expected,
+		contexty.ConversationDelta{
+			Operation:   contexty.DeltaAppendMessages,
+			Segment:     contexty.SegmentHistory,
+			Messages:    []contexty.Message{turn, result[0]},
+			ArtifactIDs: nil,
+			MessageIDs:  nil,
+			Artifact:    nil,
+			ToolRound:   nil,
+		},
+	)
+}
+
+func (m Mapper) bindTerminalState(
+	result *contexty.Message,
+	state contexty.ConversationState,
+	history []contexty.Message,
+	turn contexty.Message,
+	saved bool,
+) error {
 	// Bind terminal state to the actual committed prefix, not an empty import prefix.
 	prefixHistory := history
-	if savedTurn != nil {
+	if saved {
 		for index, message := range history {
 			if message.ID == turn.ID {
 				prefixHistory = history[:index]
@@ -181,7 +299,7 @@ func (m Mapper) CommitTerminal(ctx context.Context, store contexty.ConversationS
 		}
 	}
 	prefix := append(slices.Clone(prefixHistory), turn)
-	for i, extension := range result[0].Extensions {
+	for i, extension := range result.Extensions {
 		if envelope, ok := extension.(contexty.OpaqueState); ok {
 			for _, message := range append(state.Segment(contexty.SegmentSystem), prefix...) {
 				ref, refErr := contexty.MessageContentRef(message, m.Codec)
@@ -191,24 +309,19 @@ func (m Mapper) CommitTerminal(ctx context.Context, store contexty.ConversationS
 				envelope.Binding.Prefix = append(envelope.Binding.Prefix, ref)
 			}
 			envelope.Binding.Boundary = turn.ID
-			result[0].Extensions[i] = envelope
+			result.Extensions[i] = envelope
 		}
 	}
-	if savedTurn != nil || savedResult != nil {
-		if savedTurn != nil && savedResult != nil && contexty.MessageEqual(*savedTurn, turn) && contexty.MessageEqual(*savedResult, result[0]) {
-			return nil
-		}
-		return ErrStaleExecution
-	}
-	if state.Version() != expected {
-		return contexty.ErrConversationVersionConflict
-	}
-	return store.CommitState(ctx, conversationID, expected, contexty.ConversationDelta{Operation: contexty.DeltaAppendMessages,
-		Segment: contexty.SegmentHistory, Messages: []contexty.Message{turn, result[0]}})
+	return nil
 }
 
 type preserveLabels struct{}
 
-func (preserveLabels) ProjectLabels(_ context.Context, _ []contexty.Message, output contexty.Message, _ contexty.Descriptor) (contexty.LabelDecision, error) {
-	return contexty.LabelDecision{Extensions: output.Extensions}, nil
+func (preserveLabels) ProjectLabels(
+	_ context.Context,
+	_ []contexty.Message,
+	output contexty.Message,
+	_ contexty.Descriptor,
+) (contexty.LabelDecision, error) {
+	return contexty.LabelDecision{Extensions: output.Extensions, Upgrade: false, DecisionRef: ""}, nil
 }

@@ -4,21 +4,19 @@ This optional module owns mapping between semantic context and actual native cha
 messages. It has no provider SDK or network execution. Run from the repository root:
 
 ```sh
-python3 scripts/check_chat.py
-python3 scripts/check_chat.py --peer ../prompty
-python3 scripts/check_chat.py --published latest
+make test
+make test-integration
+make test-e2e
+cd integration/chat && GOWORK=off go run ./cmd/recipe
 ```
 
-The runner copies this module to a temporary directory. Local mode adds temporary
-core/peer replacements; published mode resolves core from its public tag with
-`GOWORK=off` and no replacements. The checked-in dependency is the preceding
-published baseline; the published runner explicitly selects the requested release.
-CI checks a supported peer tag, because the peer default branch can lag its
-published API. For coordinated development, `--peer` tests the actual local
-checkout explicitly; no peer revision is chosen by core.
-Before the new role contract is published, use
-`--published v0.12.0 --baseline` to verify only the older supported subset. That
-result is explicitly marked baseline and never counts as full acceptance.
+Run the recipe from integration/chat with GOWORK=off. The module's development
+replace points to the local core; prompty v0.15.0 resolves from its published tag.
+Mapping and focused adversarial fixtures run as unit tests. Persistence/restore,
+terminal result, cancellation, concurrent CAS and the recipe run under e2e.
+The integration profile separately checks the published v0.12.0 baseline in a
+temporary module without replacements; it never counts as current-source acceptance.
+Release publishes this module with prepared manifests alongside core and stores.
 
 `Mapper.Import` accepts stable host records and returns semantic messages plus
 mandatory continuation IDs. Persist both in the host; after truncation the list

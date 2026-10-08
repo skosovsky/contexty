@@ -222,7 +222,7 @@ func hostTrace() contexty.TraceProfile {
 		stages[name] = contexty.Descriptor{ID: "host/" + name, Revision: pinnedIdentity}
 	}
 	codec := hostCodec()
-	return contexty.TraceProfile{ //nolint:exhaustruct_v5 // no custom mapping/origin requirements
+	return contexty.TraceProfile{
 		Encoding: contexty.Descriptor{
 			ID:       "host-typed-json",
 			Revision: pinnedIdentity,

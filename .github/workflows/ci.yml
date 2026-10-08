@@ -1,123 +1,47 @@
 name: CI
-
 on:
   push:
-    branches: [ "main", "master" ]
-    tags: [ "v*" ]
+    branches: [main]
+    tags: ['v*']
   pull_request:
-    branches: [ "main", "master" ]
-
+    branches: [main]
+permissions:
+  contents: read
+env:
+  GOWORK: 'off'
+  CGO_ENABLED: '1'
+  GO_VERSION: '1.27.2'
+  LINT_VERSION: '2.14.0'
 jobs:
-  prepare-matrix:
+  check:
     runs-on: ubuntu-latest
-    outputs:
-      modules: ${{ steps.set-matrix.outputs.modules }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7.0.1
-      - id: set-matrix
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: '**/go.sum'
+      - name: Download module dependencies
+        shell: bash
         run: |
-          MODULES=$(find . -path "./integration" -prune -o -type d \( -name ".*" -not -name "." -o -name "vendor" \) -prune -o -type f -name "go.mod" -exec dirname {} \; | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "modules=$MODULES" >> $GITHUB_OUTPUT
-
-  lint:
-    needs: prepare-matrix
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module: ${{ fromJson(needs.prepare-matrix.outputs.modules) }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: ${{ matrix.module }}/go.mod
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9.3.0
-        with:
-          version: v2.14.0
-          working-directory: ${{ matrix.module }}
-          args: --timeout=5m
-
-  test:
-    name: Test
-    needs: [prepare-matrix, lint]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module: ${{ fromJson(needs.prepare-matrix.outputs.modules) }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          cache: true
-          go-version-file: ${{ matrix.module }}/go.mod
-      - name: Run tests
-        working-directory: ${{ matrix.module }}
-        run: go test -v -race ./...
-
-  acceptance:
-    name: Contract acceptance
-    needs: [prepare-matrix, lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          cache: true
-          go-version-file: go.mod
-      - name: Run contract acceptance tests
-        run: make test-acceptance
-
-  bench:
-    name: Benchmarks
-    needs: [prepare-matrix, test, acceptance]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        module: [ "." ]
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          cache: true
-          go-version-file: go.mod
-      - name: Run benchmarks with alloc guardrails
-        run: go test -bench=. -benchmem -run='^TestBenchGuardrails_' ./...
-
-  integration:
-    name: Adapter integration
-    needs: [prepare-matrix, test]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          cache: true
-          go-version-file: go.mod
-      - name: Run postgres and redis adapter integration tests
-        env:
-          CI: "true"
-        run: go test -race -timeout 10m ./adapters/store/postgres/... ./adapters/store/redis/...
-
-  chat-consumer:
-    name: Native chat semantic contracts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: go.mod
-      - uses: actions/checkout@v7.0.1
-        with:
-          repository: skosovsky/prompty
-          ref: v0.15.0
-          path: .peer/prompty
-      - name: Local core with supported peer checkout
-        run: python3 scripts/check_chat.py --peer .peer/prompty
-      - name: Published baseline (does not prove the new contract)
-        run: python3 scripts/check_chat.py --published v0.12.0 --baseline
-      - name: Published full contract after release
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: python3 scripts/check_chat.py --published ${GITHUB_REF_NAME}
+          make modules | while IFS= read -r module; do
+            printf '\n[download] %s\n' "$module"
+            (cd "$module" && go mod download all) || exit "$?"
+          done
+      - name: Install pinned linter
+        shell: bash
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v${{ env.LINT_VERSION }}
+      - name: Docker prerequisite
+        run: docker info
+      - name: Lint
+        run: make lint
+      - name: Unit tests
+        run: make test
+      - name: Integration tests
+        run: make test-integration
+      - name: End-to-end tests
+        run: make test-e2e

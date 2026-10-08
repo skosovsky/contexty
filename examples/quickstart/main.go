@@ -1,6 +1,6 @@
 // Offline durable compile and explicit checkpoint publication.
 //
-//nolint:exhaustruct_v5,mnd // Keep optional zero fields out of the onboarding example.
+//nolint:mnd // Keep optional zero fields out of the onboarding example.
 package main
 
 import (

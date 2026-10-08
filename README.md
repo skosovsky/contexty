@@ -19,8 +19,7 @@ go get github.com/skosovsky/contexty
 
 Requires Go 1.27.1+.
 
-`make lint` runs the pinned golangci-lint release through Go; no separate global
-linter installation is required. CI uses the same release.
+`make lint` uses golangci-lint from PATH. CI pins golangci-lint 2.14.0 and Go 1.27.2.
 
 ## Quick start
 
@@ -53,12 +52,16 @@ immutable view with defensive getters.
 ## Development
 
 ```sh
-make validate GOLANGCI_LINT=golangci-lint
+make lint
+make test
+make test-integration
+make test-e2e
 ```
 
-Use pinned golangci-lint 2.14.0 and Docker for isolated Redis/Postgres integration
-tests. Validate runs lint, acceptance, benchmark guardrails, race suites in all
-three modules and local Git release fixtures. No production endpoint is needed.
+Use golangci-lint 2.14.0 and Docker for isolated Redis/Postgres integration tests.
+All four modules are discovered automatically, with GOWORK=off. Missing mandatory
+prerequisites fail the selected profile. See [verification](docs/verification.md)
+for test tags, tooling and separate live/benchmark/fuzz commands.
 
 ## Native chat mapping
 

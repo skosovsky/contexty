@@ -71,8 +71,8 @@ func validateConfig(cfg Config) (*contexty.EstimateReporter, error) {
 func runRow(ctx context.Context, cfg Config, reporter *contexty.EstimateReporter, fixture Fixture,
 	strategy string) (Row, error) {
 	started := time.Now()
-	callbacks := Callbacks{}            //nolint:exhaustruct_v5 // Counters start at zero.
-	request := contexty.CompileRequest{ //nolint:exhaustruct_v5 // Only history is needed initially.
+	callbacks := Callbacks{}
+	request := contexty.CompileRequest{
 		History: cloneMessages(fixture.Messages),
 	}
 	var err error
@@ -98,7 +98,7 @@ func runRow(ctx context.Context, cfg Config, reporter *contexty.EstimateReporter
 	messages := payloadMessages(result.Payload)
 	estimateReport, err := reporter.Report(
 		ctx,
-		contexty.EstimateRequest{ //nolint:exhaustruct_v5 // No manifest or provider wire binding.
+		contexty.EstimateRequest{
 			Segments: []contexty.EstimateSegment{{Name: "issued", Messages: messages}},
 			Budget:   contexty.EffectiveInputBudget(cfg.Budget),
 		},
@@ -157,7 +157,7 @@ func runRow(ctx context.Context, cfg Config, reporter *contexty.EstimateReporter
 
 func budgetPipeline(cfg Config, reporter *contexty.EstimateReporter, fixture Fixture, strategy string,
 	callbacks *Callbacks) *contexty.BudgetPipeline {
-	budget := contexty.BudgetConfig{ //nolint:exhaustruct_v5 // Default drop-head strategy.
+	budget := contexty.BudgetConfig{
 		Retention: contexty.RetentionPolicy{
 			MessageIDs:  slices.Clone(fixture.RequiredIDs),
 			ContentRefs: nil,

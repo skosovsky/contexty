@@ -132,7 +132,7 @@ provider run. Character estimates are semantic estimates, never billed provider
 tokens. CPU benchmarks measure implementation cost separately. An optional host
 runner accepts typed model/summarizer/evaluator ports with pinned identities and
 an explicit run count. Only an explicit host invocation connects credentials and
-SDKs; ordinary tests and `make validate` do not call a model. Missing usage/cost
+SDKs; ordinary tests and the standard verification profiles do not call a model. Missing usage/cost
 measurements remain absent or `not measured`, rather than inferred from text.
 
 No strategy is universally best. A production evaluation must fix its task

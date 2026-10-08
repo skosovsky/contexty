@@ -1,3 +1,5 @@
+//go:build integration
+
 package redis
 
 import (
@@ -16,7 +18,7 @@ import (
 
 // Three actual Redis nodes share a container network; the host dialer maps their
 // advertised ports through Docker Desktop. All key/slot routing stays real.
-func TestStoreClusterIntegration(t *testing.T) {
+func TestIntegrationStoreCluster(t *testing.T) {
 	requireDocker(t)
 	ctx := context.Background()
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{

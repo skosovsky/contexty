@@ -1,3 +1,5 @@
+//go:build integration
+
 package redis
 
 import (
@@ -18,9 +20,8 @@ import (
 	"github.com/skosovsky/contexty/testutil"
 )
 
-func TestStoreIntegration(t *testing.T) {
+func TestIntegrationStore(t *testing.T) {
 	requireDocker(t)
-
 	ctx := context.Background()
 	container, err := tcredis.Run(ctx, "redis:7-alpine")
 	require.NoError(t, err)

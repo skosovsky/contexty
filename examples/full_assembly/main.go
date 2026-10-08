@@ -38,7 +38,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	}
 
 	pipe := contexty.NewBudgetPipeline(
-		contexty.BudgetConfig{ //nolint:exhaustruct_v5 // optional Summarizer/TruncateStrategy omitted
+		contexty.BudgetConfig{
 			Budget:   contexty.EffectiveInputBudget(exampleTokenLimit),
 			DropHead: contexty.DropHeadConfig{MinMessages: conversationMinMsg},
 		}, &contexty.FixedEstimator{TokensPerMessage: fixedTokensPerMsg})
@@ -88,7 +88,7 @@ func buildPrompt(ctx context.Context) (contexty.CompileResult, error) {
 	).WithPromptSafe(
 		contexty.TextMessage(contexty.RoleUser, "Summarize the design boundary."),
 	)
-	result, err := engine.Compile(ctx, contexty.CompileRequest{ //nolint:exhaustruct_v5 // optional fields omitted
+	result, err := engine.Compile(ctx, contexty.CompileRequest{
 		TurnID:                 "turn-1",
 		Artifacts:              []contexty.ContextArtifact{retrieved},
 		CurrentTurn:            &turn,
@@ -241,7 +241,7 @@ func seedAssemblyCheckpoint(ctx context.Context, store contexty.ConversationStat
 	if err != nil {
 		return err
 	}
-	//nolint:exhaustruct_v5 // Each delta initializes only its operation-specific fields.
+
 	err = store.CommitState(
 		ctx,
 		"demo",
