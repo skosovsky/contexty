@@ -3,7 +3,7 @@ module github.com/skosovsky/contexty/integration/chat
 go 1.27.1
 
 require (
-	github.com/skosovsky/contexty v0.12.0
+	github.com/skosovsky/contexty v0.13.3
 	github.com/skosovsky/prompty v0.15.0
 )
 
@@ -18,5 +18,3 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
-
-replace github.com/skosovsky/contexty => ../..
