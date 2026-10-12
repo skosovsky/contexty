@@ -1,0 +1,842 @@
+[
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A0/matchedfalse",
+    "baseline": [
+      66137.0,
+      52204.0,
+      804.0
+    ],
+    "candidate": [
+      66166.0,
+      52219.0,
+      804.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A0/matchedtrue",
+    "baseline": [
+      66653.0,
+      52215.0,
+      804.0
+    ],
+    "candidate": [
+      65276.0,
+      52214.0,
+      804.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A10/matchedfalse",
+    "baseline": [
+      108654.0,
+      198560.0,
+      916.0
+    ],
+    "candidate": [
+      65920.0,
+      52218.0,
+      804.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A10/matchedtrue",
+    "baseline": [
+      245882.0,
+      357042.0,
+      1547.0
+    ],
+    "candidate": [
+      200208.0,
+      210579.0,
+      1435.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A100/matchedfalse",
+    "baseline": [
+      643321.0,
+      1536354.0,
+      1830.0
+    ],
+    "candidate": [
+      66089.0,
+      52234.0,
+      804.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A100/matchedtrue",
+    "baseline": [
+      796593.0,
+      1695677.0,
+      2466.0
+    ],
+    "candidate": [
+      205281.0,
+      210633.0,
+      1435.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A300/matchedfalse",
+    "baseline": [
+      1991124.0,
+      4419666.0,
+      3854.0
+    ],
+    "candidate": [
+      66854.0,
+      52269.0,
+      804.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N10/A300/matchedtrue",
+    "baseline": [
+      2174350.0,
+      4587150.0,
+      4516.0
+    ],
+    "candidate": [
+      207974.0,
+      210674.0,
+      1435.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A0/matchedfalse",
+    "baseline": [
+      657311.0,
+      518585.0,
+      7993.0
+    ],
+    "candidate": [
+      672516.0,
+      518606.0,
+      7993.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A0/matchedtrue",
+    "baseline": [
+      655239.0,
+      518584.0,
+      7993.0
+    ],
+    "candidate": [
+      652431.0,
+      518549.0,
+      7993.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A10/matchedfalse",
+    "baseline": [
+      1099404.0,
+      1981953.0,
+      9116.0
+    ],
+    "candidate": [
+      657180.0,
+      518598.0,
+      7994.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A10/matchedtrue",
+    "baseline": [
+      1238840.0,
+      2141376.0,
+      9755.0
+    ],
+    "candidate": [
+      793660.0,
+      677157.0,
+      8625.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A100/matchedfalse",
+    "baseline": [
+      6442814.0,
+      15329318.0,
+      18168.0
+    ],
+    "candidate": [
+      654907.0,
+      518641.0,
+      7994.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A100/matchedtrue",
+    "baseline": [
+      8024848.0,
+      16954514.0,
+      24614.0
+    ],
+    "candidate": [
+      2041096.0,
+      2103552.0,
+      14324.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A300/matchedfalse",
+    "baseline": [
+      20040358.0,
+      44099938.0,
+      38156.0
+    ],
+    "candidate": [
+      666293.0,
+      518987.0,
+      7995.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N100/A300/matchedtrue",
+    "baseline": [
+      22462883.0,
+      45881011.0,
+      45074.0
+    ],
+    "candidate": [
+      2085567.0,
+      2104772.0,
+      14334.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A0/matchedfalse",
+    "baseline": [
+      1969404.0,
+      1515327.0,
+      23986.0
+    ],
+    "candidate": [
+      1958175.0,
+      1515706.0,
+      23990.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A0/matchedtrue",
+    "baseline": [
+      1995120.0,
+      1515891.0,
+      23994.0
+    ],
+    "candidate": [
+      1978456.0,
+      1515912.0,
+      23990.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A10/matchedfalse",
+    "baseline": [
+      3343221.0,
+      5903937.0,
+      27375.0
+    ],
+    "candidate": [
+      1963861.0,
+      1515398.0,
+      23988.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A10/matchedtrue",
+    "baseline": [
+      3472538.0,
+      6069463.0,
+      28032.0
+    ],
+    "candidate": [
+      2133298.0,
+      1674948.0,
+      24632.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A100/matchedfalse",
+    "baseline": [
+      19182146.0,
+      45916568.0,
+      54375.0
+    ],
+    "candidate": [
+      1983808.0,
+      1516170.0,
+      23996.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A100/matchedtrue",
+    "baseline": [
+      21181692.0,
+      47565100.0,
+      60912.0
+    ],
+    "candidate": [
+      3385395.0,
+      3102104.0,
+      30350.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A300/matchedfalse",
+    "baseline": [
+      61039438.0,
+      132242444.0,
+      114384.0
+    ],
+    "candidate": [
+      1995100.0,
+      1517322.0,
+      24003.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactPreparation/N300/A300/matchedtrue",
+    "baseline": [
+      70339230.0,
+      137734476.0,
+      135605.0
+    ],
+    "candidate": [
+      6362243.0,
+      6335276.0,
+      43229.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A0/targets0",
+    "baseline": [
+      260447.0,
+      266017.0,
+      3228.0
+    ],
+    "candidate": [
+      256099.0,
+      266061.0,
+      3228.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A0/targets1",
+    "baseline": [
+      542581.0,
+      571032.0,
+      6778.0
+    ],
+    "candidate": [
+      539038.0,
+      571122.0,
+      6779.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A0/targets4",
+    "baseline": [
+      1406060.0,
+      1488148.0,
+      17431.0
+    ],
+    "candidate": [
+      1389172.0,
+      1488230.0,
+      17431.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A10/targets0",
+    "baseline": [
+      2137773.0,
+      2625179.0,
+      11415.0
+    ],
+    "candidate": [
+      1999487.0,
+      2331427.0,
+      11187.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A10/targets1",
+    "baseline": [
+      4277113.0,
+      5196346.0,
+      23179.0
+    ],
+    "candidate": [
+      4037852.0,
+      4607769.0,
+      22720.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A10/targets4",
+    "baseline": [
+      10760383.0,
+      12911056.0,
+      58466.0
+    ],
+    "candidate": [
+      10134475.0,
+      11445024.0,
+      57350.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A100/targets0",
+    "baseline": [
+      27586812.0,
+      37073312.0,
+      93278.0
+    ],
+    "candidate": [
+      19982674.0,
+      20700320.0,
+      81818.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A100/targets1",
+    "baseline": [
+      53365229.0,
+      73299352.0,
+      186871.0
+    ],
+    "candidate": [
+      37253389.0,
+      40592530.0,
+      164156.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A100/targets4",
+    "baseline": [
+      127172083.0,
+      181818736.0,
+      467027.0
+    ],
+    "candidate": [
+      90385167.0,
+      100107256.0,
+      410248.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A300/targets0",
+    "baseline": [
+      109941500.0,
+      196305976.0,
+      331943.0
+    ],
+    "candidate": [
+      55462979.0,
+      60988820.0,
+      237874.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A300/targets1",
+    "baseline": [
+      217332542.0,
+      390135312.0,
+      664341.0
+    ],
+    "candidate": [
+      107833875.0,
+      119553872.0,
+      476194.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N10/A300/targets4",
+    "baseline": [
+      537059125.0,
+      971408952.0,
+      1660605.0
+    ],
+    "candidate": [
+      256000166.0,
+      295193312.0,
+      1191228.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A0/targets0",
+    "baseline": [
+      2460139.0,
+      2552461.0,
+      29898.0
+    ],
+    "candidate": [
+      2458105.0,
+      2552621.0,
+      29899.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A0/targets1",
+    "baseline": [
+      5157394.0,
+      5406984.0,
+      62667.0
+    ],
+    "candidate": [
+      5131483.0,
+      5408236.0,
+      62674.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A0/targets4",
+    "baseline": [
+      13438344.0,
+      13978564.0,
+      160996.0
+    ],
+    "candidate": [
+      13426682.0,
+      13979831.0,
+      161010.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A10/targets0",
+    "baseline": [
+      4995498.0,
+      6593281.0,
+      39128.0
+    ],
+    "candidate": [
+      4422829.0,
+      4979460.0,
+      37871.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A10/targets1",
+    "baseline": [
+      10155160.0,
+      13306442.0,
+      81164.0
+    ],
+    "candidate": [
+      9124080.0,
+      10080796.0,
+      78675.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A10/targets4",
+    "baseline": [
+      26684333.0,
+      33462458.0,
+      207357.0
+    ],
+    "candidate": [
+      23507367.0,
+      25391222.0,
+      201113.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A100/targets0",
+    "baseline": [
+      35852319.0,
+      52860941.0,
+      128949.0
+    ],
+    "candidate": [
+      21793750.0,
+      23193313.0,
+      108503.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A100/targets1",
+    "baseline": [
+      70042229.0,
+      105122448.0,
+      260842.0
+    ],
+    "candidate": [
+      45284833.0,
+      45743973.0,
+      219777.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A100/targets4",
+    "baseline": [
+      168040334.0,
+      261709336.0,
+      655889.0
+    ],
+    "candidate": [
+      104578208.0,
+      113401776.0,
+      553697.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A300/targets0",
+    "baseline": [
+      132840667.0,
+      237965648.0,
+      385730.0
+    ],
+    "candidate": [
+      58384812.0,
+      63400624.0,
+      264370.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A300/targets1",
+    "baseline": [
+      261046042.0,
+      473635656.0,
+      774370.0
+    ],
+    "candidate": [
+      114013583.0,
+      124636928.0,
+      532198.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N100/A300/targets4",
+    "baseline": [
+      621769916.0,
+      1180382368.0,
+      1939424.0
+    ],
+    "candidate": [
+      276570250.0,
+      308142528.0,
+      1334639.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A0/targets0",
+    "baseline": [
+      7578736.0,
+      7648777.0,
+      89217.0
+    ],
+    "candidate": [
+      7597381.0,
+      7648314.0,
+      89212.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A0/targets1",
+    "baseline": [
+      16171238.0,
+      16103729.0,
+      186961.0
+    ],
+    "candidate": [
+      16460208.0,
+      16104584.0,
+      186950.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A0/targets4",
+    "baseline": [
+      41846930.0,
+      41477466.0,
+      480208.0
+    ],
+    "candidate": [
+      42284014.0,
+      41453952.0,
+      480023.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A10/targets0",
+    "baseline": [
+      11386569.0,
+      14291336.0,
+      100708.0
+    ],
+    "candidate": [
+      9583847.0,
+      9751678.0,
+      97230.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A10/targets1",
+    "baseline": [
+      24243167.0,
+      29310049.0,
+      209947.0
+    ],
+    "candidate": [
+      20418183.0,
+      20235968.0,
+      203094.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A10/targets4",
+    "baseline": [
+      61398854.0,
+      74334352.0,
+      537584.0
+    ],
+    "candidate": [
+      52327271.0,
+      51648388.0,
+      520292.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A100/targets0",
+    "baseline": [
+      53936896.0,
+      88302152.0,
+      208390.0
+    ],
+    "candidate": [
+      28139010.0,
+      29039592.0,
+      167705.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A100/targets1",
+    "baseline": [
+      107163708.0,
+      176233000.0,
+      425174.0
+    ],
+    "candidate": [
+      53546375.0,
+      57718524.0,
+      343833.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A100/targets4",
+    "baseline": [
+      253813083.0,
+      439904608.0,
+      1075256.0
+    ],
+    "candidate": [
+      128965750.0,
+      143702184.0,
+      872115.0
+    ],
+    "allocation_gate": false
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A300/targets0",
+    "baseline": [
+      173297250.0,
+      331258384.0,
+      504984.0
+    ],
+    "candidate": [
+      63575312.0,
+      69603796.0,
+      323705.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A300/targets1",
+    "baseline": [
+      347370292.0,
+      660558688.0,
+      1018707.0
+    ],
+    "candidate": [
+      121979791.0,
+      137306904.0,
+      656344.0
+    ],
+    "allocation_gate": true
+  },
+  {
+    "fixture": "BenchmarkSelectionArtifactCompile/N300/A300/targets4",
+    "baseline": [
+      837227417.0,
+      1648215280.0,
+      2558588.0
+    ],
+    "candidate": [
+      297827000.0,
+      340267136.0,
+      1653011.0
+    ],
+    "allocation_gate": true
+  }
+]

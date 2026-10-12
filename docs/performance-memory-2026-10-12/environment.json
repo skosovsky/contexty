@@ -1,0 +1,17 @@
+{
+  "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "baseline": "go version go1.27.1 darwin/arm64",
+  "candidate": "go version go1.27.1 darwin/arm64",
+  "go_env": {
+    "CGO_ENABLED": "1",
+    "GOARCH": "arm64",
+    "GOCACHE": "/tmp/library-performance-gocache-20261012",
+    "GOMAXPROCS": "",
+    "GOOS": "darwin",
+    "GOVERSION": "go1.27.1",
+    "GOWORK": "off"
+  },
+  "linter": "golangci-lint has version 2.14.0 built with go1.27.1 from 114493f on 2026-09-24T10:54:53Z",
+  "benchmark_test_sha256": "32b9159732cf2fcdcac429a7d0e615ae2911841d018eaa9b03d45545ca4b8b89"
+}

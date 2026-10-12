@@ -1,0 +1,36 @@
+WAITING_FOR_AUDIT_LOCK go test -v -run ^TestSelectionArtifact(Owned|Accessor|Compile|Compatibility|Codec) .
+AUDIT_LOCK_ACQUIRED 2026-10-12T07:02:03Z
+=== RUN   TestSelectionArtifactOwnedBoundaries
+=== RUN   TestSelectionArtifactOwnedBoundaries/binaryfalse
+=== RUN   TestSelectionArtifactOwnedBoundaries/binarytrue
+--- PASS: TestSelectionArtifactOwnedBoundaries (0.01s)
+    --- PASS: TestSelectionArtifactOwnedBoundaries/binaryfalse (0.00s)
+    --- PASS: TestSelectionArtifactOwnedBoundaries/binarytrue (0.00s)
+=== RUN   TestSelectionArtifactAccessorAndRevision
+--- PASS: TestSelectionArtifactAccessorAndRevision (0.00s)
+=== RUN   TestSelectionArtifactCompileIsolation
+=== RUN   TestSelectionArtifactCompileIsolation/binaryfalse
+=== RUN   TestSelectionArtifactCompileIsolation/binarytrue
+--- PASS: TestSelectionArtifactCompileIsolation (0.20s)
+    --- PASS: TestSelectionArtifactCompileIsolation/binaryfalse (0.07s)
+    --- PASS: TestSelectionArtifactCompileIsolation/binarytrue (0.13s)
+=== RUN   TestSelectionArtifactCompileErrors
+=== RUN   TestSelectionArtifactCompileErrors/empty
+=== RUN   TestSelectionArtifactCompileErrors/invalid
+=== RUN   TestSelectionArtifactCompileErrors/canceled
+=== RUN   TestSelectionArtifactCompileErrors/callback_error
+=== RUN   TestSelectionArtifactCompileErrors/callback_cancellation
+--- PASS: TestSelectionArtifactCompileErrors (0.00s)
+    --- PASS: TestSelectionArtifactCompileErrors/empty (0.00s)
+    --- PASS: TestSelectionArtifactCompileErrors/invalid (0.00s)
+    --- PASS: TestSelectionArtifactCompileErrors/canceled (0.00s)
+    --- PASS: TestSelectionArtifactCompileErrors/callback_error (0.00s)
+    --- PASS: TestSelectionArtifactCompileErrors/callback_cancellation (0.00s)
+=== RUN   TestSelectionArtifactCompatibility
+    selection_artifact_isolation_test.go:294: compatibility_sha256=5c7d45f2d2eda652d18aa568312e33d1b2334b096cae1bc8e9c0cb779778df52
+--- PASS: TestSelectionArtifactCompatibility (0.02s)
+=== RUN   TestSelectionArtifactCodecRoundTrip
+--- PASS: TestSelectionArtifactCodecRoundTrip (0.00s)
+PASS
+ok  	github.com/skosovsky/contexty	0.440s
+AUDIT_LOCK_RELEASED 0

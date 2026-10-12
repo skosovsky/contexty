@@ -1,0 +1,64 @@
+WAITING_FOR_AUDIT_LOCK go test -race -count=1 -run ^TestReviewerB .
+AUDIT_LOCK_ACQUIRED 2026-10-12T07:02:47Z
+ok  	github.com/skosovsky/contexty	2.031s
+AUDIT_LOCK_RELEASED 0
+
+Independent temporary probe source, SHA256=c9aaab6f008a0d3a68e4beb3efb42a244492a72bbef3c7f56c2565f1c94bd05f
+package contexty
+
+import (
+ "fmt"
+ "reflect"
+ "sync"
+ "testing"
+)
+
+// Reviewer B independent differential probe against the former attachment logic.
+func TestReviewerBExactIDDifferential(t *testing.T) {
+ // Arrange: include nested prefixes, whitespace, Unicode, punctuation and zero-value snapshot.
+ ids := []string{"", "a", "artifact:a", "artifact:", " a", "a ", "a:b", "工具", "a\x00b"}
+ artifacts := make([]ContextArtifact, len(ids))
+ for i, id := range ids { artifacts[i] = NewMemoryBlock(id, TextPayload(fmt.Sprint(i))).ContextArtifact }
+ snap := EmptySnapshot().WithArtifacts(artifacts)
+ messages := []string{"", "a", "Artifact:a", "xartifact:a", "artifact:a ", "artifact:工具", "artifact:a\x00b"}
+ for _, id := range ids { messages = append(messages, "artifact:"+id) }
+ for _, id := range messages {
+  m := TextMessage(RoleUser, "x"); m.ID = id
+  got := ContextCandidate{Messages: []Message{m}}
+  want := ContextCandidate{Messages: []Message{m}}
+  // Act: candidate vs literal former implementation, with deterministic owned accessor.
+  err := attachCandidateArtifact(&got, snap.artifacts)
+  var oldErr error
+  for _, a := range snap.Artifacts() { if m.ID == "artifact:"+a.ID { cp := a.Clone(); want.Artifact=&cp; want.Ref, oldErr=ArtifactContentRef(cp); break } }
+  // Assert: attachment and digest/error behavior are identical.
+  if (err == nil) != (oldErr == nil) || !reflect.DeepEqual(got, want) { t.Fatalf("ID %q mismatch: %v/%v", id, err, oldErr) }
+ }
+ zero := ConversationSnapshot{}
+ got := ContextCandidate{Messages: []Message{TextMessage(RoleUser,"x")}}
+ if err := attachCandidateArtifact(&got, zero.artifacts); err != nil || got.Artifact != nil { t.Fatal("zero snapshot",err) }
+}
+
+func TestReviewerBConcurrentSnapshotRevisions(t *testing.T) {
+ // Arrange: one shared immutable snapshot with matching owned host extensions.
+ a:=selectionOwnedArtifact(false)
+ m:=TextMessage(RoleUser,"materialized"); m.ID="artifact:"+a.ID
+ snap:=EmptySnapshot().WithArtifact(a).WithSegment(SegmentMemory, []Message{m})
+ before:=snap.Artifacts()
+ var wg sync.WaitGroup
+ for worker:=0; worker<8; worker++ { wg.Add(1); go func(worker int) { defer wg.Done()
+  for i:=0;i<20;i++ {
+   // Act: concurrent reads plus creation of new revision maps and candidate mutations.
+   c,err:=selectionCandidates(t.Context(),snap,nil,nil)
+   if err!=nil || len(c)!=1 { t.Errorf("candidate: %v",err); return }
+   if !reflect.DeepEqual(a,*c[0].Artifact) {t.Error("stale or aliased source");return}
+   mutateSelectionArtifact(c[0].Artifact)
+   nextArtifact:=a.Clone();nextArtifact.Payload=TextPayload(fmt.Sprintf("%d/%d",worker,i))
+   next:=snap.WithArtifact(nextArtifact)
+   nc,e:=selectionCandidates(t.Context(),next,nil,nil)
+   if e!=nil || nc[0].Ref==c[0].Ref { t.Error("revision not addressed",e);return }
+  }
+ }(worker) }
+ wg.Wait()
+ // Assert: neither concurrent candidate mutations nor new snapshots alter shared source.
+ if !reflect.DeepEqual(before,snap.Artifacts()) { t.Fatal("shared snapshot mutated") }
+}

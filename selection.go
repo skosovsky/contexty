@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sort"
+	"strings"
 )
 
 var (
@@ -115,7 +116,7 @@ func selectionCandidates(
 	}
 	for i := range candidates {
 		candidates[i].Ordinal = i
-		if err := attachCandidateArtifact(&candidates[i], snap.Artifacts()); err != nil {
+		if err := attachCandidateArtifact(&candidates[i], snap.artifacts); err != nil {
 			return nil, err
 		}
 	}
@@ -211,20 +212,24 @@ func messageContentRefs(ctx context.Context, messages []Message) ([]ContentRef, 
 	return refs, nil
 }
 
-func attachCandidateArtifact(candidate *ContextCandidate, artifacts []ContextArtifact) error {
-	for _, artifact := range artifacts {
-		if candidate.Messages[0].ID != "artifact:"+artifact.ID {
-			continue
-		}
-		cp := artifact.Clone()
-		candidate.Artifact = &cp
-		ref, err := ArtifactContentRef(cp)
-		if err != nil {
-			return err
-		}
-		candidate.Ref = ref
-		break
+// The snapshot index is borrowed read-only. Clone only a match into the owned
+// candidate; no snapshot payload may escape through a candidate or callback.
+func attachCandidateArtifact(candidate *ContextCandidate, artifacts map[string]ContextArtifact) error {
+	id, prefixed := strings.CutPrefix(candidate.Messages[0].ID, "artifact:")
+	if !prefixed {
+		return nil
 	}
+	artifact, found := artifacts[id]
+	if !found {
+		return nil
+	}
+	cp := artifact.Clone()
+	candidate.Artifact = &cp
+	ref, err := ArtifactContentRef(cp)
+	if err != nil {
+		return err
+	}
+	candidate.Ref = ref
 	return nil
 }
 

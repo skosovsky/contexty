@@ -1,0 +1,597 @@
+diff --git a/selection.go b/selection.go
+index bf85a6f..226dc3f 100644
+--- a/selection.go
++++ b/selection.go
+@@ -5,6 +5,7 @@ import (
+ 	"errors"
+ 	"slices"
+ 	"sort"
++	"strings"
+ )
+ 
+ var (
+@@ -115,7 +116,7 @@ func selectionCandidates(
+ 	}
+ 	for i := range candidates {
+ 		candidates[i].Ordinal = i
+-		if err := attachCandidateArtifact(&candidates[i], snap.Artifacts()); err != nil {
++		if err := attachCandidateArtifact(&candidates[i], snap.artifacts); err != nil {
+ 			return nil, err
+ 		}
+ 	}
+@@ -211,20 +212,24 @@ func messageContentRefs(ctx context.Context, messages []Message) ([]ContentRef,
+ 	return refs, nil
+ }
+ 
+-func attachCandidateArtifact(candidate *ContextCandidate, artifacts []ContextArtifact) error {
+-	for _, artifact := range artifacts {
+-		if candidate.Messages[0].ID != "artifact:"+artifact.ID {
+-			continue
+-		}
+-		cp := artifact.Clone()
+-		candidate.Artifact = &cp
+-		ref, err := ArtifactContentRef(cp)
+-		if err != nil {
+-			return err
+-		}
+-		candidate.Ref = ref
+-		break
++// The snapshot index is borrowed read-only. Clone only a match into the owned
++// candidate; no snapshot payload may escape through a candidate or callback.
++func attachCandidateArtifact(candidate *ContextCandidate, artifacts map[string]ContextArtifact) error {
++	id, prefixed := strings.CutPrefix(candidate.Messages[0].ID, "artifact:")
++	if !prefixed {
++		return nil
++	}
++	artifact, found := artifacts[id]
++	if !found {
++		return nil
++	}
++	cp := artifact.Clone()
++	candidate.Artifact = &cp
++	ref, err := ArtifactContentRef(cp)
++	if err != nil {
++		return err
+ 	}
++	candidate.Ref = ref
+ 	return nil
+ }
+ 
+diff --git a/selection_artifact_performance_test.go b/selection_artifact_performance_test.go
+new file mode 100644
+index 0000000..fa902ba
+--- /dev/null
++++ b/selection_artifact_performance_test.go
+@@ -0,0 +1,141 @@
++package contexty
++
++import (
++	"context"
++	"fmt"
++	"strconv"
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++// Only artifacts carry this extension: counts exclude Message ownership clones.
++type selectionCountExtension struct{ calls *int }
++
++func (e selectionCountExtension) ExtensionType() string { return "selection/count" }
++func (e selectionCountExtension) CloneExtension() Extension {
++	*e.calls++
++	return e
++}
++
++func selectionArtifactFixture(n, a int, matched bool, calls *int) ConversationSnapshot {
++	messages := make([]Message, n)
++	for i := range messages {
++		messages[i] = TextMessage(RoleUser, "audit history")
++		messages[i].ID = fmt.Sprintf("m%d", i)
++		if matched && i < a {
++			messages[i].ID = fmt.Sprintf("artifact:a%d", i)
++		}
++	}
++	artifacts := make([]ContextArtifact, a)
++	for i := range artifacts {
++		artifacts[i] = NewMemoryBlock(fmt.Sprintf("a%d", i),
++			JSONPayload(`{"text":"`+strings.Repeat("x", 1024)+`"}`)).ContextArtifact
++		if calls != nil {
++			artifacts[i].Extensions = []Extension{selectionCountExtension{calls}}
++		}
++	}
++	return EmptySnapshot().WithSegment(SegmentHistory, messages).WithArtifacts(artifacts)
++}
++
++func TestSelectionArtifactCloneBound(t *testing.T) {
++	for _, n := range []int{10, 100, 300} {
++		for _, a := range []int{0, 10, 100, 300} {
++			for _, matched := range []bool{false, true} {
++				t.Run(fmt.Sprintf("N%d/A%d/matched%t", n, a, matched), func(t *testing.T) {
++					// Arrange: reset the artifact-only counter after snapshot ownership copies.
++					calls := 0
++					snap := selectionArtifactFixture(n, a, matched, &calls)
++					calls = 0
++					// Act.
++					candidates, err := selectionCandidates(t.Context(), snap, nil, nil)
++					// Assert: only matches can require artifact ownership copies.
++					require.NoError(t, err)
++					require.Len(t, candidates, n)
++					matches := 0
++					for i, candidate := range candidates {
++						require.Equal(t, i, candidate.Ordinal)
++						if matched && i < a {
++							matches++
++							artifact := snap.artifacts[fmt.Sprintf("a%d", i)]
++							ref, refErr := ArtifactContentRef(artifact)
++							require.NoError(t, refErr)
++							require.Equal(t, ref, candidate.Ref)
++							require.Equal(t, artifact, *candidate.Artifact)
++						} else {
++							require.Nil(t, candidate.Artifact)
++							require.Equal(t, candidate.Members[0], candidate.Ref)
++						}
++					}
++					require.LessOrEqual(t, calls, a)
++					require.LessOrEqual(t, calls, matches)
++					t.Logf("N=%d A=%d matches=%d artifact_clones=%d", n, a, matches, calls)
++				})
++			}
++		}
++	}
++}
++
++func BenchmarkSelectionArtifactPreparation(b *testing.B) {
++	for _, n := range []int{10, 100, 300} {
++		for _, a := range []int{0, 10, 100, 300} {
++			for _, matched := range []bool{false, true} {
++				b.Run(fmt.Sprintf("N%d/A%d/matched%t", n, a, matched), func(b *testing.B) {
++					// Arrange.
++					snap := selectionArtifactFixture(n, a, matched, nil)
++					b.ReportAllocs()
++					b.ResetTimer()
++					// Act / Assert: all per-invocation copies, lookup and digests are timed.
++					for range b.N {
++						if _, err := selectionCandidates(b.Context(), snap, nil, nil); err != nil {
++							b.Fatal(err)
++						}
++					}
++				})
++			}
++		}
++	}
++}
++
++func selectionBenchmarkMaterializer() ArtifactMaterializationPolicy {
++	return ArtifactMaterializationPolicy{
++		Identity: Descriptor{ID: "audit/materialize", Revision: "1"},
++		Materialize: func(_ context.Context, a ContextArtifact) (ArtifactRepresentation, error) {
++			return ArtifactRepresentation{Role: RoleSystem,
++				Parts: []ContentPart{TextPart{Text: string(a.Payload.Data)}}}, nil
++		},
++	}
++}
++
++func BenchmarkSelectionArtifactCompile(b *testing.B) {
++	for _, n := range []int{10, 100, 300} {
++		for _, a := range []int{0, 10, 100, 300} {
++			for _, targets := range []int{0, 1, 4} {
++				b.Run(fmt.Sprintf("N%d/A%d/targets%d", n, a, targets), func(b *testing.B) {
++					benchmarkSelectionArtifactCompile(b, n, a, targets)
++				})
++			}
++		}
++	}
++}
++
++func benchmarkSelectionArtifactCompile(b *testing.B, n, a, targets int) {
++	b.Helper()
++	// Arrange: ordinary history plus artifacts materialized by the public engine.
++	snap := selectionArtifactFixture(n, a, false, nil)
++	engine := NewEngine(WithArtifactMaterialization(selectionBenchmarkMaterializer()))
++	request := CompileRequest{History: snap.Segment(SegmentHistory), Artifacts: snap.Artifacts()}
++	for i := range targets {
++		request.Targets = append(request.Targets, CompileTarget{Name: strconv.Itoa(i),
++			Segments: []SegmentName{SegmentHistory}, IncludeArtifacts: true})
++	}
++	b.ReportAllocs()
++	b.ResetTimer()
++	// Act / Assert: full public compile, including validation and target selection.
++	for range b.N {
++		if _, err := engine.CompileSnapshot(b.Context(), request); err != nil {
++			b.Fatal(err)
++		}
++	}
++}
+diff --git a/selection_artifact_isolation_test.go b/selection_artifact_isolation_test.go
+new file mode 100644
+index 0000000..6b2fd5a
+--- /dev/null
++++ b/selection_artifact_isolation_test.go
+@@ -0,0 +1,325 @@
++package contexty
++
++import (
++	"context"
++	"crypto/sha256"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"strconv"
++	"strings"
++	"testing"
++
++	"github.com/stretchr/testify/require"
++)
++
++type selectionOwnedExtension struct {
++	Data []byte `json:"data"`
++}
++
++func (e *selectionOwnedExtension) ExtensionType() string { return "selection/owned" }
++func (e *selectionOwnedExtension) CloneExtension() Extension {
++	return &selectionOwnedExtension{Data: append([]byte(nil), e.Data...)}
++}
++
++func selectionOwnedArtifact(binary bool) ContextArtifact {
++	payload := JSONPayload(`{"text":"` + strings.Repeat("x", 64*1024) + `"}`)
++	if binary {
++		payload = BinaryPayload([]byte(strings.Repeat("x", 64*1024)), "image/png")
++	}
++	artifact := NewMemoryBlock("owned", payload).ContextArtifact
++	artifact.Extensions = []Extension{&selectionOwnedExtension{Data: []byte("original")}}
++	artifact.SourceRefs = []SourceRef{{Namespace: "host", ID: "source"}}
++	artifact.OwnerRef = &SourceRef{Namespace: "host", ID: "owner"}
++	artifact.Budget = &ArtifactBudgetPolicy{TokenLimit: 1000000}
++	return artifact
++}
++
++func mutateSelectionArtifact(artifact *ContextArtifact) {
++	if len(artifact.Payload.Data) > 0 {
++		artifact.Payload.Data[0] = '!'
++	}
++	if len(artifact.Payload.Binary) > 0 {
++		artifact.Payload.Binary[0] = '!'
++	}
++	artifact.Extensions[0].(*selectionOwnedExtension).Data[0] = '!'
++	artifact.SourceRefs[0].ID = "mutated"
++	artifact.OwnerRef.ID = "mutated"
++	artifact.Budget.TokenLimit = 0
++}
++
++func TestSelectionArtifactOwnedBoundaries(t *testing.T) {
++	for _, binary := range []bool{false, true} {
++		t.Run(fmt.Sprintf("binary%t", binary), func(t *testing.T) {
++			// Arrange: two candidates intentionally address the same artifact in different segments.
++			artifact := selectionOwnedArtifact(binary)
++			message := TextMessage(RoleUser, "materialized")
++			message.ID = "artifact:" + artifact.ID
++			snap := EmptySnapshot().WithArtifacts([]ContextArtifact{artifact}).
++				WithSegment(SegmentMemory, []Message{message}).WithSegment(SegmentSystem, []Message{message})
++			before := snap.Artifacts()
++			candidates, err := selectionCandidates(t.Context(), snap, nil, nil)
++			require.NoError(t, err)
++			require.Len(t, candidates, 2)
++			policy := &SelectionPolicy{Identity: Descriptor{ID: "mutator", Revision: "1"},
++				Select: func(_ context.Context, input []ContextCandidate) ([]SelectionChoice, error) {
++					mutateSelectionArtifact(input[0].Artifact)
++					input[0].Messages[0].Parts[0] = TextPart{Text: "mutated"}
++					input[0].Members[0].ID = "mutated"
++					return []SelectionChoice{{Ref: input[0].Ref}, {Ref: input[1].Ref}}, nil
++				}}
++			// Act: callback mutation, then direct mutation of a prepared candidate.
++			_, err = selectionPlan(t.Context(), candidates, policy)
++			// Assert: callback receives no aliases to prepared candidates.
++			require.NoError(t, err)
++			require.Equal(t, artifact, *candidates[0].Artifact)
++			require.Equal(t, message, candidates[0].Messages[0])
++			mutateSelectionArtifact(candidates[0].Artifact)
++			require.Equal(t, artifact, *candidates[1].Artifact)
++			require.Equal(t, before, snap.Artifacts())
++		})
++	}
++}
++
++func TestSelectionArtifactAccessorAndRevision(t *testing.T) {
++	// Arrange: lexical order differs from insertion order, and IDs include another prefix.
++	artifact := selectionOwnedArtifact(false)
++	artifact.ID = "artifact:owned"
++	other := NewMemoryBlock("z", TextPayload("last")).ContextArtifact
++	prior := EmptySnapshot().WithArtifacts([]ContextArtifact{other, artifact})
++	updated := artifact.Clone()
++	updated.Payload = JSONPayload(`{"revision":2}`)
++	next := prior.WithArtifact(updated)
++	messages := make([]Message, 3)
++	for i, id := range []string{"artifact:artifact:owned", "artifact:owned", "xartifact:artifact:owned"} {
++		messages[i] = TextMessage(RoleUser, "materialized")
++		messages[i].ID = id
++	}
++	// Act.
++	oldCandidates, oldErr := selectionCandidates(t.Context(), prior.WithSegment(SegmentMemory, messages), nil, nil)
++	newCandidates, newErr := selectionCandidates(t.Context(), next.WithSegment(SegmentMemory, messages), nil, nil)
++	owned := prior.Artifacts()
++	mutateSelectionArtifact(&owned[0])
++	// Assert: strip exactly one prefix; current content controls the ref; prior state is unchanged.
++	require.NoError(t, oldErr)
++	require.NoError(t, newErr)
++	require.NotEqual(t, oldCandidates[0].Ref, newCandidates[0].Ref)
++	for _, candidates := range [][]ContextCandidate{oldCandidates, newCandidates} {
++		require.Nil(t, candidates[1].Artifact)
++		require.Nil(t, candidates[2].Artifact)
++	}
++	require.Equal(t, []ContextArtifact{artifact, other}, prior.Artifacts())
++	require.Equal(t, updated, next.Artifacts()[0])
++}
++
++func TestSelectionArtifactCompileIsolation(t *testing.T) {
++	for _, binary := range []bool{false, true} {
++		t.Run(fmt.Sprintf("binary%t", binary), func(t *testing.T) {
++			// Arrange: mutating host callbacks serve main plus four independent targets.
++			artifact := selectionOwnedArtifact(binary)
++			calls := 0
++			policy := ArtifactMaterializationPolicy{Identity: Descriptor{ID: "media", Revision: "1"},
++				Materialize: func(_ context.Context, input ContextArtifact) (ArtifactRepresentation, error) {
++					calls++
++					parts, err := ArtifactContentParts(input)
++					mutateSelectionArtifact(&input)
++					return ArtifactRepresentation{Role: RoleSystem, Parts: parts}, err
++				}}
++			selectionCalls := 0
++			selection := SelectionPolicy{Identity: Descriptor{ID: "mutator", Revision: "1"},
++				Select: func(_ context.Context, input []ContextCandidate) ([]SelectionChoice, error) {
++					selectionCalls++
++					choices := make([]SelectionChoice, len(input))
++					for i := range input {
++						choices[i].Ref = input[i].Ref
++						if input[i].Artifact != nil {
++							require.Equal(t, artifact, *input[i].Artifact)
++							mutateSelectionArtifact(input[i].Artifact)
++						}
++					}
++					return choices, nil
++				}}
++			// Typed media needs an explicit token cost, including artifact-local admission.
++			pipe := NewBudgetPipeline(BudgetConfig{Budget: EffectiveInputBudget(100)},
++				&FixedEstimator{TokensPerMessage: 1})
++			engine := NewEngine(
++				WithArtifactMaterialization(policy),
++				WithSelectionPolicy(selection),
++				WithBudgetPipeline(pipe),
++			)
++			request := CompileRequest{Artifacts: []ContextArtifact{artifact}}
++			for i := range 4 {
++				request.Targets = append(request.Targets, CompileTarget{Name: strconv.Itoa(i),
++					IncludeArtifacts: true, Selection: &selection, Budget: pipe})
++			}
++			// Act.
++			first, err := engine.CompileSnapshot(t.Context(), request)
++			require.NoError(t, err)
++			mutateSelectionArtifact(&first.Artifacts[0])
++			projection := first.Projections["0"]
++			mutateSelectionArtifact(&projection.Artifacts[0])
++			projection.Messages[0].SourceRefs[0].ID = "mutated"
++			second, secondErr := engine.CompileSnapshot(t.Context(), request)
++			// Assert: one materialization per request, with no cache carried between requests.
++			require.NoError(t, secondErr)
++			require.Equal(t, 2, calls)
++			require.Equal(t, 10, selectionCalls)
++			require.Equal(t, artifact, request.Artifacts[0])
++			require.Equal(t, artifact, second.Artifacts[0])
++			require.Equal(t, artifact, first.PreparedSnapshot.Artifacts()[0])
++			require.Equal(t, second.Selection, first.Selection)
++			require.Equal(t, second.Payload, first.Payload)
++			for _, name := range []string{"1", "2", "3"} {
++				p := first.Projections[name]
++				require.Equal(t, artifact, p.Artifacts[0])
++				require.Equal(t, second.Projections[name].Messages, p.Messages)
++				require.Equal(t, second.Projections[name].Selection, p.Selection)
++			}
++		})
++	}
++}
++
++func TestSelectionArtifactCompileErrors(t *testing.T) {
++	for _, scenario := range []string{"empty", "invalid", "canceled", "callback error", "callback cancellation"} {
++		t.Run(scenario, func(t *testing.T) {
++			// Arrange.
++			ctx, cancel := context.WithCancel(t.Context())
++			defer cancel()
++			request := CompileRequest{}
++			policy := selectionBenchmarkMaterializer()
++			calls := 0
++			hostErr := errors.New("host materializer")
++			if scenario != "empty" {
++				request.Artifacts = selectionArtifactFixture(0, 1, false, nil).Artifacts()
++			}
++			switch scenario {
++			case "invalid":
++				request.Artifacts[0].Budget = &ArtifactBudgetPolicy{TokenLimit: -1}
++			case "canceled":
++				cancel()
++			case "callback error", "callback cancellation":
++				policy.Materialize = func(context.Context, ContextArtifact) (ArtifactRepresentation, error) {
++					calls++
++					if scenario == "callback cancellation" {
++						cancel()
++					}
++					return ArtifactRepresentation{}, hostErr
++				}
++			}
++			engine := NewEngine(WithArtifactMaterialization(policy))
++			// Act.
++			result, err := engine.CompileSnapshot(ctx, request)
++			// Assert.
++			assertSelectionArtifactCompileError(t, scenario, result, err, hostErr, calls)
++		})
++	}
++}
++
++func assertSelectionArtifactCompileError(
++	t *testing.T,
++	scenario string,
++	result CompileResult,
++	err, hostErr error,
++	calls int,
++) {
++	t.Helper()
++	if scenario == "empty" {
++		require.NoError(t, err)
++		require.Empty(t, result.Artifacts)
++		return
++	}
++	require.Zero(t, result)
++	switch scenario {
++	case "canceled", "callback cancellation":
++		require.ErrorIs(t, err, context.Canceled)
++	case "callback error":
++		require.ErrorIs(t, err, hostErr)
++	default:
++		require.Error(t, err)
++	}
++	if strings.HasPrefix(scenario, "callback") {
++		require.Equal(t, 1, calls)
++	}
++}
++
++// The same fixture runs on the archived baseline and the candidate. The golden
++// includes chronology, exact refs, priorities, coverage lineage and all targets.
++func TestSelectionArtifactCompatibility(t *testing.T) {
++	// Arrange.
++	type target struct {
++		Messages  []Message          `json:"Messages"`
++		Artifacts []ContextArtifact  `json:"Artifacts"`
++		Selection *SelectionDecision `json:"Selection"`
++		Lineage   Lineage            `json:"Lineage"`
++	}
++	type output struct {
++		Payload   AbstractPayload    `json:"Payload"`
++		Artifacts []ContextArtifact  `json:"Artifacts"`
++		Selection *SelectionDecision `json:"Selection"`
++		Lineage   Lineage            `json:"Lineage"`
++		Targets   map[string]target  `json:"Targets"`
++	}
++	snap := selectionArtifactFixture(10, 10, false, nil)
++	policy := SelectionPolicy{Identity: Descriptor{ID: "compatibility", Revision: "1"},
++		Select: func(_ context.Context, candidates []ContextCandidate) ([]SelectionChoice, error) {
++			choices := make([]SelectionChoice, len(candidates))
++			for i, c := range candidates {
++				choices[i] = SelectionChoice{Ref: c.Ref, Priority: i % 3}
++			}
++			return choices, nil
++		}}
++	engine := NewEngine(WithArtifactMaterialization(selectionBenchmarkMaterializer()), WithSelectionPolicy(policy))
++	request := CompileRequest{History: snap.Segment(SegmentHistory), Artifacts: snap.Artifacts()}
++	var outputs []output
++	// Act.
++	for _, count := range []int{0, 1, 4} {
++		request.Targets = nil
++		for i := range count {
++			request.Targets = append(request.Targets, CompileTarget{Name: strconv.Itoa(i),
++				Segments: []SegmentName{SegmentHistory}, IncludeArtifacts: true, Selection: &policy})
++		}
++		result, err := engine.CompileSnapshot(t.Context(), request)
++		require.NoError(t, err)
++		item := output{result.Payload, result.Artifacts, result.Selection, result.Lineage, map[string]target{}}
++		for name, p := range result.Projections {
++			item.Targets[name] = target{p.Messages, p.Artifacts, p.Selection, p.Lineage}
++		}
++		outputs = append(outputs, item)
++	}
++	wire, err := json.Marshal(outputs)
++	// Assert: exact output hash from the archived baseline at 08b2101.
++	require.NoError(t, err)
++	require.Equal(t, "5c7d45f2d2eda652d18aa568312e33d1b2334b096cae1bc8e9c0cb779778df52",
++		fmt.Sprintf("%x", sha256.Sum256(wire)))
++	t.Logf("compatibility_sha256=%x", sha256.Sum256(wire))
++}
++
++func TestSelectionArtifactCodecRoundTrip(t *testing.T) {
++	// Arrange: host types on both messages and artifacts retain codec and clone semantics.
++	registry := NewExtensionRegistry()
++	registry.Register("selection/owned", func(wire []byte) (Extension, error) {
++		var e selectionOwnedExtension
++		err := json.Unmarshal(wire, &e)
++		return &e, err
++	})
++	codec := ConversationCodec{Extensions: registry}
++	artifact := selectionOwnedArtifact(true)
++	message := TextMessage(RoleUser, "materialized")
++	message.ID = "artifact:" + artifact.ID
++	message.Extensions = []Extension{&selectionOwnedExtension{Data: []byte("message")}}
++	snap := EmptySnapshot().WithArtifact(artifact).WithSegment(SegmentMemory, []Message{message})
++	wire, err := codec.Encode(snap)
++	require.NoError(t, err)
++	// Act.
++	decoded, err := codec.Decode(wire)
++	require.NoError(t, err)
++	candidates, err := selectionCandidates(t.Context(), decoded, nil, nil)
++	// Assert.
++	require.NoError(t, err)
++	require.Equal(t, artifact, *candidates[0].Artifact)
++	require.Equal(t, message, candidates[0].Messages[0])
++	mutateSelectionArtifact(candidates[0].Artifact)
++	candidates[0].Messages[0].Extensions[0].(*selectionOwnedExtension).Data[0] = '!'
++	require.Equal(t, snap.Artifacts(), decoded.Artifacts())
++	require.Equal(t, snap.Segment(SegmentMemory), decoded.Segment(SegmentMemory))
++}
+diff --git a/docs/selection-artifact-ownership.md b/docs/selection-artifact-ownership.md
+new file mode 100644
+index 0000000..de5d378
+--- /dev/null
++++ b/docs/selection-artifact-ownership.md
+@@ -0,0 +1,54 @@
++# Selection artifact preparation
++
++`selectionCandidates` borrows the snapshot's private immutable artifact index for
++exact `artifact:` message-ID lookup. It must not enumerate, sort or copy the full
++artifact set for each candidate. The existing index belongs to the snapshot;
++selection adds no cache, global state or lifetime beyond the invocation.
++
++For N candidates, A artifacts and M matches, lookup work is O(N), within the
++O(A+N+M) bound including construction of the snapshot index. Artifact payload
++copies during this stage are limited to M: unmatched candidates copy no artifact
++payloads or extensions. Matched artifacts are cloned into each owned candidate
++before computing its artifact ContentRef. Message ownership copies and digest
++work remain separate; neither total compile time nor total compile allocations
++are claimed to be linear.
++
++Selection callbacks receive another owned candidate copy. They may mutate
++payloads, extensions, source references, budgets and messages without affecting
++the snapshot, prepared candidates, another output or a previous snapshot.
++BYOT extensions retain their CloneExtension and codec boundaries; redundant
++internal clone counts are not a public compatibility guarantee.
++
++The public `Artifacts()` accessor still returns independently owned copies in
++deterministic ID order. Materialization, priorities, required refs, tool rounds,
++chronology, coverage, lineage, cancellation and error contracts are unchanged.
++
++## Acceptance ledger (fixed before implementation)
++
++Each row is one mandatory gate. PASS counts only complete execution; FAIL,
++NOT RUN and partial results count zero. Completeness is 100 × PASS / 22.
++
++| ID | Mandatory requirement |
++| --- | --- |
++| R01 | Private ownership/complexity contract documented before implementation |
++| R02 | Scope confined to selection, tests and evidence; APIs/dependencies/persistence unchanged |
++| R03 | No per-candidate full artifact traversal/copy; bounded exact-ID indexed lookup |
++| R04 | Unmatched clone upper bound <= A, including N=A=100 and 300 |
++| R05 | Matched clones separated from message ownership; full-set copies independent of N |
++| R06 | Independent N=10/100/300, A=0/10/100/300 matched/unmatched scaling fixtures |
++| R07 | Artifacts accessor deterministic and independently owned |
++| R08 | Candidate and selection callback mutations cannot change snapshots/other candidates |
++| R09 | Compile callback/output mutations cannot change source/sibling outputs or later compiles |
++| R10 | Large JSON/binary, Extensions, SourceRefs and Budget isolation |
++| R11 | Same artifact ID with new revision yields new ContentRef; old snapshot unchanged |
++| R12 | Exact artifact message IDs, ContentRefs and pre-change output compatibility |
++| R13 | Priority, required refs, rounds, order, coverage and lineage suites PASS |
++| R14 | Materialization invocation contract and typed media suites PASS |
++| R15 | Empty/unmatched artifacts and invalid/canceled/error compilation tested |
++| R16 | BYOT clone/codec suites PASS; no global/long-lived cache added |
++| R17 | >=3 sequential baseline/candidate benchmem samples, same host/toolchain |
++| R18 | Internal and public CompileSnapshot benchmarks, explicit materializer, 0/1/4 targets |
++| R19 | Setup outside timer; all invocation work inside; independent N/A benchmark matrix |
++| R20 | N=A=100/300 B/op and allocs/op decrease; linear lookup/copy evidence; timing discussed |
++| R21 | Full root race/contracts and existing identity/budget/replay/checkpoint suites PASS |
++| R22 | Exact commands, source/tree identity, raw logs and two independent final approvals |
