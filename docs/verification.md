@@ -52,5 +52,4 @@ adapters and incur no API charges; no paid provider test is currently supplied.
 The tooling package tests the actual Bash release against disposable bare repositories.
 It belongs to the root module and adds no runtime executable or module.
 CI pins Go 1.27.2 and golangci-lint 2.14.0; local commands use tools from PATH.
-No Python or PDF runtime is required for verification or release. The historical
-scripts/reproduce_review.py remains an optional archived-review reproduction tool.
+No Python or PDF runtime is required for verification or release.

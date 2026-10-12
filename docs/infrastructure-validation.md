@@ -23,8 +23,7 @@ Validated working tree on local main, based on 912c041. Reference:
   helpers are refactored and literals made explicit; public APIs are preserved.
 - Release fixtures live in the root tooling test package rather than a separate
   tooling module. The old published baseline is a separate Go integration fixture.
-  Python release/consumer entrypoints and legacy Make gates are removed. Historical
-  review evidence and the optional reproduce_review.py are preserved.
+  Python release/consumer entrypoints and legacy Make gates are removed.
 
 ## Verification results
 

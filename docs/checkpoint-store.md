@@ -41,7 +41,6 @@ parallel benchmark samples with distinct conversation IDs took 12.4–13.9µs/op
 without synthetic decoder work and 18.9–22.2µs/op with 10,000 rotate/XOR
 iterations per decode (76 allocs/op in both). This measures callback cost under
 the shared lock, not production latency or a benefit from a different design.
-See `remediation-evidence/stage5/memory-bench.log` for the exact run.
 
 Redis positive TTL rounds upward to milliseconds:1ns/999999ns→1ms,1500us→2ms.
 Zero explicitly selects persistence; negative values panic at configuration.

@@ -1,6 +1,0 @@
-golangci-lint - .
-0 issues.
-golangci-lint - ./adapters/store/redis
-0 issues.
-golangci-lint - ./adapters/store/postgres
-0 issues.

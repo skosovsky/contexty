@@ -47,7 +47,7 @@ immutable view with defensive getters.
 - [Projections](docs/context-projections.md), [output policy](docs/output-policy.md), [opaque state](docs/opaque-state.md).
 - [Resources](docs/resource-content.md), [blob retention](docs/blob-retention.md), [prefix diagnostics](docs/prefix-diagnostics.md).
 - [Release and recovery](docs/release.md), [ownership/concurrency matrix](docs/remediation-contracts.md#ownership-and-concurrency-matrix).
-- [Review decisions](docs/remediation-decisions.md) and [measurements](docs/remediation-evidence/stage6/measurements.md).
+- [Review decisions](docs/remediation-decisions.md).
 
 ## Development
 

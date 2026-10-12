@@ -2,8 +2,7 @@
 
 Every D entry has an explicit decision below. Accepted retention means the current
 behavior is part of the contract, not silently postponed work. The numbered stages
-and their independent acceptance evidence are in `remediation-evidence/stage1` …
-`stage6`. Full final gates exercise the referenced tests; measurements are local
+refer to the historical review. Full final gates exercise the referenced tests; measurements are local
 observations, not production guarantees.
 
 | ID | Decision | Reason and implementation/evidence |
@@ -59,7 +58,7 @@ observations, not production guarantees.
 | Findings | Original behavior on review SHA | New regression/evidence |
 | --- | --- | --- |
 | F01/F02 | scripts/test_release.py old release fixtures; untracked/tag publication and detached checkout | stage2 local14fixtures, exact refs/isolation/failure/retry/interruption |
-| F03/F04/F05/F11/F12 | preserved review probes via scripts/reproduce_review.py | stage3 baseline + identity/config/materialization/view/provenance regression tests |
+| F03/F04/F05/F11/F12 | historical identity/config/materialization/view/provenance probes | identity/config/materialization/view/provenance regression tests |
 | F06/F07/F08 | same original budget/overhead probes | stage4 baseline + owned estimator/arithmetic/full-request adversarial tests/fuzz |
 | F09/F10 | original TTL/cancel overlays, race count10 | stage5 baseline + wire/live PTTL/deterministic lock-wait regressions |
 
